@@ -1,0 +1,60 @@
+name: Bug report
+description: Something behaves differently from spec/envelope.md or the documented constraints
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security issues.** A cryptographic or data-integrity flaw goes through
+        [private vulnerability reporting](https://github.com/devgyurak/mysql-gcm/security/advisories/new)
+        instead — see `SECURITY.md`.
+
+        Before filing, please check `docs/ops-constraints.md`. Several behaviours that look
+        like bugs are documented properties of the approach.
+  - type: input
+    id: mysql
+    attributes:
+      label: MySQL version
+      description: Output of `SELECT VERSION()`
+      placeholder: "8.4.11"
+    validations: { required: true }
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was the component installed?
+      options:
+        - Built with scripts/build-in-docker.sh
+        - Release tarball
+        - Docker Hub server image (devgyurak/mysql-gcm-server)
+        - Other (describe below)
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: |
+        SQL that shows the problem. Use the public fixture key
+        `UNHEX('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f')` —
+        never a real key, and never real plaintext.
+      render: sql
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected versus actual
+      description: What you expected, what happened, and which document says so if one does.
+    validations: { required: true }
+  - type: input
+    id: strict
+    attributes:
+      label: gcm.strict
+      description: Output of `SELECT @@GLOBAL.gcm.strict` (and `@@SESSION.gcm.strict` on 9.0+)
+      placeholder: "1"
+  - type: textarea
+    id: argshape
+    attributes:
+      label: Argument shape
+      description: |
+        Was the plaintext or ciphertext a column, a literal, a user variable, or a bound
+        parameter? A freshly computed expression is corrupted by MySQL 8.0 and 8.4 —
+        `docs/design.md` amendment A7.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/devgyurak/mysql-gcm/security/advisories/new
+    about: Report a cryptographic or data-integrity flaw privately. Never in a public issue.
+  - name: Operational constraints
+    url: https://github.com/devgyurak/mysql-gcm/blob/main/docs/ops-constraints.md
+    about: Many surprising behaviours are documented properties of the approach. Check here first.

@@ -100,7 +100,7 @@ CI runs all of these. Nothing here needs network access except the Docker builds
 
 ## Reporting a security issue
 
-Do not open a public issue for a cryptographic flaw. Use GitHub's private vulnerability reporting on
+Full policy: [SECURITY.md](SECURITY.md). In short: do not open a public issue for a cryptographic flaw. Use GitHub's private vulnerability reporting on
 this repository. Include the server version, the envelope version byte, and the shape of the failing
 query — never a real key or real plaintext.
 

@@ -9,7 +9,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang-format-18 clang-tidy-18
       # .clang-format is the MySQL 8.4 config with ColumnLimit raised to 100; see the
       # comment at the top of that file.
-      - run: clang-format-18 --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h')
+      # -z / xargs -0 rather than unquoted command substitution: a path with a space
+      # would otherwise be split into two arguments and silently skipped.
+      - run: |
+          git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+            | xargs -0 clang-format-18 --dry-run --Werror
   python:
     runs-on: ubuntu-24.04
     steps:

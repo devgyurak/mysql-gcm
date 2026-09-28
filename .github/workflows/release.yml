@@ -117,8 +117,13 @@ jobs:
             suffix=${name#component_gcm-}               # mysql8.4-amd64
             tar -C "$d" -czf "dist/component_gcm-${ver}-${suffix}.tar.gz" component_gcm.so
           done
-          test "$(ls dist | wc -l)" -eq 6 || { echo "expected 6 archives, got:" >&2; ls dist >&2; exit 1; }
-          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          count=$(find dist -name '*.tar.gz' -type f | wc -l)
+          test "$count" -eq 6 || {
+            echo "expected 6 archives (3 majors x 2 arches), got $count:" >&2
+            find dist -type f >&2
+            exit 1
+          }
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
       - uses: anchore/sbom-action@v0
         with: { path: ., output-file: dist/sbom.spdx.json }
       - uses: softprops/action-gh-release@v2

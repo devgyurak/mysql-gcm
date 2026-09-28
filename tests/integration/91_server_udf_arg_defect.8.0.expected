@@ -1,0 +1,19 @@
+# Given: a table with a text column and an integer column
+# When: an argument expression implicitly stringifies the integer operand
+1	1	1	1
+2	1	1	1
+3	1	1	1
+# Then: 1 everywhere except MySQL 8.4, which corrupts byte 0 (above)
+# Scenario 2 — Given: the same table
+# When: the integer is used as a repeat count instead of an operand
+1	1
+2	1
+3	0
+# Then: 1 everywhere except MySQL 8.0, which inflates the length (above)
+# Scenario 3 — Given: the same rows with the computed plaintext materialised
+# When: the functions are called on materialised values only
+1	1	1	1
+2	1	1	1
+3	1	1	1
+# Then: all 1 on every major — a column, a literal or a variable is always
+#       safe, and that is what an application with bound parameters sends (above)

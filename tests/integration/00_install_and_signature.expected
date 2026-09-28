@@ -1,0 +1,25 @@
+# Scenario 1 — Given: the installed component and a 32-byte fixture key
+# When: each function is called with a valid signature
+1	1	x
+# Then: all three answer and the round trip returns the plaintext (above)
+# Scenario 2 — Given: the same key
+# When: gcm_encrypt is called with too few arguments
+# Then: the call is rejected at init with the usage message (errors section)
+# Scenario 3 — Given: the same key
+# When: gcm_decrypt is called with too many arguments
+# Then: the call is rejected at init with the usage message (errors section)
+# Scenario 4 — Given: a key that is 5 bytes instead of 32
+# When: gcm_encrypt is called with it
+# Then: bad_key_len, reported with lengths only and no key bytes (errors section)
+# Scenario 5 — Given: a key that is 31 bytes, one short of AES-256
+# When: gcm_decrypt is called with it
+# Then: bad_key_len — the length check runs on every call (errors section)
+# Scenario 6 — Given: a 33-byte key, one byte too long
+# When: gcm_encrypt_det is called with it
+# Then: bad_key_len — no folding, hashing or padding to length (errors section)
+--- errors, in statement order ---
+ERROR 1123 (HY000) at line 14: Can't initialize function 'gcm_encrypt'; gcm_encrypt(plaintext, key [, aad]) needs 2 or 3 arguments
+ERROR 1123 (HY000) at line 19: Can't initialize function 'gcm_decrypt'; gcm_decrypt(ciphertext, key [, aad]) needs 2 or 3 arguments
+ERROR 3200 (HY000) at line 24: gcm_encrypt UDF failed; key must be exactly 32 bytes, got 5
+ERROR 3200 (HY000) at line 29: gcm_decrypt UDF failed; key must be exactly 32 bytes, got 31
+ERROR 3200 (HY000) at line 34: gcm_encrypt_det UDF failed; key must be exactly 32 bytes, got 33

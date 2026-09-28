@@ -1,0 +1,33 @@
+# Given: the installed component
+# When: each function is called with a valid signature
+SELECT gcm_encrypt('x', @k) IS NOT NULL AS random_answers,
+gcm_encrypt_det('x', @k) IS NOT NULL AS det_answers,
+gcm_decrypt(gcm_encrypt('x', @k), @k) AS decrypted;
+random_answers	det_answers	decrypted
+1	1	x
+# Then: all three answer and the round trip returns the plaintext
+# Given: the same component
+# When: a function is called with too few arguments
+SELECT gcm_encrypt('x');
+ERROR HY000: Can't initialize function 'gcm_encrypt'; gcm_encrypt(plaintext, key [, aad]) needs 2 or 3 arguments
+# Then: init rejects the call
+# Given: the same component
+# When: a function is called with too many arguments
+SELECT gcm_decrypt('x', @k, 'aad', 'extra');
+ERROR HY000: Can't initialize function 'gcm_decrypt'; gcm_decrypt(ciphertext, key [, aad]) needs 2 or 3 arguments
+# Then: init rejects the call
+# Given: a key of the wrong length
+# When: encryption is attempted with 5 bytes
+SELECT gcm_encrypt('x', 'short');
+ERROR HY000: gcm_encrypt UDF failed; key must be exactly 32 bytes, got 5
+# Then: bad_key_len, and the message carries lengths only
+# Given: a key one byte short of AES-256
+# When: decryption is attempted with 31 bytes
+SELECT gcm_decrypt(gcm_encrypt('x', @k), LEFT(@k, 31));
+ERROR HY000: gcm_decrypt UDF failed; key must be exactly 32 bytes, got 31
+# Then: bad_key_len — the check runs on every call, not just at init
+# Given: a key one byte too long
+# When: the deterministic variant is called with 33 bytes
+SELECT gcm_encrypt_det('x', CONCAT(@k, UNHEX('00')));
+ERROR HY000: gcm_encrypt_det UDF failed; key must be exactly 32 bytes, got 33
+# Then: bad_key_len — no folding, hashing or padding to length

@@ -1,0 +1,66 @@
+# Legacy v1 dual-read (docs/design.md amendment A3): an existing AES_ENCRYPT value
+# prefixed with 0x01 and its IV decrypts without re-encryption.
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: a CBC ciphertext from the builtin AES_ENCRYPT and a v1 envelope around it
+SET @iv = UNHEX('101112131415161718191a1b1c1d1e1f');
+SET SESSION block_encryption_mode = 'aes-256-cbc';
+SET @cbc = AES_ENCRYPT('홍길동', @k, @iv);
+SET @v1 = CONCAT(UNHEX('01'), @iv, @cbc);
+
+--echo # When: the component decrypts the v1 envelope
+SELECT gcm_decrypt(@v1, @k) AS plaintext,
+       gcm_decrypt(@v1, @k) = CONVERT(AES_DECRYPT(@cbc, @k, @iv) USING utf8mb4) AS agrees_with_builtin,
+       LENGTH(@v1) AS envelope_length;
+
+--echo # Then: the same plaintext the builtin returns, from a 33 byte envelope
+
+--echo # Given: the same v1 envelope
+--echo # When: a non-empty AAD is supplied
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@v1, @k, 'anything');
+
+--echo # Then: bad_envelope — v1 predates AAD and cannot bind one
+
+--echo # Given: a v1 envelope whose body is not a block multiple
+--echo # When: it is decrypted
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(CONCAT(UNHEX('01'), @iv, LEFT(@cbc, 15)), @k);
+
+--echo # Then: bad_envelope
+
+--echo # Given: a legacy column whose plaintext is latin1 rather than utf8mb4
+SET @latin1_v1 = CONCAT(UNHEX('01'), @iv, AES_ENCRYPT(CONVERT('Müller' USING latin1), @k, @iv));
+
+--echo # When: it is decrypted and searched
+SELECT HEX(gcm_decrypt(@latin1_v1, @k)) AS decrypted_hex,
+       gcm_decrypt(@latin1_v1, @k) LIKE '%ller%' AS like_on_the_ascii_tail;
+
+--echo # Then: the bytes are returned unchanged, but the result is tagged utf8mb4 and is
+--echo #       ill-formed, so LIKE yields 0 with no error. A v1 migration must convert
+--echo #       the legacy column to utf8mb4 before prefixing 0x01||iv
+--echo #       (spec/envelope.md §2.3) — the component cannot guess the legacy charset,
+--echo #       and converting inside gcm_decrypt would corrupt genuinely binary values.
+
+--echo # Given: the same name migrated the documented way, converted first
+SET @utf8_v1 = CONCAT(UNHEX('01'), @iv,
+                      AES_ENCRYPT(CONVERT(CONVERT('Müller' USING latin1) USING utf8mb4), @k, @iv));
+
+--echo # When: that envelope is decrypted and searched
+SELECT HEX(gcm_decrypt(@utf8_v1, @k)) AS decrypted_hex,
+       gcm_decrypt(@utf8_v1, @k) LIKE '%ller%' AS like_on_the_ascii_tail,
+       gcm_decrypt(@utf8_v1, @k) LIKE '%ü%' AS like_on_the_accented_char;
+
+--echo # Then: both matches succeed
+
+--echo # Given: v1, v2 and v3 values side by side, as during a migration
+CREATE TABLE mixed (id INT PRIMARY KEY, c VARBINARY(128));
+INSERT INTO mixed VALUES (1, @v1), (2, gcm_encrypt('홍길동', @k)), (3, gcm_encrypt_det('홍길동', @k));
+
+--echo # When: one query decrypts all three versions
+SELECT id, HEX(LEFT(c, 1)) AS version, gcm_decrypt(c, @k) AS plaintext FROM mixed ORDER BY id;
+
+--echo # Then: dual-read works across versions through one function
+DROP TABLE mixed;
+
+--source suite/gcm/include/gcm_uninstall.inc

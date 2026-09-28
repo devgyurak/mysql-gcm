@@ -1,0 +1,47 @@
+# Argument count and key length validation.
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: the installed component
+--echo # When: each function is called with a valid signature
+SELECT gcm_encrypt('x', @k) IS NOT NULL AS random_answers,
+       gcm_encrypt_det('x', @k) IS NOT NULL AS det_answers,
+       gcm_decrypt(gcm_encrypt('x', @k), @k) AS decrypted;
+
+--echo # Then: all three answer and the round trip returns the plaintext
+
+--echo # Given: the same component
+--echo # When: a function is called with too few arguments
+--error ER_CANT_INITIALIZE_UDF
+SELECT gcm_encrypt('x');
+
+--echo # Then: init rejects the call
+
+--echo # Given: the same component
+--echo # When: a function is called with too many arguments
+--error ER_CANT_INITIALIZE_UDF
+SELECT gcm_decrypt('x', @k, 'aad', 'extra');
+
+--echo # Then: init rejects the call
+
+--echo # Given: a key of the wrong length
+--echo # When: encryption is attempted with 5 bytes
+--error ER_UDF_ERROR
+SELECT gcm_encrypt('x', 'short');
+
+--echo # Then: bad_key_len, and the message carries lengths only
+
+--echo # Given: a key one byte short of AES-256
+--echo # When: decryption is attempted with 31 bytes
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(gcm_encrypt('x', @k), LEFT(@k, 31));
+
+--echo # Then: bad_key_len — the check runs on every call, not just at init
+
+--echo # Given: a key one byte too long
+--echo # When: the deterministic variant is called with 33 bytes
+--error ER_UDF_ERROR
+SELECT gcm_encrypt_det('x', CONCAT(@k, UNHEX('00')));
+
+--echo # Then: bad_key_len — no folding, hashing or padding to length
+
+--source suite/gcm/include/gcm_uninstall.inc

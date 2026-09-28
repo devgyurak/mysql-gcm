@@ -1,0 +1,4 @@
+# Given: encrypted Korean names forced through a sort and a group by
+# When: the decrypted column drives ORDER BY, GROUP BY and LIKE at once
+김	3
+# Then: three 김 rows group under one surname (above)

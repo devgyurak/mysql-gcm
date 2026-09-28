@@ -1,0 +1,96 @@
+# NULL propagation and boundary plaintexts.
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: the fixture key
+--echo # When: NULL is supplied in each argument position
+SELECT gcm_encrypt(NULL, @k) IS NULL AS enc_null_plaintext,
+       gcm_encrypt('x', NULL) IS NULL AS enc_null_key,
+       gcm_encrypt('x', @k, NULL) IS NULL AS enc_null_aad,
+       gcm_encrypt_det(NULL, @k) IS NULL AS det_null_plaintext,
+       gcm_decrypt(NULL, @k) IS NULL AS dec_null_ciphertext,
+       gcm_decrypt('x', NULL) IS NULL AS dec_null_key;
+
+--echo # Then: SQL NULL propagates, with no cryptographic work
+
+--echo # Given: the empty string
+--echo # When: it is sealed and opened
+SELECT LENGTH(gcm_encrypt_det('', @k)) AS empty_envelope_length,
+       gcm_decrypt(gcm_encrypt_det('', @k), @k) = '' AS round_trips;
+
+--echo # Then: 29 bytes of envelope and an empty plaintext back
+
+--echo # Given: plaintexts at block and buffer boundaries, stored in a column
+--echo # (materialised on purpose: see tests/integration/91_server_udf_arg_defect.sql)
+CREATE TABLE sized (n INT, pt VARCHAR(64)) CHARSET utf8mb4;
+INSERT INTO sized VALUES (0, ''), (1, 'a'), (15, REPEAT('a', 15)), (16, REPEAT('a', 16)),
+                         (17, REPEAT('a', 17)), (31, REPEAT('a', 31)), (32, REPEAT('a', 32)),
+                         (33, REPEAT('a', 33));
+
+--echo # When: each is sealed and opened
+SELECT COUNT(*) AS lengths_checked,
+       SUM(gcm_decrypt(gcm_encrypt_det(pt, @k), @k) = pt) AS round_trips,
+       SUM(LENGTH(gcm_encrypt_det(pt, @k)) = n + 29) AS overheads_correct
+FROM sized;
+
+--echo # Then: every length round-trips with a 29 byte overhead
+DROP TABLE sized;
+
+--echo # Given: the plaintext in a LONGTEXT column, whose declared maximum is the
+--echo #        largest a UDF argument can report
+CREATE TABLE wide (c LONGTEXT) CHARSET utf8mb4;
+INSERT INTO wide VALUES ('홍길동');
+
+--echo # When: the envelope is materialised into a column, which sizes the result field
+--echo #       from initid->max_length
+CREATE TABLE wide_out AS SELECT gcm_encrypt(c, @k) AS e FROM wide;
+SELECT LENGTH(e) AS envelope_length, gcm_decrypt(e, @k) AS decrypted FROM wide_out;
+
+--echo # Then: 38 bytes, not 28. The server narrows initid->max_length through
+--echo #       min<uint32>(), so an unsaturated `arg_len + 29` would wrap for a
+--echo #       4294967295-wide argument and truncate every envelope below its minimum
+DROP TABLE wide_out;
+DROP TABLE wide;
+
+--echo # Given: a latin1 column one byte wide, holding a character that needs two
+--echo #        bytes in UTF-8 — so the converted plaintext is wider than the argument
+--echo #        length the server reports at init
+CREATE TABLE narrow (c VARCHAR(1) CHARACTER SET latin1);
+INSERT INTO narrow VALUES (_latin1 0xE9);
+
+--echo # When: the envelope is materialised into a column
+CREATE TABLE narrow_out AS SELECT gcm_encrypt_det(c, @k) AS e FROM narrow;
+SELECT LENGTH(e) AS envelope_length, HEX(gcm_decrypt(e, @k)) AS decrypted_hex FROM narrow_out;
+
+--echo # Then: 31 bytes (2 converted plaintext bytes + 29) and it still decrypts. Sizing
+--echo #       the result from the *pre-conversion* length would declare 30, which under
+--echo #       strict SQL mode raises ER_DATA_TOO_LONG and without it truncates to 30
+--echo #       with only a warning — storing ciphertext that no longer authenticates.
+DROP TABLE narrow_out;
+
+--echo # Given: the same column, with strict SQL mode switched off
+SET @saved_sql_mode = @@SESSION.sql_mode;
+SET SESSION sql_mode = '';
+
+--echo # When: the envelope is materialised again
+CREATE TABLE narrow_loose AS SELECT gcm_encrypt_det(c, @k) AS e FROM narrow;
+
+--echo # Then: no truncation warning, full length, and the round trip still works —
+--echo #       the case that would silently destroy data if the width were wrong
+SHOW WARNINGS;
+SELECT LENGTH(e) AS envelope_length, HEX(gcm_decrypt(e, @k)) AS decrypted_hex FROM narrow_loose;
+SET SESSION sql_mode = @saved_sql_mode;
+DROP TABLE narrow_loose;
+DROP TABLE narrow;
+
+--echo # Given: bytes that are not valid UTF-8, passed where the component asks the
+--echo #        server for utf8mb4
+--echo # When: they are sealed and opened
+SELECT HEX(gcm_decrypt(gcm_encrypt(UNHEX('ff'), @k), @k)) AS single_ff,
+       gcm_decrypt(gcm_encrypt(UNHEX('ff'), @k), @k) = UNHEX('ff') AS ff_round_trips,
+       HEX(gcm_decrypt(gcm_encrypt(UNHEX('c3'), @k), @k)) AS lone_lead_byte;
+
+--echo # Then: the bytes survive. Converting from `binary` to utf8mb4 copies bytes
+--echo #       rather than substituting them, so a binary argument is not silently
+--echo #       rewritten before being sealed
+
+--source suite/gcm/include/gcm_uninstall.inc

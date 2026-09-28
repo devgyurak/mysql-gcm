@@ -1,0 +1,9 @@
+---
+description: "C++ / CMake / OpenSSL 관례"
+globs: "src/**, tests/unit/**, **/*.cc, **/*.h"
+alwaysApply: false
+---
+Generated from `.agents/rules/stack-cpp.md` by scripts/agents-sync.py — edit the source, not this file.
+The full rule text is in the referenced file and applies together with this rule.
+
+@.agents/rules/stack-cpp.md

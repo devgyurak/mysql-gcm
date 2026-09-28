@@ -1,0 +1,30 @@
+# Given: a CBC ciphertext produced by the builtin AES_ENCRYPT with an explicit IV
+# When: the v1 envelope is decrypted by the component
+홍길동	1	33	01
+# Then: the same plaintext the builtin returns, from a 33 byte v1 envelope (above)
+# Scenario 2 — Given: the same v1 envelope
+# When: a non-empty AAD is supplied
+# Then: bad_envelope — v1 predates AAD and cannot bind one (errors section)
+# Scenario 3 — Given: a v1 envelope whose ciphertext length is not a block multiple
+# When: it is decrypted
+# Then: bad_envelope, regardless of gcm.strict (errors section)
+# Scenario 5 — Given: a legacy column whose plaintext is latin1, not utf8mb4
+# When: it is decrypted and searched
+4DFC6C6C6572	0
+# Then: the bytes come back unchanged but LIKE returns 0 — no error, just a
+#       silently failed search. This is why spec/envelope.md §2.3 requires a v1
+#       plaintext to be utf8mb4 already: convert the legacy column before
+#       prefixing 0x01||iv (above)
+# Scenario 6 — Given: the same name migrated properly, i.e. converted first
+# When: that v1 envelope is decrypted and searched
+4DC3BC6C6C6572	1	1
+# Then: both matches succeed (above)
+# Scenario 4 — Given: v2, v3 and v1 values side by side, as during a migration
+# When: one query decrypts all three versions
+1	01	홍길동
+2	02	홍길동
+3	03	홍길동
+# Then: dual-read works across versions with one function (above)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 18: gcm_decrypt UDF failed; malformed or unsupported envelope (length 33)
+ERROR 3200 (HY000) at line 23: gcm_decrypt UDF failed; malformed or unsupported envelope (length 32)

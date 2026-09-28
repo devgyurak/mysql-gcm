@@ -1,0 +1,16 @@
+# Given: the fixture key
+# When: the same plaintext is encrypted deterministically twice
+1	03	38
+# Then: identical bytes, version 03, length = 9 + 29 = 38 (above)
+# Scenario 2 — Given: the spec worked example det-korean-hong
+# When: the deterministic envelope is produced
+03B9C3A065D8C76EA9D627C591BB12160661AD43902EB8263C49815E07483158555819839732
+# Then: it equals spec/envelope.md §5.1 byte for byte (above)
+# Scenario 3 — Given: two tables joined on a deterministic ciphertext
+# When: the join runs on the encrypted column
+first visit
+# Then: the row joins without decrypting anything (above)
+# Scenario 4 — Given: a UNIQUE key over a deterministic ciphertext
+# When: the same natural key is inserted again
+1
+# Then: still one row — the deterministic ciphertext collided as intended (above)

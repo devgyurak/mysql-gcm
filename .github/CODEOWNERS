@@ -1,0 +1,16 @@
+# Every change needs the maintainer's review. Combined with the `develop` ruleset
+# ("require review from Code Owners"), this is what makes an approval from
+# @devgyurak the condition for merging rather than any approval at all.
+#
+# CONTRIBUTING.md describes the flow: feature -> develop -> main -> tag v*.
+*                       @devgyurak
+
+# The cryptographic path additionally needs a second human reviewer and a
+# crypto-reviewer report (.agents/rules/code-review.md). CODEOWNERS cannot express
+# "two reviewers", so that part is enforced in review, not by this file.
+/src/gcm.cc             @devgyurak
+/src/envelope.cc        @devgyurak
+/src/nonce.cc           @devgyurak
+/src/sysvar.cc          @devgyurak
+/spec/                  @devgyurak
+/scripts/gen-vectors.py @devgyurak

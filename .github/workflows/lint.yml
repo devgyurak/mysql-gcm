@@ -1,0 +1,52 @@
+name: lint
+on: { pull_request: {}, push: { branches: [main] } }
+permissions: { contents: read }
+jobs:
+  cpp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4   # TODO pin to SHA (stack-ci-docker.md)
+      - run: sudo apt-get update && sudo apt-get install -y clang-format-18 clang-tidy-18
+      # .clang-format is the MySQL 8.4 config with ColumnLimit raised to 100; see the
+      # comment at the top of that file.
+      - run: clang-format-18 --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h')
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff mypy -r scripts/requirements.txt && ruff check . && ruff format --check .
+      - run: mypy --strict scripts/gen-vectors.py scripts/import-nist.py scripts/check-architecture.py
+      - run: pip install PyMySQL types-PyMySQL && mypy --strict tests/load/run.py tests/e2e/runner.py tests/e2e/scenarios/ scripts/check-architecture.py
+      - run: python3 scripts/check-architecture.py
+  agents-sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/agents-sync.sh --check
+  architecture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      # Module boundaries of docs/design.md amendment A6: the core must stay free of
+      # server headers, version macros and test seams.
+      - run: python3 scripts/check-architecture.py
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y shellcheck && shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      # .gitleaks.toml allowlists exactly two paths, both holding published NIST vectors
+      # and the documented fixture key. Everything else that trips a rule is a finding.
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITLEAKS_CONFIG: .gitleaks.toml

@@ -1,0 +1,20 @@
+# Given: a valid envelope, the same envelope with its last tag byte flipped, and strict at its default
+# When: the tampered envelope is decrypted
+# Then: an error, never NULL and never unauthenticated plaintext (errors section)
+# Scenario 2 — Given: envelopes that are malformed rather than unauthentic
+# When: each is decrypted
+# Then: each is an error — and 31_strict_scope shows strict=OFF does not
+#       soften these (errors section)
+# Scenario 3 — Given: a value sealed with one AAD
+# When: it is opened with a different AAD
+# Then: a tag error — the AAD is authenticated (errors section)
+# Scenario 4 — Given: the same value sealed with an AAD
+# When: it is opened with no AAD at all
+# Then: a tag error (errors section)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 10: gcm_decrypt UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 15: gcm_decrypt UDF failed; malformed or unsupported envelope (length 4)
+ERROR 3200 (HY000) at line 16: gcm_decrypt UDF failed; malformed or unsupported envelope (length 1)
+ERROR 3200 (HY000) at line 17: gcm_decrypt UDF failed; malformed or unsupported envelope (length 21)
+ERROR 3200 (HY000) at line 24: gcm_decrypt UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 29: gcm_decrypt UDF failed; authentication tag verification failed

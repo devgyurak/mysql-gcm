@@ -1,0 +1,50 @@
+# Given: a valid envelope and the same envelope with its last tag byte flipped
+SET @good = gcm_encrypt_det('홍길동', @k);
+SET @tampered = CONCAT(LEFT(@good, LENGTH(@good) - 1), UNHEX('FF'));
+# When: the tampered envelope is decrypted with gcm.strict at its default
+SELECT gcm_decrypt(@tampered, @k);
+ERROR HY000: gcm_decrypt UDF failed; authentication tag verification failed
+# Then: an error — a tag mismatch is never silently NULL
+# Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+# When: an unknown version byte is decrypted
+SELECT gcm_decrypt(UNHEX('07000000'), @k);
+ERROR HY000: gcm_decrypt UDF failed; malformed or unsupported envelope (length 4)
+# Then: still an error — corrupt data is not hidden by a setting
+# Given: gcm.strict still off
+# When: an envelope shorter than the minimum is decrypted
+SELECT gcm_decrypt(UNHEX('02'), @k);
+ERROR HY000: gcm_decrypt UDF failed; malformed or unsupported envelope (length 1)
+# Then: still an error
+# Given: the tampered envelope and gcm.strict still off
+# When: it is decrypted
+SELECT gcm_decrypt(@tampered, @k) IS NULL AS null_when_strict_off;
+null_when_strict_off
+1
+# Then: NULL — the other half of the tag-failure contract, which an error-only
+#       suite would never exercise
+SET GLOBAL gcm.strict = DEFAULT;
+# Given: a prepared statement created while strict was off
+SET GLOBAL gcm.strict = OFF;
+PREPARE tampered_read FROM 'SELECT gcm_decrypt(?, ?) IS NULL AS is_null';
+EXECUTE tampered_read USING @tampered, @k;
+is_null
+1
+# When: strict is turned back on and the same prepared statement runs again
+SET GLOBAL gcm.strict = ON;
+EXECUTE tampered_read USING @tampered, @k;
+ERROR HY000: gcm_decrypt UDF failed; authentication tag verification failed
+# Then: it errors. The strict snapshot is taken per execution, not once at
+#       PREPARE, so turning strictness back on cannot be outlived by a plan
+DEALLOCATE PREPARE tampered_read;
+# Given: a value sealed with one AAD
+SET @with_aad = gcm_encrypt_det('홍길동', @k, 'patients.name');
+# When: it is opened with a different AAD
+SELECT gcm_decrypt(@with_aad, @k, 'patients.other');
+ERROR HY000: gcm_decrypt UDF failed; authentication tag verification failed
+# Then: a tag error — the AAD is authenticated
+# Given: the same value
+# When: it is opened with no AAD at all
+SELECT gcm_decrypt(@with_aad, @k);
+ERROR HY000: gcm_decrypt UDF failed; authentication tag verification failed
+# Then: a tag error

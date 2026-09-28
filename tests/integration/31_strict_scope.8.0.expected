@@ -1,0 +1,17 @@
+# Given: a tampered envelope and gcm.strict at its default
+1
+# When: strict is turned off at both scopes and the tampered envelope is decrypted
+1
+# Then: NULL on every major, reached through whichever scope that major
+#       supports (errors section lists the rejected one)
+# Scenario 2 — Given: strict off in this session
+# When: a malformed envelope is decrypted
+# Then: still an error — strict only ever governs tag failures (errors section)
+# Scenario 3 — Given: strict off
+# When: strict is restored to its default and the tampered envelope is decrypted again
+# Then: the error is back (errors section)
+--- errors, in statement order ---
+ERROR 1229 (HY000) at line 19: Variable 'gcm.strict' is a GLOBAL variable and should be set with SET GLOBAL
+ERROR 3200 (HY000) at line 26: gcm_decrypt UDF failed; malformed or unsupported envelope (length 4)
+ERROR 1229 (HY000) at line 32: Variable 'gcm.strict' is a GLOBAL variable and should be set with SET GLOBAL
+ERROR 3200 (HY000) at line 33: gcm_decrypt UDF failed; authentication tag verification failed

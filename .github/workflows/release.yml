@@ -1,0 +1,127 @@
+name: release
+# A release is a tag v* on main, and nothing else publishes anything:
+# CONTRIBUTING.md — feature -> develop -> main -> tag v*.
+on: { push: { tags: ["v*"] } }
+permissions: { contents: write }
+
+jobs:
+  # One job per (major, arch) so both architectures actually get built. The build runs
+  # here rather than being downloaded from build.yml, because actions/download-artifact@v4
+  # is scoped to its own workflow run — the jobs below are in this same run.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ["8.0", "8.4", "9"]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
+          path: "build/${{ matrix.mysql }}/component_gcm.so"
+
+  # Docker Hub images: an official mysql image per major with the component preinstalled
+  # (docker/server.Dockerfile). Pushed per architecture, then joined into one multi-arch
+  # tag by `manifest` below, so `docker run` picks the right one automatically.
+  #
+  # Needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them
+  # this job fails and the GitHub Release below still publishes — the tarballs do not
+  # depend on it.
+  image:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ["8.0", "8.4", "9"]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
+          path: "build/${{ matrix.mysql }}"
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Resolve the base image for this major
+        id: base
+        run: |
+          set -euo pipefail
+          image=$(python3 -c "
+          import json, sys
+          with open('docker/versions.json', encoding='utf-8') as fh:
+              print(json.load(fh)[sys.argv[1]]['image'])
+          " "${{ matrix.mysql }}")
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server.Dockerfile
+          push: true
+          provenance: false
+          build-args: |
+            SERVER_IMAGE=${{ steps.base.outputs.image }}
+            SO_PATH=build/${{ matrix.mysql }}/component_gcm.so
+            MYSQL_MAJOR=${{ matrix.mysql }}
+            GCM_VERSION=${{ steps.base.outputs.version }}
+          tags: >-
+            ${{ secrets.DOCKERHUB_USERNAME }}/mysql-gcm-server:${{ steps.base.outputs.version }}-mysql${{ matrix.mysql }}-${{ matrix.arch }}
+
+  # Joins the per-architecture tags into one multi-arch tag per major, and points
+  # `<major>` at the release just published. No `latest`: which major it would mean is
+  # ambiguous, and picking one silently would be the wrong kind of convenience.
+  manifest:
+    needs: image
+    strategy:
+      fail-fast: false
+      matrix: { mysql: ["8.0", "8.4", "9"] }
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Create the multi-arch tags
+        run: |
+          set -euo pipefail
+          repo="${{ secrets.DOCKERHUB_USERNAME }}/mysql-gcm-server"
+          ver="${GITHUB_REF_NAME#v}"
+          major="${{ matrix.mysql }}"
+          for tag in "${ver}-mysql${major}" "mysql${major}"; do
+            docker buildx imagetools create -t "${repo}:${tag}" \
+              "${repo}:${ver}-mysql${major}-amd64" \
+              "${repo}:${ver}-mysql${major}-arm64"
+          done
+          docker buildx imagetools inspect "${repo}:${ver}-mysql${major}"
+
+  package:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Package every major and architecture
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          mkdir dist
+          for d in artifacts/component_gcm-mysql*; do
+            name=$(basename "$d")                       # component_gcm-mysql8.4-amd64
+            suffix=${name#component_gcm-}               # mysql8.4-amd64
+            tar -C "$d" -czf "dist/component_gcm-${ver}-${suffix}.tar.gz" component_gcm.so
+          done
+          test "$(ls dist | wc -l)" -eq 6 || { echo "expected 6 archives, got:" >&2; ls dist >&2; exit 1; }
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: anchore/sbom-action@v0
+        with: { path: ., output-file: dist/sbom.spdx.json }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

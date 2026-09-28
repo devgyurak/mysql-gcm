@@ -1,0 +1,13 @@
+# Given: a deterministic envelope of a Korean name
+# When: the decrypted value is filtered with native LIKE
+1	1	1	0	utf8mb4
+# Then: infix/prefix/suffix hit, non-match misses, charset is utf8mb4 (above)
+# Scenario 2 — Given: a Latin name encrypted deterministically
+# When: filtered case-insensitively through the default collation
+1	1	utf8mb4_0900_ai_ci
+# Then: both match — MySQL collation does the work, not C code (above)
+# Scenario 3 — Given: a table of encrypted Korean names
+# When: the server searches for the partial match %길%
+2
+3
+# Then: rows 2 and 3 match server-side, no rows shipped to the client (above)

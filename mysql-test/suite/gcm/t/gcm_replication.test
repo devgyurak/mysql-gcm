@@ -1,0 +1,106 @@
+# Row-based replication of encrypted values (docs/design.md §6). The random-nonce
+# function is non-deterministic, so ROW binlog is a requirement, not a preference:
+# under statement-based replication the replica would run gcm_encrypt again and
+# store a different nonce.
+#
+# Requires a MySQL 8.4 or newer tree: the replication helpers live under
+# include/rpl/ there, while 8.0 still uses include/master-slave.inc. The same
+# property is covered version-independently by
+# tests/e2e/scenarios/replica_consistency.py.
+--source include/have_binlog_format_row.inc
+--source include/rpl/init_source_replica.inc
+
+--connection master
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: a primary row with a random-nonce and a deterministic value, and the
+--echo #        hex of both captured in a table so the comparison survives the hop
+--echo #        (user variables are per-connection and would not)
+CREATE TABLE gcm_repl (id INT PRIMARY KEY, rnd VARBINARY(128), det VARBINARY(128));
+INSERT INTO gcm_repl VALUES (1, gcm_encrypt('홍길동', @k), gcm_encrypt_det('홍길동', @k));
+CREATE TABLE gcm_expected (id INT PRIMARY KEY, rnd_hex TEXT, det_hex TEXT);
+INSERT INTO gcm_expected SELECT id, HEX(rnd), HEX(det) FROM gcm_repl;
+
+--echo # When: the changes reach the replica
+--source include/rpl/sync_to_replica.inc
+
+--connection slave
+--echo # Then: the replica holds the identical bytes and decrypts them to the plaintext
+# The component is installed per server; the replica needs it to run gcm_decrypt.
+--source suite/gcm/include/gcm_install.inc
+SELECT r.id,
+       HEX(r.rnd) = e.rnd_hex AS random_bytes_identical,
+       HEX(r.det) = e.det_hex AS det_bytes_identical,
+       gcm_decrypt(r.rnd, @k) AS decrypted_random,
+       gcm_decrypt(r.det, @k) LIKE '%길%' AS korean_like_on_replica
+FROM gcm_repl r JOIN gcm_expected e ON e.id = r.id;
+
+--echo # Given: the component uninstalled on the replica only
+--source suite/gcm/include/gcm_uninstall.inc
+
+--connection master
+--echo # When: the primary still has it installed and writes another row
+INSERT INTO gcm_repl VALUES (2, gcm_encrypt('김철수', @k), gcm_encrypt_det('김철수', @k));
+--source include/rpl/sync_to_replica.inc
+
+--connection slave
+--echo # Then: the row arrived as bytes, but the replica cannot decrypt it. INSTALL
+--echo #       COMPONENT is per server and is not replicated, so every server that
+--echo #       answers decryption queries, and every promotion candidate, needs its own
+--echo #       install (docs/design.md amendment A8)
+SELECT COUNT(*) AS replicated_rows FROM gcm_repl;
+--error ER_SP_DOES_NOT_EXIST
+SELECT gcm_decrypt(rnd, @k) FROM gcm_repl WHERE id = 2;
+
+--echo # Given: the component installed again on the replica, and statement-based
+--echo #        binary logging on the primary — the format this design forbids
+--source suite/gcm/include/gcm_install.inc
+
+--connection master
+# The server logs the unsafe-statement warning below to the error log, and MTR fails a
+# test on any unexpected warning there. The warning is the point of this scenario, so
+# it is declared expected rather than silenced.
+--disable_query_log
+CALL mtr.add_suppression("Statement is unsafe because it uses a UDF");
+--enable_query_log
+SET @saved_binlog_format = @@SESSION.binlog_format;
+--disable_warnings
+SET SESSION binlog_format = STATEMENT;
+--enable_warnings
+
+--echo # When: a random-nonce and a deterministic value are written under it
+INSERT INTO gcm_repl VALUES (3, gcm_encrypt('박길동', @k), gcm_encrypt_det('박길동', @k));
+
+--echo # Then: the server itself flags the statement as unsafe for logging, because a
+--echo #       loadable function may not return the same value on the replica
+SHOW WARNINGS;
+
+--disable_warnings
+SET SESSION binlog_format = @saved_binlog_format;
+--enable_warnings
+
+# Captured under ROW, so the primary's own bytes travel to the replica as data
+# rather than being recomputed there.
+CREATE TABLE sbr_expected AS
+  SELECT id, HEX(rnd) AS rnd_hex, HEX(det) AS det_hex FROM gcm_repl WHERE id = 3;
+--source include/rpl/sync_to_replica.inc
+
+--connection slave
+--echo # Then: the replica re-executed the statement, so the random-nonce value
+--echo #       DIVERGED while the deterministic one — a pure function of plaintext and
+--echo #       key — did not. This is the whole reason ROW binlog is mandatory
+--echo #       (design §6): under STATEMENT the primary and replica disagree about
+--echo #       ciphertext that the application believes is the same row.
+SELECT HEX(r.rnd) = e.rnd_hex AS random_matches_primary,
+       HEX(r.det) = e.det_hex AS det_matches_primary
+FROM gcm_repl r JOIN sbr_expected e ON e.id = r.id;
+--source suite/gcm/include/gcm_uninstall.inc
+
+--connection master
+DROP TABLE sbr_expected;
+DROP TABLE gcm_expected;
+DROP TABLE gcm_repl;
+--source suite/gcm/include/gcm_uninstall.inc
+--source include/rpl/sync_to_replica.inc
+
+--source include/rpl/deinit.inc

@@ -1,0 +1,11 @@
+-- Runs once, on first start of a fresh data directory (the official mysql entrypoint
+-- executes /docker-entrypoint-initdb.d/* only then).
+--
+-- If you start this image against a data directory that already exists, this does not
+-- run and you must install the component yourself:
+--
+--   INSTALL COMPONENT 'file://component_gcm';
+--
+-- The same applies to every replica and every promotion candidate: INSTALL COMPONENT is
+-- not replicated (docs/ops-constraints.md item 14).
+INSTALL COMPONENT 'file://component_gcm';

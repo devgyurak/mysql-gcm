@@ -1,0 +1,9 @@
+{
+  "_comment": [
+    "Load gate for tests/load/run.py (testing rule). Raising either number needs a PR",
+    "that states the hardware, the server version and why the regression is acceptable.",
+    "Measurements themselves are accumulated per version in docs/perf.md."
+  ],
+  "max_p95_ratio": 1.2,
+  "max_p95_ms_at_largest_serial": 1000.0
+}

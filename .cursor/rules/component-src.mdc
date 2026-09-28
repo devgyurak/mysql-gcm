@@ -1,0 +1,9 @@
+---
+description: "component 소스 규칙"
+globs: "src/**, CMakeLists.txt"
+alwaysApply: false
+---
+Generated from `.agents/rules/component-src.md` by scripts/agents-sync.py — edit the source, not this file.
+The full rule text is in the referenced file and applies together with this rule.
+
+@.agents/rules/component-src.md

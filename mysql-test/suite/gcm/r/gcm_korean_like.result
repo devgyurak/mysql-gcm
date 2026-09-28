@@ -1,0 +1,31 @@
+# Given: a deterministic envelope of a Korean name
+SET @c = gcm_encrypt_det('홍길동', @k);
+# When: the decrypted value is filtered with native LIKE
+SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS infix_hit,
+gcm_decrypt(@c, @k) LIKE '홍%' AS prefix_hit,
+gcm_decrypt(@c, @k) LIKE '%동' AS suffix_hit,
+gcm_decrypt(@c, @k) LIKE '%박%' AS non_match,
+CHARSET(gcm_decrypt(@c, @k)) AS result_charset;
+infix_hit	prefix_hit	suffix_hit	non_match	result_charset
+1	1	1	0	utf8mb4
+# Then: infix, prefix and suffix hit, the non-match misses, charset utf8mb4
+# Given: a Latin name, so the default collation's case folding is visible
+# When: filtered case-insensitively
+SELECT gcm_decrypt(gcm_encrypt_det('Kim', @k), @k) LIKE '%kim%' AS ci_lower,
+gcm_decrypt(gcm_encrypt_det('Kim', @k), @k) LIKE '%KIM%' AS ci_upper;
+ci_lower	ci_upper
+1	1
+# Then: both match, because MySQL's collation does the work, not C code
+# Given: a table of encrypted Korean names
+CREATE TABLE patients (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO patients VALUES
+(1, gcm_encrypt_det('김철수', @k)),
+(2, gcm_encrypt_det('홍길동', @k)),
+(3, gcm_encrypt_det('박길수', @k));
+# When: the server searches for a partial match
+SELECT id FROM patients WHERE gcm_decrypt(name_enc, @k) LIKE '%길%' ORDER BY id;
+id
+2
+3
+# Then: rows 2 and 3 match, entirely server-side
+DROP TABLE patients;

@@ -1,0 +1,3 @@
+# SQL driver only. The runner never encrypts or decrypts: every cryptographic
+# operation happens in the server through the SQL functions (docs/design.md A4).
+PyMySQL>=1.1

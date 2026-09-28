@@ -1,0 +1,40 @@
+name: e2e
+on:
+  push: { branches: [main] }
+  pull_request: { types: [labeled, synchronize] }
+  workflow_dispatch:
+    inputs:
+      mysql: { description: "MySQL major to run against (8.0 | 8.4 | 9)", default: "8.4" }
+permissions: { contents: read }
+jobs:
+  # Builds its own .so: actions/download-artifact@v4 cannot reach another workflow run,
+  # so downloading build.yml's output here would leave this gate vacuously green.
+  compose:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-24.04
+    env:
+      MYSQL_MAJOR: ${{ inputs.mysql || '8.4' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/build-in-docker.sh "$MYSQL_MAJOR"
+      # The server image has to follow the selected major as well. A component is bound
+      # to the server version it was built against, so pairing a 9.x .so with the
+      # compose default (8.4) would test a combination nobody ships.
+      - name: Resolve the server image for that major
+        run: |
+          set -euo pipefail
+          image=$(python3 -c "
+          import json, sys
+          with open('docker/versions.json', encoding='utf-8') as fh:
+              print(json.load(fh)[sys.argv[1]]['image'])
+          " "$MYSQL_MAJOR")
+          echo "GCM_SERVER_IMAGE=$image" >> "$GITHUB_ENV"
+          echo "GCM_SO=../../build/$MYSQL_MAJOR/component_gcm.so" >> "$GITHUB_ENV"
+      - name: Run the scenarios
+        run: docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner --abort-on-container-exit
+      - name: Collect logs
+        if: failure()
+        run: docker compose -f tests/e2e/compose.yml logs --no-color > e2e-logs.txt || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: "e2e-logs-${{ inputs.mysql || '8.4' }}", path: e2e-logs.txt }

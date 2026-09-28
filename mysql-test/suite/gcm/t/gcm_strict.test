@@ -1,0 +1,73 @@
+# Failure semantics of spec/envelope.md §4. gcm.strict governs exactly one of them.
+#
+# The .result for this suite is recorded against a MySQL 8.4 tree, where gcm.strict is
+# GLOBAL-only, so SET GLOBAL changes the running session (docs/design.md amendment A5).
+# On 9.0+ the same effect needs SET SESSION; the per-version scope matrix is covered by
+# tests/integration/31_strict_scope.sql, which runs on every supported major.
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: a valid envelope and the same envelope with its last tag byte flipped
+SET @good = gcm_encrypt_det('홍길동', @k);
+SET @tampered = CONCAT(LEFT(@good, LENGTH(@good) - 1), UNHEX('FF'));
+
+--echo # When: the tampered envelope is decrypted with gcm.strict at its default
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@tampered, @k);
+
+--echo # Then: an error — a tag mismatch is never silently NULL
+
+--echo # Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+
+--echo # When: an unknown version byte is decrypted
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(UNHEX('07000000'), @k);
+
+--echo # Then: still an error — corrupt data is not hidden by a setting
+
+--echo # Given: gcm.strict still off
+--echo # When: an envelope shorter than the minimum is decrypted
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(UNHEX('02'), @k);
+
+--echo # Then: still an error
+
+--echo # Given: the tampered envelope and gcm.strict still off
+--echo # When: it is decrypted
+SELECT gcm_decrypt(@tampered, @k) IS NULL AS null_when_strict_off;
+
+--echo # Then: NULL — the other half of the tag-failure contract, which an error-only
+--echo #       suite would never exercise
+SET GLOBAL gcm.strict = DEFAULT;
+
+--echo # Given: a prepared statement created while strict was off
+SET GLOBAL gcm.strict = OFF;
+PREPARE tampered_read FROM 'SELECT gcm_decrypt(?, ?) IS NULL AS is_null';
+EXECUTE tampered_read USING @tampered, @k;
+
+--echo # When: strict is turned back on and the same prepared statement runs again
+SET GLOBAL gcm.strict = ON;
+--error ER_UDF_ERROR
+EXECUTE tampered_read USING @tampered, @k;
+
+--echo # Then: it errors. The strict snapshot is taken per execution, not once at
+--echo #       PREPARE, so turning strictness back on cannot be outlived by a plan
+DEALLOCATE PREPARE tampered_read;
+
+--echo # Given: a value sealed with one AAD
+SET @with_aad = gcm_encrypt_det('홍길동', @k, 'patients.name');
+
+--echo # When: it is opened with a different AAD
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@with_aad, @k, 'patients.other');
+
+--echo # Then: a tag error — the AAD is authenticated
+
+--echo # Given: the same value
+--echo # When: it is opened with no AAD at all
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@with_aad, @k);
+
+--echo # Then: a tag error
+
+--source suite/gcm/include/gcm_uninstall.inc

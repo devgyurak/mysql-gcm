@@ -1,0 +1,16 @@
+build/
+*.so
+__pycache__/
+.venv/
+target/
+*.pem
+*.key
+.env*
+load-result.json
+
+# Agent configuration is part of the project (AGENTS.md §7): rules, subagents, hooks and
+# permissions are reviewed like any other source. A global gitignore commonly carries
+# `.claude/`, which would silently drop all of it, so it is re-included here. Anything
+# genuinely local belongs in .claude/settings.local.json, excluded below.
+!.claude/
+.claude/settings.local.json

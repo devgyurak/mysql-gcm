@@ -1,0 +1,2 @@
+# Internal vector generation only; not a runtime dependency of component_gcm.
+cryptography>=42

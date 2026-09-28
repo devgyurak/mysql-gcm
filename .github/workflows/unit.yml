@@ -1,0 +1,27 @@
+name: unit
+on:
+  pull_request: {}
+  push: { branches: [main] }
+  schedule: [{ cron: "0 17 * * *" }]   # 02:00 KST nightly, for the 1M collision run
+permissions: { contents: read }
+jobs:
+  cpp-asan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libgtest-dev
+      - run: cmake -S tests/unit -B build/unit -G Ninja -DGCM_SANITIZE=ON && cmake --build build/unit
+      # gtest_discover_tests registers one ctest entry per case, and each one re-reads
+      # the 434 KB vector file, so serially this is minutes of mostly parsing. Run them
+      # in parallel; the cases share no state.
+      # testing.md: 100k deterministic-nonce collision samples on every PR, 1M nightly.
+      - run: ctest --test-dir build/unit --output-on-failure --parallel "$(nproc)"
+        env: { GCM_COLLISION_N: "${{ github.event_name == 'schedule' && '1000000' || '100000' }}" }
+  vectors:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r scripts/requirements.txt
+      - run: python scripts/gen-vectors.py --check

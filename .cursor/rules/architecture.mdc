@@ -1,0 +1,9 @@
+---
+description: "아키텍처 — 책임·의존 방향·자원 수명"
+globs: "src/**, tests/**, mysql-test/**, spec/**, docs/design.md, **/CMakeLists.txt, scripts/check-architecture.py, .github/**"
+alwaysApply: false
+---
+Generated from `.agents/rules/architecture.md` by scripts/agents-sync.py — edit the source, not this file.
+The full rule text is in the referenced file and applies together with this rule.
+
+@.agents/rules/architecture.md

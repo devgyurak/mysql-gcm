@@ -1,0 +1,12 @@
+# Lint/format scope for CI (lint.yml). Markdown is excluded: skill files hold intentionally condensed
+# illustrative snippets, not runnable modules.
+target-version = "py310"
+line-length = 100
+extend-exclude = ["**/*.md", "build/", "third_party/"]
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "S", "N", "W"]
+ignore = ["S603", "S607"]   # subprocess with a fixed argv (guard.py) is intended
+
+[lint.per-file-ignores]
+"tests/**" = ["S101"]       # assert in tests

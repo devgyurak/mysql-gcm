@@ -1,0 +1,13 @@
+# Given: the fixture key and three rows holding the same plaintext
+# When: the same plaintext is encrypted once per row and the result stored
+3	3	1	02	38	3
+# Then: 3 rows, 3 distinct envelopes from one shared version byte, each 38
+#       bytes and each decrypting back to the plaintext (above)
+# Scenario 2 — Given: the fixture key
+# When: a random-nonce envelope is decrypted
+홍길동	1
+# Then: the original plaintext comes back (above)
+# Scenario 3 — Given: the fixture key and an AAD
+# When: the value is sealed and opened with the same AAD
+홍길동	38
+# Then: the plaintext returns and the AAD adds no bytes (above)

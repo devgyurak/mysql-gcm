@@ -1,0 +1,32 @@
+# Given: the fixture key
+# When: NULL is passed in each argument position
+1	1	1	1	1	1
+# Then: SQL NULL propagates with no cryptographic work (above)
+# Scenario 1b — Given: an empty string, which is not NULL
+# When: it arrives as a literal, as an expression result and from a column
+29	29
+1	0	29
+2	1	NULL
+# Then: 29 bytes in every case, and only the real NULL propagates — an
+#       argument of length 0 must not be mistaken for a NULL one (above)
+# Scenario 2 — Given: the empty string
+# When: it is sealed and opened
+29	0378141E6DAF391E6C40D3EA31D6B3F5B6F2F82E3C86118232B25FC0F2	1	0
+# Then: 29 bytes, matching spec/envelope.md §5.2, and an empty round trip (above)
+# Scenario 3 — Given: a 64 KiB plaintext
+# When: it is sealed and opened
+65535	29	1
+# Then: the overhead is exactly 29 bytes at any size (above)
+# Scenario 4 — Given: plaintexts of many boundary lengths, stored in a column
+# When: each is sealed and opened
+10	10	10
+# Then: every length round-trips with a 29 byte overhead (above)
+# Scenario 5 — Given: a latin1 column one byte wide holding a two-byte UTF-8 char
+# When: the envelope is materialised under strict mode
+31	C3A9
+# Then: 31 bytes and it decrypts (above)
+# Scenario 6 — Given: the same column with strict SQL mode switched off
+# When: the envelope is materialised again
+31	C3A9
+# Then: no truncation warning, still 31 bytes, still decrypts — the case that
+#       would silently destroy ciphertext if the declared width were too narrow

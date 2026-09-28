@@ -1,0 +1,618 @@
+# MySQL GCM 암복호화 함수 (component) — 설계와 절차
+
+> ## 개정 A8 — 키·nonce 운영 책임과 보안 보장의 범위
+>
+> component 는 키를 SQL 인자로 받고 nonce 생성·인증 검증을 수행하지만,
+> 키별 사용량 집계·자동 키 교체·nonce 중복 탐지·AAD 정책 강제는 구현하지 않는다.
+> 배포 전 운영자가 동일 키를 사용하는 모든 서버·컬럼·애플리케이션의 암호화 사용량을
+> 합산할 방법과 사용 한도·교체 기준을 정하고 보안 검토를 받아야 한다.
+> 무작위/결정적 모드의 충돌 분석과 메시지 길이·위조 시도 등을 함께 고려한다.
+> 이 프로젝트는 모든 배포에 적용할 수 있는 안전한 키당 사용량을 확정하지 않았다.
+> 근거: [NIST SP 800-38D §8 및 부록 A/B](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
+>
+> 결정적 암호화의 AAD 는 컬럼별이 아니라 **동일 키를 사용하는 모든 결정적 호출**에서
+> 같은 바이트열(또는 항상 빈 값)이어야 한다. 서로 다른 AAD 영역은 키를 분리한다.
+> 암호문 동등성으로 JOIN 하는 컬럼들은 같은 키·AAD 를 사용해야 하며, 키 교체 시
+> 이전/신규 암호문의 동등성이 유지되지 않으므로 이관 절차를 함께 설계한다.
+>
+> 이미 생성한 봉투를 복사·복제·복원하는 것은 새 암호화 호출이 아니다.
+> `gcm_encrypt` 재호출은 새 nonce 로 암호화하고, 결정적 재호출은 키·평문·AAD 가
+> 모두 같을 때 기존 결과를 재현한다. 재시도 중 AAD 만 바꾸지 않는다.
+> 백업 복구로 키 사용량 장부를 되돌리지 않는다. 복구·프로세스 복제 후 난수 상태의
+> 안전성이나 누적 사용량을 확신할 수 없으면 해당 키로 새 쓰기를 중단한다. 모든 쓰기 주체의
+> 난수 상태를 복구·확인한 뒤 독립적으로 안전하게 생성한 새 키로 쓰기를 재개한다.
+> 키 교체만으로 중복된 난수 상태가 해결되는 것은 아니다.
+> 과거 데이터/백업 복호화에 필요한 키는 외부 키 관리 절차로 보존한다.
+>
+> 테스트 벡터 통과와 샘플 nonce 충돌 테스트는 운영 한도 준수나 결정적 구성의 안전성
+> 증명이 아니다. 보안 가드 훅도 개발 명령을 제한할 뿐 운영 중 암호 사용을 감시하지 않는다.
+> 이 개정은 운영 전제를 명시하며 SQL API·봉투·nonce 유도식·벡터를 변경하지 않는다.
+
+> ## 개정 A8 (2026-09-28) — 배치 토폴로지: ROW 복제와 샤딩
+>
+> 함수 표면·봉투는 그대로 두고, 이 component 가 **복제·샤딩 구성에서 어떻게 배치되는지**를 명문화한다.
+> 결론부터: 샤드마다 primary + ROW replica 를 두는 구성은 이 설계와 자연히 맞는다. 다만 지켜야 할
+> 조건이 있고, 그 조건은 코드가 아니라 운영이 지킨다.
+>
+> **복제 — 암호화 결과를 그대로 전달한다**
+>
+> - `binlog_format=ROW` 에서는 primary 가 저장한 암호문·nonce·태그가 그대로 복제된다. replica 는
+>   암호화를 다시 실행하지 않는다. STATEMENT 방식은 무작위 nonce 때문에 양쪽 값이 달라지므로
+>   ROW 를 필수로 둔다 (§6 1항). 근거:
+>   <https://dev.mysql.com/doc/refman/8.4/en/replication-formats.html>
+>   실측: `tests/e2e/scenarios/replica_consistency.py` 와 `mysql-test/suite/gcm/t/gcm_replication.test`
+>   가 양쪽 바이트 일치·replica 복호화·replica 에서의 한글 LIKE 를 확인한다 (8.4 · 9.4 통과).
+> - **component 설치는 복제되지 않는다.** `INSTALL COMPONENT` 는 그 서버의 `mysql.component` 에만
+>   기록된다. 복호화 조회를 받는 서버, 장애 시 primary 로 승격될 서버에는 **각각 설치**해야 하고,
+>   애플리케이션이 그 서버에도 키를 전달할 수 있어야 한다. 근거:
+>   <https://dev.mysql.com/doc/refman/8.4/en/component-loading.html>
+>   MTR 복제 테스트가 primary·replica 양쪽에서 `gcm_install.inc` 를 소스하는 이유가 이것이다.
+>
+> **샤딩 — 라우팅과 키 정책이 핵심이다**
+>
+> | 항목 | 적용할 원칙 |
+> |---|---|
+> | 샤드 선택 | `tenant_id` 처럼 안정적인 식별자로 라우팅한다. 무작위 nonce 암호문(`0x02`)은 같은 평문도 매번 달라지므로 라우팅 키로 쓸 수 없다. 결정적 암호문(`0x03`)은 안정적이지만 그 자체를 샤드 키로 쓰면 키 로테이션이 리샤딩이 된다 |
+> | 샤드 간 데이터 이동 | 기존 암호문을 **그대로** 옮길 수 있다 (재암호화 불필요). 목적지에서도 원래 키와 AAD 로 복호화해야 한다 |
+> | 결정적 암호문 비교 | 샤드 간 같은 암호문을 얻으려면 키·평문·AAD 가 모두 같아야 한다. §6 의 "키마다 AAD 하나" 규칙이 샤드 경계를 넘어 적용된다 — 샤드별로 AAD 를 다르게 두면 같은 평문이 다른 봉투가 되어 교차 비교가 깨진다 |
+> | 키 사용량 | 같은 키를 여러 샤드에서 쓰면 **새 암호화 호출량을 전체 샤드에 걸쳐 합산**해서 봐야 한다. 기존 암호문을 옮기는 것은 새 암호화가 아니다. 결정적 변형의 nonce 충돌 경계(§5.2)도 이 합산치로 따진다 |
+> | 부분일치 검색 | `gcm_decrypt(...) LIKE '%길%'` 만으로는 샤드를 고를 수 없다. 라우팅 조건이 없으면 여러 샤드를 조회하고 각 샤드가 후보 행을 복호화한다 — 비용이 샤드 수에 비례한다 |
+>
+> **범위 밖**: 특정 샤딩 미들웨어(프록시·라우터)가 사용자 정의 함수 호출을 그대로 전달하는지,
+> 결과 charset 을 보존하는지는 **그 조합으로 따로 검증해야 한다.** 이 저장소는 자체 운영 MySQL 서버에
+> 대해서만 검증한다 (§0 범위). 프록시 방식은 §0 에서 이미 범위 밖이다.
+
+> ## 개정 A7 (2026-09-28, 확정) — 계산된 SQL 식을 인자로 넘기지 않는다 (8.0·8.4 서버 결함)
+>
+> MySQL 8.0·8.4 는 **계산된 문자열 식**을 loadable function 인자로 넘길 때, 한 statement 의
+> **두 번째 행부터** 낡은 인자 뷰를 건네준다. 같은 식을 빌트인 함수에 넘기면 항상 올바른 값이
+> 나오고, component 를 "인자를 그대로 되돌려주는" 빌드로 바꿔도 같은 손상이 관측된다 —
+> 즉 component 안에서는 탐지도 복구도 불가능하다. 9.4.0 에서는 재현되지 않는다.
+>
+> 실측 (`tests/integration/91_server_udf_arg_defect.sql` 이 버전별로 고정한다):
+>
+> | 인자 식 | 8.0.43 | 8.4.11 | 9.4.0 |
+> |---|---|---|---|
+> | `CONCAT(col, int_col)` · `CONCAT_WS(...)` · 이를 감싼 `LOWER(...)` | 정상 | **byte 0 손상** | 정상 |
+> | `REPEAT('a', int_col)` | **길이 부풀림** | 정상 | 정상 |
+> | `CAST(계산식 AS CHAR)` | 정상 | **16바이트에서 손상** | 정상 |
+> | 컬럼 · 리터럴 · 사용자 변수 · 바인드 파라미터 | 정상 | 정상 | 정상 |
+>
+> 원인 지점은 `sql/item_func.cc` 의 `udf_handler::get_and_convert_string` 이다. 인자 Item 이 돌려준
+> `String` 을 **얕게 복사**한 뒤(`buffers[index] = *res`) `c_ptr_safe()` 를 호출하는데, 그 Item 이
+> 중첩 Item 의 버퍼를 가리키고 있으면 포인터·길이가 낡는다. 8.4 의 손상이 16바이트 경계에서
+> 나타나는 것이 `String` 재할당 경계와 일치한다.
+>
+> 결정:
+>
+> - **회피를 코드로 시도하지 않는다.** 서버가 변환을 수행하도록 다른 collation 을 요구하면
+>   (`argument_set(args, "collation", 0, "utf8mb4_bin")`) 8.4 의 `CONCAT` 손상은 사라지지만
+>   `REPEAT` 의 **길이**가 부풀어 더 나쁜 결과(더 많은 바이트를 봉인)가 된다. 실측으로 확인했다.
+>   따라서 `udf_encrypt.cc` 는 계약이 요구하는 charset(`utf8mb4`)만 요청한다.
+> - **운영 제약으로 문서화한다** (§6, `docs/ops-constraints.md` 10항, README). 모든 버전에서 안전한
+>   호출 형태는 컬럼·리터럴·사용자 변수·바인드 파라미터, 즉 **구체화된 값**이다. 애플리케이션이
+>   드라이버로 바인드 파라미터를 보내는 정상 경로는 영향이 없다.
+> - SQL 안에서 값을 계산해야 하면 파생/임시 테이블이나 별도 statement 로 **먼저 구체화**한다.
+>   `CAST` 만으로는 충분하지 않다 (8.4, 16바이트).
+> - `gcm_decrypt` 의 봉투 인자도 같은 부류이지만 실패가 `bad_tag`/`bad_envelope` 에러로 드러나므로
+>   조용한 데이터 손상이 아니다. `gcm_encrypt*` 가 위험한 쪽이다.
+> - 서버가 수정되면 91 케이스의 기대값이 0→1 로 바뀌어 CI 에서 드러난다. 그때 이 개정과 제약을 해제한다.
+
+> ## 개정 A6 — 모듈 경계와 자원 수명
+>
+> 배포 범위(A4)와 SQL·봉투 계약은 유지하고, 구현의 경계를
+> `.agents/rules/architecture.md` 에 명문화한다. 서버 어댑터는 코어를 호출하지만
+> 코어(`gcm`, `envelope`, `nonce`)는 MySQL 서비스·설정·SQL 오류에 의존하지 않는다.
+> SQL NULL·charset·strict 오류 변환은 UDF 계층, 바이트 형식은 envelope,
+> 인증 결과는 gcm, 서버 버전 차이는 component/sysvar 계층이 담당한다.
+>
+> 자원은 component·UDF_INIT·연산 수명으로 구분한다. UDF_INIT 은 세션 전체와
+> 동일하지 않다. 등록 실패 시 롤백하고, 해제 실패 시 사용 중인 자원을 유지하며
+> 이미 해제한 자원을 다시 해제하지 않도록 상태를 추적한다.
+> 행 처리 경로에서 설정 조회·알고리즘 fetch·파일/네트워크 접근을 반복하지 않는다.
+> 테스트용 고정 nonce 진입점은 SQL 에 노출하지 않고, 암호화를 우회하는 실험 코드는
+> 배포 대상에서 제외한다. 기존 파일 배치를 유지하며 범용 backend 계층은 추가하지 않는다.
+>
+> 참고한 구현: [Percona Encryption UDF](https://github.com/percona/percona-server/blob/8.4/components/encryption_udf/encryption_udf_component.cc)의
+> 서버/암호 래퍼 분리와 등록 상태 추적,
+> [MySQL keyring operations](https://dev.mysql.com/doc/dev/mysql-server/8.4.9/operations_8h_source.html)의
+> 연산/backend 경계,
+> [pgcrypto SQL 진입점](https://github.com/postgres/postgres/blob/REL_17_STABLE/contrib/pgcrypto/pgcrypto.c)의
+> SQL 인자·결과·오류 변환. 이들은 설계 참고이며 외부 프로젝트의 API·예외 정책·기능을 도입하는 근거는 아니다.
+
+> ## 개정 A5 (2026-09-28, 확정) — `gcm.strict` 의 SESSION 스코프는 MySQL 9.0+ 에서만
+>
+> A1 개정은 `gcm.strict` 를 GLOBAL + SESSION 으로 두었다. 서버 소스 실측 결과
+> **component sysvar 의 세션 스코프는 9.0.0 이상에만 구현되어 있다.** 8.0/8.4 에서
+> `PLUGIN_VAR_THDLOCAL` 을 넘기면 등록은 성공하고 값 읽기는 범위 밖 읽기가 된다.
+>
+> 근거 (태그 `mysql-8.0.43` · `mysql-8.4.11` · `mysql-9.4.0` 실측):
+>
+> - `sql/server_component/component_sys_var_service.cc` 의 `PLUGIN_VAR_THDLOCAL` 등장 횟수는
+>   8.0.43 · 8.4.11 이 0, 9.4.0 이 11 이다. 8.x 의 `register_variable` 은
+>   `flags & PLUGIN_VAR_WITH_SIGN_TYPEMASK`(`0x00ff`) 로만 타입을 분기하므로 THDLOCAL(`0x0100`)이 탈락하고,
+>   전역 bool 포인터를 쓰는 GLOBAL 경로가 실행된다.
+> - 그런데 `sys_var_pluginvar` 는 **그 플래그로 스코프를 정하고**(`sql/sql_plugin_var.h`),
+>   값 접근은 `real_value_ptr()` 에서 `*(int *)(plugin_var + 1)` 을 세션 저장소의 **바이트 offset** 으로
+>   해석한다(`sql/sql_plugin_var.cc`). 8.x component 경로에서 그 자리는 전역 변수의 주소다 → OOB read.
+>   **8.0/8.4 에 THDLOCAL 을 넘기지 않는다.**
+> - 세션 값을 읽는 유일한 서비스 `mysql_system_variable_reader` 도 9.0.0 신설이다
+>   (`include/mysql/components/services/mysql_system_variable.h`: 8.4.11 부재, 9.4.0 존재).
+>   `component_sys_variable_register::get_variable` 은 헤더 주석과 구현(`OPT_GLOBAL` 하드코딩) 모두
+>   **GLOBAL 전용**이라 세션 값 읽기에 쓸 수 없다.
+> - 9.x 선례: `components/test/test_session_var_service.cc`,
+>   `mysql-test/suite/service_sys_var_registration/{t,r}/session_var_service.*`.
+>
+> 결정:
+>
+> ```
+> MySQL 9.0+     gcm.strict : GLOBAL + SESSION   (PLUGIN_VAR_BOOL | PLUGIN_VAR_THDLOCAL)
+> MySQL 8.0/8.4  gcm.strict : GLOBAL only        (PLUGIN_VAR_BOOL)
+> ```
+>
+> - 분기는 **컴파일 타임** (`MYSQL_VERSION_ID`). `mysql_system_variable_reader` 의 `SERVICE_TYPE` 선언
+>   자체가 8.x 헤더에 없어 런타임 probe 로는 빌드되지 않고, `REQUIRES_SERVICE` 는 하드 로드 의존이므로
+>   8.x 빌드에서는 그 두 서비스를 REQUIRES 목록에서 빼야 한다.
+> - 8.0/8.4 에서 `SET SESSION gcm.strict` 는 서버가 `ER_INCORRECT_GLOBAL_LOCAL_VAR` 로 거부한다.
+>   §6 운영 제약과 README 에 명시한다.
+> - **태그 실패 의미론은 바뀌지 않는다** (ON=에러, OFF=NULL). 바뀌는 것은 그 값을 어느 스코프에서
+>   바꿀 수 있는지 뿐이다. 서비스 호출 실패 시에는 strict ON 으로 간주한다 (fail closed).
+> - 값은 statement 당 한 번(`Udf_func_init`)만 읽고 행마다 읽지 않는다. reader 는
+>   `LOCK_system_variables_hash` read lock + 해시 룩업 + 숫자→문자열 변환을 거치므로 행 단위 호출은
+>   부하 게이트에서 바로 드러난다. `SET SESSION` 은 statement 경계에서만 바뀌므로 의미론도 정확하다.
+
+> ## 개정 A4 — 배포 범위는 MySQL component 와 SQL 인터페이스
+>
+> Python·Java 암호화 클라이언트를 별도 제품으로 제공하지 않는다. 애플리케이션은
+> 기존 MySQL 드라이버로 `gcm_encrypt` / `gcm_encrypt_det` / `gcm_decrypt` 를 SQL 호출한다.
+> 드라이버에 이 프로젝트의 암호 구현을 통합할 필요는 없다.
+>
+> Python 은 벡터 생성·검증과 SQL 기반 E2E/부하 실행을 위한 개발 도구로만 사용한다.
+> `scripts/gen-vectors.py` 는 `cryptography` 로 고정 입력의 벡터를 생성하고 검증하며,
+> 재사용 가능한 암복호화 클라이언트 API 나 패키지를 제공하지 않는다.
+> 봉투·SQL API·기존 벡터의 바이트 값은 이 범위 개정으로 변경하지 않는다.
+> C++ 단위 테스트와 SQL 통합 테스트가 서버 동작을 검증하며, 언어별 클라이언트의
+> 동등성 검증·배포·호환성 유지 의무는 제거한다.
+
+> ## 개정 A2 (2026-09-28, 확정) — 결정적 봉투도 nonce 를 저장한다
+>
+> 미해결 이슈 A2 를 다음으로 확정한다. §2.2 는 결정적 봉투를 `version || ct || tag` 로 두고
+> "nonce 는 재계산" 이라 했지만, nonce 가 평문의 HMAC 이므로 **복호화 시점에는 평문을 몰라
+> 재계산할 수 없다.** 따라서 결정적 봉투도 nonce 12 바이트를 저장한다.
+>
+> ```
+> 0x02  GCM 무작위 : 0x02 || nonce(12) || ciphertext || tag(16)
+> 0x03  GCM 결정적 : 0x03 || nonce(12) || ciphertext || tag(16)   # nonce 는 유도하되 저장한다
+> ```
+>
+> - 결정성·동등성은 그대로다 (같은 키·평문·AAD → 같은 봉투 전체 바이트). 조인·UNIQUE 는 영향 없음.
+> - 비용: 결정적 값당 +12 바이트. §2.2 의 "실제 증가 0~16 바이트" 는 **"평문 + 29 바이트"** 로 정정한다.
+> - 복호화는 저장된 nonce 를 그대로 쓴다. 재계산 후 비교는 요구하지 않는다 (GCM 태그가 이미 인증한다).
+> - 대안 AES-GCM-SIV 는 OpenSSL 3.2+ 에 묶여 서버 OpenSSL 을 제약하므로 채택하지 않는다.
+>   선례는 HashiCorp Vault Transit 의 convergent encryption v2 (nonce 를 함께 저장한다).
+> - 확정본은 `spec/envelope.md` (FINAL). 서버 구현·벡터 생성 도구·테스트는 그 문서를 따른다.
+
+> ## 개정 A3 (2026-09-28) — v1 legacy CBC 봉투의 정의
+>
+> §2.2 는 version 바이트로 CBC→GCM dual-read 를 지원한다고만 했고 v1 의 바이트 배치는 비어 있었다.
+> 구현·테스트를 위해 다음으로 정의한다. **복호화 전용이며 component 는 v1 을 절대 생성하지 않는다.**
+>
+> ```
+> 0x01  legacy CBC : 0x01 || iv(16) || AES-256-CBC(PKCS#7) ciphertext
+> ```
+>
+> - 마이그레이션은 기존 `AES_ENCRYPT` 값 앞에 version 바이트와 IV 를 덧붙이기만 한다 — 재암호화가 없다.
+>   MySQL 은 32 바이트 키를 그대로 AES-256 키로 쓴다 (`my_aes_create_key` 의 XOR 접기는 입력 길이가
+>   키 길이와 같으면 항등이다). 따라서 같은 키로 `gcm_decrypt` 와 `AES_DECRYPT` 결과가 같다.
+> - v1 은 **인증되지 않는다.** 틀린 키로도 패딩이 우연히 맞으면 쓰레기 평문이 나올 수 있다. legacy
+>   데이터의 성질이며 v2/v3 로 이관하면 사라진다. 이 한계를 `spec/envelope.md` 와 README 에 명시한다.
+> - v1 은 AAD 를 받지 않는다. 비어 있지 않은 AAD 로 v1 을 복호화하면 `bad_envelope` 에러.
+> - `gcm.strict` 는 v1 경로에 영향을 주지 않는다 (태그가 없다). 길이·패딩 오류는 항상 에러.
+
+> ## 개정 A1 (2026-09-28) — 키 전달 방식: keyring → SQL 인자
+>
+> 초기안(§2.1 · §2.3 · §3 · §5.4 · Phase S 의 keyring 항목)과 달리, **키는 기존 MySQL
+> `AES_ENCRYPT(str, key_str)` 과 동일하게 SQL 인자로 받는다.** 아래가 §2 를 대체한다.
+>
+> ```
+> gcm_encrypt(plaintext, key [, aad])       -> BLOB     무작위 nonce
+> gcm_encrypt_det(plaintext, key [, aad])   -> BLOB     결정적
+> gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  charset 태깅 (utf8mb4)
+> ```
+>
+> - `key` 는 **정확히 32 바이트**(AES-256) 바이너리. 길이가 다르면 에러. `AES_ENCRYPT` 의
+>   키 접기(XOR folding)는 재현하지 않는다 — 약한 키를 조용히 받아들이는 원인이다.
+> - 결정적 변형의 nonce 키는 별도 인자 없이 도메인 분리로 유도한다 (Phase 1 에서 확정):
+>   `nonce_key = HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`,
+>   `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`.
+> - sysvar 는 `gcm.strict` (GLOBAL + SESSION, 기본 ON) 만 남는다. my.cnf 에는 `loose_gcm.strict`.
+>   `gcm.key_id` · `gcm.nonce_key_id` · `gcm_key_id()` 는 폐기.
+> - `keyring_reader_with_status` 의존과 §3 keyring 백엔드 선결 결정은 **범위 밖**이 된다.
+>   §5.4 의 "키를 my.cnf 에 두지 않는다" 는 여전히 유효하다 (키는 앱이 보관하고 쿼리마다 전달).
+> - 대가: 키 바이트가 SQL 문에 등장하므로 general log · slow log · `performance_schema.events_statements_*`
+>   · SBR binlog 에 남을 수 있다. 이는 **현재 `AES_ENCRYPT` 운영과 동일한 노출면**이며 §6 운영 제약에
+>   추가한다. keyring 방식은 향후 선택 기능(`gcm_encrypt_kr` 류)으로 재검토할 수 있다.
+> - Phase S 체크리스트에서 "keyring 에서 키를 읽음" 항목은 제거되고, "32 바이트 키 인자 검증 +
+>   `SET SESSION gcm.strict` 동작" 으로 대체된다.
+
+MySQL 에 AES-256-GCM 암복호화 함수를 추가하는 서버 component 를 만들기 위한
+설계 문서. 별도 오픈소스로 분리할 것을 전제로 쓴다.
+
+암호화 로드맵 2단계(CBC→GCM)의 선택 가능한 구성요소다. 이것 없이도 GCM 전환은
+가능하지만, 그 경우 서버측 검색(LIKE)을 잃는다 — §1 참조.
+
+> 원 프로젝트의 관련 문서: `.agents/docs/value-column-encryption.md`(로드맵),
+> `.agents/docs/ope-removal.md`(0단계). 이 저장소에는 포함되지 않는다.
+
+## 0. 목표와 범위
+
+| 항목 | 내용 |
+|---|---|
+| 목표 | MySQL 에 GCM 암복호화 함수 추가 + my.cnf 통합 + 복호화 후 LIKE 검색 |
+| 형태 | MySQL 8.0+ component (legacy UDF plugin 아님 — §5.1) |
+| 대상 | 자체 운영 MySQL 만. 관리형(RDS·Aurora·Cloud SQL)은 설치 불가 |
+| 범위 밖 | 프록시 방식, 언어별 암호화 클라이언트/SDK, DB 드라이버 통합, 키 관리 시스템 자체 |
+
+## 1. 왜 필요한가
+
+### 1.1 MySQL 은 GCM 을 지원하지 않는다 (확정)
+
+`block_encryption_mode` 허용값은 `aes-{128,192,256}-{ECB,CBC,CFB1,CFB8,CFB128,OFB}`
+뿐이고, AEAD 모드가 없다. 인증 태그·AAD 를 받을 인자 자리도 없다.
+
+실측 — 컨테이너에서 `SET SESSION block_encryption_mode` 직접 시험:
+
+| 모드 | MySQL 8.4.11 | MySQL 9.4.0 |
+|---|---|---|
+| aes-256-cbc / -ecb / -cfb128 / -ofb | 수용 | 수용 |
+| aes-256-gcm | 거부 | 거부 |
+| aes-256-gcm-siv / -siv / -ctr / -xts | 거부 | 거부 |
+
+```
+ERROR 1231 (42000): Variable 'block_encryption_mode' can't be set to the value of 'aes-256-gcm'
+```
+
+문서도 8.0 → 8.4 → 9.7 까지 같은 목록이다. MySQL 버전을 올려 해결하는 경로는 없다.
+MariaDB 도 ECB/CBC/CTR 뿐이라 계열 전체의 한계다.
+
+### 1.2 서버측 복호화를 잃으면 부분일치 검색이 성립하지 않는다
+
+환자명·EMR ID 부분일치 검색은 현재 서버측 `AES_DECRYPT + LIKE` 로 동작한다.
+이를 앱으로 옮기면 요청마다 후보 전량을 복호화해야 한다.
+
+| 후보 환자 수 | 앱측 읽기 + 복호화 (실측 기준 10.6µs/행) |
+|---|---|
+| 10,000 | 117ms |
+| 100,000 | ~1.1초 |
+| 300,000 | ~3.2초 |
+
+검색 요청마다 3초는 성립하지 않는다. 서버측은 행 전송·파이썬 객체 생성이 없고
+암복호가 C 속도라 비용 구조가 근본적으로 다르며, 현재 운영이 이미 그렇게 돌고
+있으므로 성립이 증명된 경로다.
+
+> 부분일치를 포기할 수 있다면(전방일치·정확일치로 축소) 이 component 는 필요 없다.
+> 제품 결정이 선행 조건이다.
+
+### 1.3 기존 오픈소스로는 안 된다
+
+| 프로젝트 | 상태 |
+|---|---|
+| crypsi-mysql-udf | AES-GCM UDF 를 제공하지만 스타 0 · 커밋 36 · OpenSSL 1.1.1(EOL) 요구 · 키를 SQL 인자로 받음 · 결정적 모드 없음 · 라이선스 불명확 |
+| lib_mysqludf_aes256 | AES-256 확장이고 GCM 아님 |
+| Acra (Apache 2.0) | 프록시로 AES-256-GCM. 검색은 정확일치만(CE), 전방일치는 Enterprise, 부분일치·범위 없음. SQL 파싱 프록시라 CTE 많은 쿼리에 리스크 |
+
+Acra 의 기능 경계가 우리 진단을 독립적으로 확인해준다 — 이 분야 제품도 부분일치는
+제공하지 않는다.
+
+## 2. 무엇을 만드는가
+
+### 2.1 함수 표면
+
+빌트인을 덮어쓸 수 없으므로 새 이름이어야 한다. `block_encryption_mode` 에
+모드를 추가하는 것도 불가능하다.
+
+```
+gcm_encrypt(plaintext [, aad])       -> BLOB      무작위 nonce
+gcm_encrypt_det(plaintext [, aad])   -> BLOB      결정적 (조인·UNIQUE·정확일치용)
+gcm_decrypt(ciphertext [, aad])      -> VARCHAR   charset 태깅 (§5.3)
+gcm_key_id()                         -> VARCHAR   현재 key id (관측용)
+```
+
+`gcm_encrypt_det` 는 선택이 아니다. 이것이 없으면 암호 컬럼을 조인 키로 쓰는
+지점 전체가 깨진다 (vc-backend 94 / vc-report 37 / vc-sync 88곳, 패턴 재산정치).
+결정적 변형이 있으면 그 지점들은 무변경이다.
+
+```
+nonce = HMAC-SHA256(nonce_key, plaintext)[:12]     # 합성 nonce, 저장 불필요
+ct    = AES-256-GCM(key, nonce, plaintext, aad)
+```
+
+### 2.2 암호문 봉투
+
+```
+무작위 nonce : version(1) || nonce(12) || ciphertext || tag(16)
+결정적       : version(1) || ciphertext || tag(16)        # nonce 는 재계산
+```
+
+- BLOB 반환. VARCHAR 아님 — MySQL 은 바이너리를 텍스트 형식으로 필터할 때
+  동작이 애매하다 (Acra 도 같은 이유로 명시적 캐스팅을 넣었다)
+- version 바이트로 CBC(v1) → GCM(v2) 과도기 dual-read 를 지원한다
+- PKCS7 패딩이 사라지므로 실제 증가는 0~16바이트 (결정적 변형 기준)
+
+### 2.3 my.cnf 통합
+
+`component_sys_variable_register` 로 sysvar 를 등록하면 my.cnf·커맨드라인에서 설정된다.
+
+```ini
+[mysqld]
+# key id 만. 키 바이트는 절대 두지 않는다 (§5.4)
+loose_gcm.key_id       = vc_phi_v1
+loose_gcm.nonce_key_id = vc_phi_nonce_v1
+loose_gcm.strict       = ON
+```
+
+| sysvar | 스코프 | 설명 |
+|---|---|---|
+| gcm.key_id | GLOBAL + SESSION | keyring data id. 세션 스코프가 있어야 로테이션·dual-read 과도기가 된다 |
+| gcm.nonce_key_id | GLOBAL + SESSION | 합성 nonce 용 HMAC 키 id (암호 키와 분리) |
+| gcm.strict | GLOBAL + SESSION | 태그 불일치 시 ON=에러 / OFF=NULL |
+
+키는 `keyring_reader_with_status` 로 Data ID 조회한다 → 키 바이트가 SQL 에
+등장하지 않는다. crypsi 의 결함을 이걸로 피한다.
+
+## 3. 선결 결정 — keyring 백엔드 (스파이크보다 먼저)
+
+이 결정이 프로젝트 정당성 자체를 좌우한다.
+
+지금은 앱이 키를 갖고 SQL 로 넘긴다. keyring 방식은 DB 호스트에 키가 상주한다.
+
+로드맵이 밝힌 암호화의 실질 효익은 "DB 파일·백업 유출 시 값 노출 차단" 이다.
+그런데 `component_keyring_file` 로 같은 호스트에 키를 두면 데이터 파일을 가져간
+사람이 키도 가져간다 — 그 효익이 사라진다.
+
+| 백엔드 | 판정 |
+|---|---|
+| component_keyring_file | 불가. 위 효익이 무너진다. 개발·테스트에만 |
+| component_keyring_vault / KMS keyring | 필요 조건 |
+
+외부 keyring 을 운영에 둘 수 없다면 이 방향 전체를 재검토해야 한다.
+"keyring_file 로 시작해서 나중에 바꾼다"는 계획은 위험하다.
+
+## 4. 절차
+
+### Phase S — 스파이크 (1~2일, 스펙보다 먼저)
+
+위험한 미지값을 한 번에 답하는 최소 component 를 먼저 만든다. 이 결과에 따라
+스펙이 달라지므로 순서를 바꾸지 않는다.
+
+- [ ] component 골격이 UDF 하나를 `mysql_service_udf_registration` 으로 등록
+- [ ] my.cnf 의 `loose_gcm.key_id` 를 sysvar 로 읽음
+- [ ] keyring 에서 그 id 로 키를 읽음 (`keyring_reader_with_status`)
+- [ ] `gcm_decrypt` 반환값에 charset 태깅 → 한글 `LIKE '%김%'` 이 native collation 으로 동작
+      ← decrypt_like 필요 여부가 여기서 결정된다 (§5.3)
+- [ ] `Created_tmp_disk_tables` 관측 — 평문이 디스크 temp 로 내려가는지 (§5.3)
+- [ ] `EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL)` 이 빌드·런타임 OpenSSL 조합에서 성공
+
+로컬 검증:
+
+```sh
+# 빌드한 .so 를 plugin_dir 로 넣고
+docker cp component_gcm.so mysql-dev:/usr/lib/mysql/plugin/
+docker exec -i mysql-dev mysql -uroot <<'SQL'
+INSTALL COMPONENT 'file://component_gcm';
+SELECT gcm_key_id();
+SELECT HEX(gcm_encrypt_det('홍길동'));
+SELECT gcm_decrypt(gcm_encrypt_det('홍길동'));
+SELECT gcm_decrypt(gcm_encrypt_det('홍길동')) LIKE '%길%';   -- 1 이어야 한다
+SHOW STATUS LIKE 'Created_tmp_disk_tables';
+SQL
+```
+
+### Phase 1 — 스펙 (스파이크 결과 반영 후)
+
+- 봉투 포맷 · 함수 표면 · sysvar · 실패 의미론 확정
+- 테스트 벡터 — NIST CAVP GCM KAT + 자체 벡터. C++ 서버 코어와 SQL 테스트의 공통 기준이다
+- 문서화할 운영 제약 목록 (§6)
+
+### Phase 2 — 구현 + 테스트
+
+- OpenSSL EVP, 이름으로 fetch (`EVP_aes_256_gcm()` 심볼 직접 사용 금지 — 빌드 OpenSSL 에 묶인다)
+- `OPENSSL_cleanse` 로 키 버퍼 소거. 에러 메시지에 키·평문 금지
+- MTR (mysql-test) .test/.result 스위트
+- 결정적 변형의 nonce 충돌 경계 테스트
+
+### Phase 3 — SQL 사용 흐름과 E2E 검증
+
+기존 MySQL 드라이버로 SQL 함수를 호출하는 사용 흐름을 검증한다. 암호화 저장 →
+서버 복호화와 한글 LIKE, ROW 복제, legacy CBC dual-read, AAD 불일치 및 세션 strict
+격리를 다룬다. Python runner 는 SQL 실행·결과 확인만 담당하며 암복호화하지 않는다.
+
+### Phase 4 — 빌드·배포·문서
+
+- 빌드 매트릭스: MySQL 메이저 버전 × 플랫폼(amd64/arm64, glibc/musl) × OpenSSL
+  — component ABI 가 서버 버전에 결합된다
+- §6 의 운영 제약을 README 첫 화면에 배치
+
+### Phase 5 — 업스트림 (선택, 기대치 낮게)
+
+선례: WL#6781 "Support multiple AES Encryption modes" 가 지금의 모드 목록을 추가했다.
+채널은 존재한다.
+
+다만 `AES_ENCRYPT(str, key, iv, kdf, salt, info)` 에 태그·AAD 자리가 없어 기존 함수
+확장이 아니라 새 함수군이 필요하므로 수용 가능성은 낮다. feature request 제출은
+비용이 거의 없다.
+
+## 5. 설계 결정과 근거
+
+### 5.1 왜 component 인가 (legacy UDF plugin 아님)
+
+component 인프라는 서비스 경계가 명확하고 신규 확장의 권장 경로다. 결정적으로
+keyring 서비스와 sysvar 등록 서비스를 쓸 수 있다 — legacy UDF 로는 키를 함수
+인자로 받는 수밖에 없다 (crypsi 가 그렇다).
+
+### 5.2 왜 결정적 변형이 필수인가
+
+암호 컬럼이 스키마의 조인 백본이다.
+
+```
+Patient.encrypted_emr_id      == Encounter.encrypted_patient_id
+Encounter.encrypted_emr_id    == Score.encrypted_encounter_id
+Encounter.encrypted_emr_id    == UserPin.encrypted_encounter_id
+```
+
+또 `uq_emr_location_natural_key (site, ward, room, bed)` 는 room/bed 가 결정적
+AES 라서 성립하는 UNIQUE 다. 무작위 nonce 만 제공하면 이 전부가 깨진다.
+
+합성 nonce 의 안전성: 서로 다른 평문이 같은 nonce 를 얻으면 GCM 은 치명적이지만,
+HMAC-SHA256 을 96비트로 자른 충돌은 값 1,000만 개 기준 약 10⁻¹⁵ 수준이다. 같은
+평문이 같은 nonce 를 얻는 것은 의도한 결정성이다. 다만 동일 키의 모든 결정적 호출에서
+AAD 가 같아야 한다(개정 A8). 동등성·빈도·길이 정보가 노출되며, 이 충돌 확률 계산만으로
+구성 전체의 안전성이나 키당 운영 한도가 증명되지는 않는다. 별도 보안 검토가 필요하다.
+
+선례: HashiCorp Vault Transit 의 convergent encryption 이 같은 구성이다.
+
+### 5.3 왜 decrypt_like 를 먼저 만들지 않는가
+
+MySQL 8.0.19 부터 `mysql_udf_metadata` 서비스로 반환값의 charset/collation 을
+지정할 수 있다. 그러면 MySQL 의 native LIKE 를 그대로 쓸 수 있다.
+
+```sql
+WHERE gcm_decrypt(encrypted_name) LIKE '%김%'   -- utf8mb4_general_ci 로 동작
+```
+
+decrypt_like 를 직접 만들면 C 로 utf8mb4_general_ci 의 대소문자 무시·유니코드
+정규화 의미론을 CJK 까지 재현해야 한다. OPE 제거에서 파이썬 코드포인트 순서와
+MySQL collation 이 달라 한 번 데인 지점이다. 재현하지 말고 MySQL 것을 쓴다.
+
+> 단, decrypt_like 를 원할 정당한 이유가 하나 있다 — 성능이 아니라 보안이다.
+> `gcm_decrypt(col)` 이 임시 테이블·filesort 를 타면 평문이 디스크 기반 temp 로
+> 내려간다. boolean 만 돌려주는 융합 함수는 평문을 메모리 밖으로 내보내지 않는다.
+> Phase S 에서 `Created_tmp_disk_tables` 로 실제 발생을 관측한 뒤 판단한다.
+
+### 5.4 왜 키를 my.cnf 에 두지 않는가
+
+파일 읽기 권한자 전원에게 노출되고, 설정관리·백업·이미지에 남고, SHOW VARIABLES
+로도 보일 수 있다. MySQL 자신의 InnoDB TDE 가 쓰는 방식이 정답이다 — my.cnf 는
+key id 만, 키 바이트는 keyring.
+
+### 5.5 태그 불일치를 NULL 로 내리지 않는다
+
+기존 `AES_DECRYPT` 는 실패 시 NULL 을 돌려줘 "키 틀림"과 "데이터 없음"이 구분되지
+않는다. AEAD 에서 이건 인증의 의미를 없앤다. `gcm.strict=ON` 을 기본으로 두고
+에러를 올린다.
+
+## 6. 운영 제약 — README 에 반드시 명시
+
+- 무작위 nonce 함수는 비결정적 → statement-based replication 에서 위험하다.
+  `INSERT ... VALUES(gcm_encrypt(...))` 가 마스터와 레플리카에서 다른 값을 만든다.
+  ROW binlog 필수
+- 비결정 함수는 생성 컬럼·인덱스에 사용 불가
+- 평문이 서버 로그에 남는다. 암호화 호출은 평문을 SQL 인자로 받으므로 general
+  log · slow log · performance_schema.events_statements_* · SBR binlog 에 남는다.
+  검색 패턴('%김%')도 평문 PHI 조각이다. UDF 방식의 근본 한계이며 회피할 수 없다
+- 관리형 MySQL 에는 설치할 수 없다 (plugin_dir 접근 불가)
+- component sysvar 는 component 설치 전까지 값이 적용되지 않는다. my.cnf 에
+  `loose_` 접두 없이 적으면 최초 기동이 실패할 수 있다
+- UDF 는 옵티마이저에 불투명하다. 선택도는 다른 술어(scope·status 필터)에 의존한다
+- (개정 A2) `gcm_encrypt_det` 의 nonce 는 평문만의 함수다. **한 키에 대해 같은 평문을 서로 다른 AAD 로
+  암호화하면 (키, nonce) 쌍이 재사용**되고, 두 값을 모두 본 공격자는 GHASH 서브키를 복원해 그 nonce 에
+  대한 태그 위조가 가능해진다. 기밀성은 영향받지 않는다(같은 평문이므로 키스트림이 두 평문을 덮지 않는다).
+  운영 규칙: 동일 키를 사용하는 모든 결정적 호출에서 AAD 를 하나로 고정한다.
+  서버·컬럼·애플리케이션이 달라도 예외가 없으며, 다른 AAD 영역에는 다른 키를 쓴다.
+  무작위 변형에는 이 AAD 고정 제약이 적용되지 않는다.
+  근거·표현은 `spec/envelope.md` §3.
+- (개정 A3) `gcm_decrypt` 는 legacy `0x01`(CBC) 봉투를 받아들이며 이 경로는 **인증되지 않는다**.
+  dual-read 이관이 끝나면 애플리케이션에서 `0x01` 을 거부한다.
+- (개정 A1) 키가 SQL 인자로 전달되므로 general log · slow log · performance_schema · SBR binlog 에
+  키 바이트가 남을 수 있다. `AES_ENCRYPT` 와 동일한 노출면. general log 비활성, slow log 의
+  `log_raw=OFF` 는 도움이 되지 않으므로(UDF 인자는 리터럴) 로그 접근 통제로 대응한다
+- (개정 A5) `gcm.strict` 는 MySQL 9.0 미만에서 **GLOBAL 전용**이다. 8.0·8.4 에서 `SET SESSION gcm.strict`
+  는 `ER_INCORRECT_GLOBAL_LOCAL_VAR` 로 거부된다. 태그 실패 의미론(ON=에러, OFF=NULL)은 모든 버전에서 같다
+- (개정 A7) **계산된 SQL 식을 `gcm_encrypt*` 인자로 직접 넘기지 않는다.** 8.0·8.4 서버가 두 번째 행부터
+  낡은 인자를 건네 조용히 잘못된 평문을 봉인할 수 있다. 컬럼·리터럴·사용자 변수·바인드 파라미터를 쓰고,
+  SQL 안에서 계산해야 하면 먼저 구체화한다 (`CAST` 만으로는 불충분)
+- (개정 A8) **component 설치는 복제되지 않는다.** 복호화 조회를 받는 서버와 승격 대상 replica 에 각각
+  `INSTALL COMPONENT` 하고, 애플리케이션이 그 서버에도 키를 전달할 수 있어야 한다. ROW binlog 는
+  암호문·nonce·태그를 그대로 옮기므로 replica 가 재암호화하지 않는다
+- (개정 A8) **샤딩에서는 무작위 암호문을 라우팅 키로 쓸 수 없고**, `gcm_decrypt(...) LIKE` 만으로는
+  샤드를 고를 수 없다. 안정적 식별자로 라우팅한다. "키마다 AAD 하나" 규칙은 샤드 경계를 넘어 적용되며,
+  결정적 암호문을 샤드 간 비교하려면 키·평문·AAD 가 모두 같아야 한다. 샤딩 미들웨어의 UDF 전달·charset
+  보존 여부는 그 조합으로 별도 검증한다
+
+- (개정 A8) 동일 키를 쓰는 모든 서버·컬럼·애플리케이션의 사용량을 합산하고,
+  배포 전 키당 사용 예산·교체 기준을 보안 검토한다. component 는 사용량 계수·자동 교체를 하지 않는다.
+- (개정 A8) 봉투 복사/복원은 새 암호화가 아니다. 재암호화·결정적 재시도의 조건을 구분하고,
+  DB 복원으로 누적 사용량을 되돌리지 않는다. 사용 이력·난수 상태 안전성이 불확실하면 쓰기를 중단하고,
+  모든 쓰기 주체의 난수 상태를 복구·확인한 뒤 안전하게 생성한 새 키로 재개한다.
+- (개정 A8) 키 교체는 결정적 암호문의 JOIN/UNIQUE 이관과 과거 데이터·백업용 키 보존을 동반한다.
+  가드 훅·벡터·샘플 충돌 테스트는 운영 중 nonce 재사용 탐지나 안전성 증명을 제공하지 않는다.
+
+## 7. 라이선스 — GPLv2 (확정)
+
+**결론: GPLv2 로 확정한다** (2026-09-28). `LICENSE` 에 GPLv2 전문을 두고, 소스에는
+`SPDX-License-Identifier: GPL-2.0-only` 를 표기한다.
+
+근거: MySQL 서버는 GPLv2(FOSS exception)이고 component 는 서버 헤더에 링크한다. 파생물
+판단 시 GPLv2 배포가 안전한 선택이다. Apache/MIT 로 내리는 길은 검토 대상이었으나
+채택하지 않았다. OpenSSL 3 는 Apache-2.0 이고 GPLv2 와의 조합은 MySQL 자신의 FOSS
+exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드한 libcrypto 를 쓰고 별도
+번들·정적 링크를 하지 않으므로(crypto-safety) MySQL 배포와 같은 형태다.
+`GPL-2.0-only` 이며 "or later" 가 아니다: MySQL 이 GPLv2-only 이므로 상향 호환을
+주장하지 않는다.
+
+## 8. 확인된 사실 / 미확인
+
+### 확인됨
+
+| 항목 | 근거 |
+|---|---|
+| MySQL 8.4.11 · 9.4.0 이 GCM/GCM-SIV/SIV/CTR/XTS 거부 | 컨테이너 실측 |
+| 8.0 → 9.7 문서의 모드 목록 불변 | dev.mysql.com 레퍼런스 |
+| MariaDB 도 ECB/CBC/CTR 뿐 | MariaDB 문서 |
+| component 가 UDF 등록 가능 | mysql_service_udf_registration (WL#8020) |
+| component 가 keyring 에서 키 조회 가능 | keyring_reader_with_status |
+| UDF 반환값 charset 지정 가능 (8.0.19+) | mysql_udf_metadata (WL#12370) |
+| AES_ENCRYPT 는 8.0.30+ 에서 KDF(hkdf/pbkdf2_hmac) 지원 | 8.0 레퍼런스 — 참고용 |
+| `udf_registration` · `mysql_udf_metadata` · `component_sys_variable_register`/`_unregister` · `mysql_runtime_error` · `mysql_current_thread_reader` 는 8.0.43 · 8.4.11 · 9.4.0 전부에 있다 | 세 태그의 `include/mysql/components/services/` 실측 |
+| **component sysvar 의 SESSION 스코프와 `mysql_system_variable_reader` 는 9.0.0+ 전용** | 개정 A5 — 세 태그의 `component_sys_var_service.cc` · `mysql_system_variable.h` 실측 |
+| `CONFIGURE_COMPONENTS()` 가 `components/*` 를 glob 하므로 `components/gcm` 에 넣고 재-configure 하면 in-tree 빌드된다 | `cmake/component.cmake` |
+| RHEL9 계열에서 서버 소스가 요구하는 컴파일러는 8.0/8.4 = gcc-toolset-12, **9.x = gcc-toolset-14** | 각 태그 `CMakeLists.txt` 의 `ALTERNATIVE_PATHS`(`LINUX_RHEL9` 분기). 실측: toolset-13 으로는 9.4.0 configure 가 "Could not find devtoolset compiler/linker" 로 실패한다. `docker/versions.json` 의 `rhel9_toolset` 이 이 값의 원본 |
+| 8.0 은 외부 boost(1.77) 필요, 8.4·9.x 는 `extra/boost` 로 번들 | 각 태그 `cmake/boost.cmake` |
+| **한글 부분일치가 native LIKE 로 동작한다** — `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` = 1, `CHARSET()` = `utf8mb4`, 전방·후방일치와 `LIKE '%kim%'`(대소문자 무시)도 1 | Phase S 실측 8.0.43 · 8.4.11 · 9.4.0 (`scripts/verify.sql`, `tests/integration/20_korean_like.sql`) → **decrypt_like 는 불필요** |
+| `gcm_decrypt` + `ORDER BY` + `GROUP BY` 조합에서 `Created_tmp_disk_tables` 증가량 0 | Phase S 실측 8.0.43 · 8.4.11 · 9.4.0 (`build/<ver>/tmp_disk.txt`). 소규모 관측이므로 부하 테스트에서 재확인한다 |
+| `EVP_CIPHER_fetch("AES-256-GCM")` · `EVP_MAC_fetch("HMAC")` 가 세 버전 모두에서 성공 | `INSTALL COMPONENT` 성공 자체가 증거 (init 에서 fetch 실패 시 설치가 실패한다) |
+| 결정적 봉투가 `spec/envelope.md` §5.1 · §5.2 와 바이트 단위로 일치 | Phase S 실측 세 버전 (`tests/integration/11_roundtrip_det.sql`, `40_null_and_edge.sql`) |
+| 32 바이트 아닌 키는 호출마다 거부된다 (0·5·31·33·64) | `tests/unit`, `tests/integration/00_install_and_signature.sql` |
+| **계산된 문자열 식을 인자로 넘기면 8.0·8.4 가 값을 손상시킨다** | 개정 A7 — 세 버전 실측 (`tests/integration/91_server_udf_arg_defect.sql`) |
+| MTR 스위트 `mysql-test/suite/gcm` 가 8.4.11 서버 트리에서 통과하고 `.result` 는 `--record` 산출물 | `scripts/mtr.sh 8.4` 실측. 복제 케이스는 8.4+ 경로인 `include/rpl/*` 를 쓴다 |
+| ROW binlog 에서 primary·replica 의 암호문 바이트가 동일하고, STATEMENT 에서는 무작위 변형이 **갈라진다** | `gcm_replication.test` 실측 — 서버가 SBR 을 unsafe 로 경고하고 replica 가 함수를 재실행해 다른 nonce 를 만든다 |
+| `INSTALL COMPONENT` 는 복제되지 않는다 | 같은 테스트 — replica 에서 UNINSTALL 후 복제된 행을 읽으면 `ER_SP_DOES_NOT_EXIST` |
+| 독립된 두 서버(샤드)가 같은 키·평문·AAD 에 대해 같은 결정적 봉투를 만들고, AAD 가 다르면 달라진다 | `tests/e2e/scenarios/cross_shard_determinism.py` 실측 (8.4) |
+| v1 봉투의 평문이 utf8mb4 가 아니면 결과가 불정 문자열이 되어 `LIKE` 가 조용히 0 을 낸다 | 8.4 실측 (latin1 `Müller` → `4DFC6C6C6572`, `LIKE '%ller%'` = 0). `spec/envelope.md` §2.3 에 MUST 로 기록 |
+| `gcm_encrypt_det` 가 `const_item` 을 선언하면 상수 조회가 UNIQUE 인덱스를 탄다 (`type=const`) | `gcm_envelope.test` 실측. PREPARE 를 다른 파라미터로 재실행해도 값이 캐시되지 않는다 |
+| 바이너리(비 UTF-8) 평문은 `utf8mb4` 요청에도 바이트가 보존된다 | `gcm_null_and_edge.test` 실측 — `binary` → `utf8mb4` 변환은 바이트를 복사한다 |
+| **`args->lengths[i]` 는 변환 *전* 길이다** — 평문 인자를 utf8mb4 로 요청하므로 서버가 넓힌 뒤 component 에 넘긴다. latin1 `VARCHAR(1)` 의 `é` 는 lengths[0]=1 이지만 봉투는 31바이트 | 8.4·9.4 실측: 결과를 구체화하면 엄격 모드에서 `ER_DATA_TOO_LONG`, 비엄격 모드에서는 **30바이트로 잘려 저장되고 복호화가 실패**한다(경고 1265 뿐). 모든 charset 이 문자당 1바이트 이상이므로 `lengths[0]` 이 문자 수의 상한이고 utf8mb4 는 문자당 4바이트 이하 → `4 × lengths[0] + 29` 로 선언한다. `gcm_null_and_edge` 가 두 모드 모두 고정 |
+| `initid->max_length` 는 서버가 `min<uint32>(...)` 로 좁히므로 **uint32 로 먼저 잘린다** | `sql/item_func.cc` 의 `udf_handler::fix_fields`. LONGTEXT 인자(4294967295)에 29 를 더하면 28 로 접혀 봉투가 최소 길이 아래로 잘린다 — 8.4 실측 `ERROR 1406 Data too long`. `udf_glue.h` 의 `envelope_max_length()` 가 포화 연산으로 막고 `gcm_null_and_edge.test` 가 고정한다 |
+| component 는 `mysql_com.h` 를 include 할 수 없다 | 그 뒤의 `my_io.h` 가 `#error This header shall not be included in components` 를 낸다. 9.4.0 빌드에서 실패로 드러났고 8.0·8.4 는 조용히 통과했다 — 세 버전 빌드를 모두 돌려야 잡힌다 |
+| `component_sys_variable_register::register_variable` 은 `*_CHECK_ARG` 의 `def_val` 을 **복사**한다 | `sql/server_component/component_sys_var_service.cc`: `sysvar_bool->def_val = bool_arg->def_val` (my_malloc 한 구조체로). 따라서 스택 지역 check-arg 전달이 안전하다 |
+
+### 미확인 (Phase S 에서 답한다)
+
+- ~~charset 태깅으로 한글 LIKE 가 native collation 대로 동작하는지~~ → **확인됨** (위 표). decrypt_like 는 만들지 않는다
+- ~~gcm_decrypt 가 디스크 temp 테이블에 평문을 남기는지~~ → 소규모에서는 증가량 0 (위 표). 대용량은 `tests/load` 의
+  `created_tmp_disk_tables_delta` 로 계속 관측한다
+- 운영 MySQL 이 자체 운영인지 (ECR 이미지 정황상 그렇게 보이나 미확정)
+- ~~외부 keyring(Vault/KMS)을 운영에 둘 수 있는지~~ → 개정 A1 로 **범위 밖**
+- 부하 기준선: `gcm_decrypt` + LIKE 의 p95 가 `AES_DECRYPT` 대비 1.2배 이내인지 (10k/100k/300k, 동시 1/8/32).
+  `tests/load/run.py --gate` 가 게이트이고 결과는 `docs/perf.md` 에 누적한다
+- 부하 baseline — 릴리스 빌드 + 알려진 하드웨어에서의 수치. 개발 머신 실측만 `docs/perf.md` 에 있다
+
+## 9. 참고
+
+- MySQL: Keyring component services
+- WL#4102 Service registry and component infrastructure
+- WL#8020 Add a UDF registration service
+- WL#12370 Extend the UDF API to handle character sets
+- WL#6781 Support multiple AES Encryption modes
+- Extending MySQL: Adding a Loadable Function
+- Keyring Component Installation

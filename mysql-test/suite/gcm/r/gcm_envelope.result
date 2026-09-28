@@ -1,0 +1,82 @@
+# Given: the fixture key and the spec's worked examples
+# When: the deterministic envelopes are produced
+SELECT HEX(gcm_encrypt_det('홍길동', @k)) AS det_korean_hong;
+det_korean_hong
+03B9C3A065D8C76EA9D627C591BB12160661AD43902EB8263C49815E07483158555819839732
+SELECT HEX(gcm_encrypt_det('', @k)) AS det_empty;
+det_empty
+0378141E6DAF391E6C40D3EA31D6B3F5B6F2F82E3C86118232B25FC0F2
+# Then: they equal spec/envelope.md §5.1 and §5.2 exactly
+# Given: the fixture key
+# When: envelope shapes are measured
+SELECT HEX(LEFT(gcm_encrypt('x', @k), 1)) AS random_version,
+HEX(LEFT(gcm_encrypt_det('x', @k), 1)) AS det_version,
+LENGTH(gcm_encrypt_det('홍길동', @k)) AS det_length,
+LENGTH(gcm_encrypt('홍길동', @k)) AS random_length,
+CHARSET(gcm_encrypt_det('x', @k)) AS envelope_charset;
+random_version	det_version	det_length	random_length	envelope_charset
+02	03	38	38	binary
+# Then: versions 02 and 03, plaintext + 29 bytes, binary result
+# Given: three rows carrying the same plaintext
+CREATE TABLE two_rows (n INT);
+INSERT INTO two_rows VALUES (1), (2), (3);
+# When: the random variant encrypts it once per row and the result is stored
+# (stored first because COUNT(DISTINCT gcm_encrypt('x', @k)) over N rows
+#  returns 1 — the server evaluates that constant expression once per
+#  aggregate, so counting it directly would pass even with a reused nonce)
+CREATE TABLE sealed_rows AS SELECT n, gcm_encrypt('홍길동', @k) AS c FROM two_rows;
+SELECT COUNT(*) AS rows_sealed, COUNT(DISTINCT c) AS distinct_envelopes,
+MIN(LENGTH(c)) AS envelope_length,
+SUM(gcm_decrypt(c, @k) = '홍길동') AS all_decrypt
+FROM sealed_rows;
+rows_sealed	distinct_envelopes	envelope_length	all_decrypt
+3	3	38	3
+# Then: one fresh nonce per row, and every envelope still opens
+DROP TABLE sealed_rows;
+DROP TABLE two_rows;
+# Given: the fixture key
+# When: the deterministic variant is called twice
+SELECT gcm_encrypt_det('홍길동', @k) = gcm_encrypt_det('홍길동', @k) AS det_stable;
+det_stable
+1
+# Then: identical bytes, which is what makes join keys and UNIQUE work
+# Given: a unique index over a deterministic ciphertext column
+CREATE TABLE patient (id INT PRIMARY KEY, emr VARBINARY(64), UNIQUE KEY uq (emr));
+INSERT INTO patient VALUES (1, gcm_encrypt_det('EMR-001', @k)), (2, gcm_encrypt_det('EMR-002', @k));
+# When: a constant deterministic value is used as the lookup key
+# (only the access type and the chosen key matter; the rest of EXPLAIN is noise)
+EXPLAIN SELECT id FROM patient WHERE emr = gcm_encrypt_det('EMR-001', @k);
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+#	#	#	#	const	#	uq	#	#	#	#	#
+Warnings:
+#	#	#
+SELECT id FROM patient WHERE emr = gcm_encrypt_det('EMR-001', @k);
+id
+1
+# Then: type=const on the unique key, not a scan. gcm_encrypt_det declares
+#       const_item so the optimizer may fold it; gcm_encrypt must not, and does not
+# Given: a prepared statement over the deterministic function
+PREPARE seal FROM 'SELECT HEX(gcm_encrypt_det(?, ?)) AS env';
+SET @a = 'EMR-001';
+SET @b = 'EMR-002';
+# When: it is executed twice with different parameters
+EXECUTE seal USING @a, @k;
+env
+036B814673C20EEC8EC2355EEE05904425DBD5DCEA1D5187CB580CE620F50250893C7C93
+EXECUTE seal USING @b, @k;
+env
+03F6D08E562022E50CC6A856FB837EA096623601AEEBA4DB5A0A51201FA4D5469DBC124A
+# Then: two different envelopes — folding a constant expression must not cache
+#       a value across executions with different parameters
+DEALLOCATE PREPARE seal;
+SELECT HEX(gcm_encrypt_det('EMR-001', @k)) AS expected_for_a,
+HEX(gcm_encrypt_det('EMR-002', @k)) AS expected_for_b;
+expected_for_a	expected_for_b
+036B814673C20EEC8EC2355EEE05904425DBD5DCEA1D5187CB580CE620F50250893C7C93	03F6D08E562022E50CC6A856FB837EA096623601AEEBA4DB5A0A51201FA4D5469DBC124A
+# Given: the same table
+# When: a column drives the deterministic function
+SELECT COUNT(DISTINCT gcm_encrypt_det(emr, @k)) AS distinct_over_rows FROM patient;
+distinct_over_rows
+2
+# Then: 2 — a column argument is still evaluated per row
+DROP TABLE patient;

@@ -1,0 +1,27 @@
+name: load
+on:
+  schedule: [{ cron: "0 18 * * *" }]   # 03:00 KST nightly
+  workflow_dispatch:
+    inputs: { rows: { default: "300000" } }
+permissions: { contents: read }
+jobs:
+  load:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/build-in-docker.sh 8.4
+      # verify.sh uninstalls the component when it finishes, so the load run has to
+      # install it again before it can call the functions.
+      - run: scripts/verify.sh 8.4
+      - name: Install the component for the load run
+        run: |
+          set -euo pipefail
+          dir=$(docker exec mysql-dev-8.4 mysql -uroot -N -e 'SELECT @@plugin_dir')
+          docker cp build/8.4/component_gcm.so "mysql-dev-8.4:${dir}component_gcm.so"
+          docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_gcm'"
+          echo "MYSQL_PORT=$(docker port mysql-dev-8.4 3306/tcp | head -1 | cut -d: -f2)" >> "$GITHUB_ENV"
+      - run: pip install PyMySQL && python tests/load/run.py --rows "${{ inputs.rows || '300000' }}" --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json --out load-result.json
+        env: { MYSQL_HOST: "127.0.0.1" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: load-result, path: load-result.json }

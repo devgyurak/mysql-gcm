@@ -1,0 +1,70 @@
+include/rpl/init_source_replica.inc
+Warnings:
+Note	####	Sending passwords in plain text without SSL/TLS is extremely insecure.
+Note	####	Storing MySQL user name or password information in the connection metadata repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START REPLICA; see the 'START REPLICA Syntax' in the MySQL Manual for more information.
+[connection master]
+# Given: a primary row with a random-nonce and a deterministic value, and the
+#        hex of both captured in a table so the comparison survives the hop
+#        (user variables are per-connection and would not)
+CREATE TABLE gcm_repl (id INT PRIMARY KEY, rnd VARBINARY(128), det VARBINARY(128));
+INSERT INTO gcm_repl VALUES (1, gcm_encrypt('홍길동', @k), gcm_encrypt_det('홍길동', @k));
+CREATE TABLE gcm_expected (id INT PRIMARY KEY, rnd_hex TEXT, det_hex TEXT);
+INSERT INTO gcm_expected SELECT id, HEX(rnd), HEX(det) FROM gcm_repl;
+# When: the changes reach the replica
+include/rpl/sync_to_replica.inc
+# Then: the replica holds the identical bytes and decrypts them to the plaintext
+SELECT r.id,
+HEX(r.rnd) = e.rnd_hex AS random_bytes_identical,
+HEX(r.det) = e.det_hex AS det_bytes_identical,
+gcm_decrypt(r.rnd, @k) AS decrypted_random,
+gcm_decrypt(r.det, @k) LIKE '%길%' AS korean_like_on_replica
+FROM gcm_repl r JOIN gcm_expected e ON e.id = r.id;
+id	random_bytes_identical	det_bytes_identical	decrypted_random	korean_like_on_replica
+1	1	1	홍길동	1
+# Given: the component uninstalled on the replica only
+# When: the primary still has it installed and writes another row
+INSERT INTO gcm_repl VALUES (2, gcm_encrypt('김철수', @k), gcm_encrypt_det('김철수', @k));
+include/rpl/sync_to_replica.inc
+# Then: the row arrived as bytes, but the replica cannot decrypt it. INSTALL
+#       COMPONENT is per server and is not replicated, so every server that
+#       answers decryption queries, and every promotion candidate, needs its own
+#       install (docs/design.md amendment A8)
+SELECT COUNT(*) AS replicated_rows FROM gcm_repl;
+replicated_rows
+2
+SELECT gcm_decrypt(rnd, @k) FROM gcm_repl WHERE id = 2;
+ERROR 42000: FUNCTION test.gcm_decrypt does not exist
+# Given: the component installed again on the replica, and statement-based
+#        binary logging on the primary — the format this design forbids
+SET @saved_binlog_format = @@SESSION.binlog_format;
+Warnings:
+Warning	1287	'@@binlog_format' is deprecated and will be removed in a future release.
+SET SESSION binlog_format = STATEMENT;
+# When: a random-nonce and a deterministic value are written under it
+INSERT INTO gcm_repl VALUES (3, gcm_encrypt('박길동', @k), gcm_encrypt_det('박길동', @k));
+Warnings:
+Note	1592	Unsafe statement written to the binary log using statement format since BINLOG_FORMAT = STATEMENT. Statement is unsafe because it uses a UDF which may not return the same value on the replica.
+# Then: the server itself flags the statement as unsafe for logging, because a
+#       loadable function may not return the same value on the replica
+SHOW WARNINGS;
+Level	Code	Message
+Note	1592	Unsafe statement written to the binary log using statement format since BINLOG_FORMAT = STATEMENT. Statement is unsafe because it uses a UDF which may not return the same value on the replica.
+SET SESSION binlog_format = @saved_binlog_format;
+CREATE TABLE sbr_expected AS
+SELECT id, HEX(rnd) AS rnd_hex, HEX(det) AS det_hex FROM gcm_repl WHERE id = 3;
+include/rpl/sync_to_replica.inc
+# Then: the replica re-executed the statement, so the random-nonce value
+#       DIVERGED while the deterministic one — a pure function of plaintext and
+#       key — did not. This is the whole reason ROW binlog is mandatory
+#       (design §6): under STATEMENT the primary and replica disagree about
+#       ciphertext that the application believes is the same row.
+SELECT HEX(r.rnd) = e.rnd_hex AS random_matches_primary,
+HEX(r.det) = e.det_hex AS det_matches_primary
+FROM gcm_repl r JOIN sbr_expected e ON e.id = r.id;
+random_matches_primary	det_matches_primary
+0	1
+DROP TABLE sbr_expected;
+DROP TABLE gcm_expected;
+DROP TABLE gcm_repl;
+include/rpl/sync_to_replica.inc
+include/rpl/deinit.inc

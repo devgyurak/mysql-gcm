@@ -1,0 +1,25 @@
+# gitleaks configuration for mysql-gcm.
+#
+# The scan is a real gate: a key that reaches this repository is an incident. Exactly two
+# paths are allowlisted, and both hold values that are public by construction.
+#
+#   spec/test-vectors.json   NIST CAVP GCM known-answer vectors plus this project's own
+#                            fixtures. Every key_hex in it is either published by NIST or
+#                            the documented 000102..1f fixture pattern. crypto-safety.md
+#                            names this file as the single exception to "no key bytes in
+#                            the repository", and testing.md requires the vectors to live
+#                            in one place so no test can paste values of its own.
+#   spec/envelope.md         quotes the same fixture key in its worked examples, because a
+#                            reader has to be able to reproduce the byte sequences.
+#
+# Anything else that trips a rule is a finding to act on, not to add here. Widening this
+# list needs the same review as a change to the cryptographic path.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public NIST CAVP vectors and the documented fixture key"
+paths = [
+  '''spec/test-vectors\.json$''',
+  '''spec/envelope\.md$''',
+]

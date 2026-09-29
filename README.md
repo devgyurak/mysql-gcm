@@ -19,14 +19,19 @@
 `gcm_encrypt`, `gcm_encrypt_det` and `gcm_decrypt` are registered as a MySQL **component** (not a
 legacy UDF plugin). The decrypted value is charset-tagged `utf8mb4`, so MySQL's own collation drives
 `LIKE '%길%'` **inside the server** — keeping partial-match search on encrypted columns, which is the
-reason this project exists. On a developer machine at 100,000 rows the server-side filter measures
-**41 ms p95**, where `docs/design.md` §1.2 estimates ~1.1 s for pulling the same candidate set into
-the application and decrypting it there. Those are indicative numbers, not a release baseline —
-`docs/perf.md` says what was measured and on what.
+reason this project exists. On CI hardware, **300,000 rows are scanned, decrypted and matched in
+244 ms p95** on one session — and GCM lands at **0.87–0.91x** of the `AES_DECRYPT` baseline at every
+measured point, so the authenticated cipher is not the cost here; the row scan is, and both variants
+pay it. `docs/design.md` §1.2 estimates ~1.1 s for pulling just 100,000 candidate rows into the
+application and decrypting them there. `docs/perf.md` has the three runs behind those numbers.
 
-> **Status: Phase 2 (implementation).** Builds in-tree against MySQL 8.0, 8.4 and 9.x, installs, and
-> passes unit, integration, MTR, E2E and load suites. **Not released**: no published artifacts, no
-> load baseline on reference hardware, no legal sign-off on the license. See `docs/design.md`.
+> **Status: ready to tag 0.1.0.** Builds in-tree against MySQL 8.0, 8.4 and 9.x and passes the unit
+> and integration suites on all three majors in CI, plus MTR, E2E and load on 8.4. The envelope format is frozen
+> (`spec/envelope.md`), the load gate is set from three measured runs on CI hardware, and the release
+> pipeline has been dry-run end to end — six artifacts, all three server images started and queried,
+> checksums signed and the signature verified independently. **Nothing is published yet**: no tag, so
+> no GitHub Release and no Docker Hub tags. The standing caveat is unchanged — **no independent
+> cryptographic review** (constraint 13).
 
 ## Read this first — operational constraints
 

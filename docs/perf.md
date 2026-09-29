@@ -10,7 +10,16 @@ SELECT COUNT(*) FROM patients WHERE gcm_decrypt(name_gcm, @k) LIKE '%김%';
 SELECT COUNT(*) FROM patients WHERE AES_DECRYPT(name_cbc, @k, @iv) LIKE '%김%';   -- baseline
 ```
 
-over the same plaintexts in two columns, after 3 warm-up runs, 20 measured runs per session.
+over the same plaintexts in two columns, after 3 warm-up runs, 20 measured runs per session. Each
+session alternates the two variants per iteration, and alternates which of the pair goes first, so
+neither a slow period on the host nor a warm cache can favour one of them. The consequence to keep in
+mind when reading the concurrency axis: at 8 or 32 sessions the server sees a *mixture* of GCM and
+`AES_DECRYPT` work, not 8 or 32 concurrent GCM queries. That is the right shape for a ratio and the
+wrong shape for an absolute capacity number.
+
+p95 is the nearest-rank percentile — the smallest sample at or above rank `ceil(0.95n)`. It used to be
+computed one rank too high, which at 20 samples is the maximum, so a "p95" at one session was really
+the worst single request of twenty.
 
 ## Gate
 
@@ -33,11 +42,16 @@ acceptable, and updates this file in the same change.
 
 ## Results
 
-### Developer-machine run (indicative only — NOT the baseline)
+### Developer-machine run (indicative only — NOT the baseline, and a previous harness)
 
 Docker on an arm64 macOS laptop, MySQL 8.4.11 in a container, `RelWithDebInfo` component build.
 Recorded to prove the harness and the gate work end to end, and to sanity-check the premise of
 `docs/design.md` §1.2. Do not treat these as the release baseline: the host is shared and noisy.
+
+These numbers also came from the **earlier harness**, which measured every GCM session and then every
+AES session and computed p95 one rank too high. They are not comparable point-for-point with the
+release baseline below; they are kept because they are what the design's §1.2 premise was first
+checked against.
 
 | Rows | Sessions | gcm p50 | gcm p95 | aes p50 | aes p95 | p95 ratio | tmp disk delta |
 |---|---|---|---|---|---|---|---|

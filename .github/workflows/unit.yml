@@ -4,6 +4,11 @@ on:
   push: { branches: [main, develop] }
   schedule: [{ cron: "0 17 * * *" }]   # 02:00 KST nightly, for the 1M collision run
 permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   cpp-asan:
     runs-on: ubuntu-24.04

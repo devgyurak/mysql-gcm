@@ -17,19 +17,23 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/smoke-image.sh <image>
+usage: scripts/smoke-image.sh <image> <major>
 
   <image>  a locally available image built from docker/server.Dockerfile,
            e.g. devgyurak/mysql-gcm-server:0.1.0-mysql8.4-amd64
+  <major>  the MySQL major that image is supposed to be, as docker/versions.json
+           keys it: 8.0, 8.4 or 9
 
-Starts the image on a throwaway container and port, asserts the component is installed
-and that a Korean partial match over a decrypted value returns a hit, then removes it.
+Starts the image on a throwaway container, asserts the component is installed, that the
+server really is that major, and that a Korean partial match over a decrypted value
+returns a hit, then removes the container.
 USAGE
   exit 2
 }
 
-[ $# -eq 1 ] || usage
+[ $# -eq 2 ] || usage
 image=$1
+major=$2
 name="gcm-smoke-$$"
 
 cleanup() {
@@ -42,7 +46,6 @@ trap cleanup EXIT
 # answers before the init scripts — including ours — have run. Same reason as dev-up.sh.
 docker run -d --name "${name}" \
   -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
-  -p 0:3306 \
   --health-cmd='mysqladmin ping -h 127.0.0.1 -P 3306 -uroot --silent' \
   --health-interval=2s \
   --health-retries=60 \
@@ -68,11 +71,21 @@ until docker exec "${name}" mysql -uroot -N -e 'SELECT 1' >/dev/null 2>&1; do
   sleep 1
 done
 
-# The fixture key is the public 00..1f pattern from spec/test-vectors.json, and it is
-# fine for it to appear here: it protects nothing (crypto-safety, key handling).
-observed=$(docker exec "${name}" mysql -uroot -N -B -e "
+# --default-character-set=utf8mb4 because the statement contains Korean literals: without
+# it the client announces whatever the container's locale implies and the comparison would
+# be testing the client's encoding rather than the component.
+#
+# The major is checked against VERSION(). A component links against the server it was built
+# for, so the one mapping that nothing else in the pipeline can catch is a consistently
+# wrong one — docker/versions.json pairing the "9" key with an 8.4 image, built with an 8.4
+# .so. Everything would install and work, and the published mysql9 tag would be 8.4.
+#
+# The fixture key is the public 00..1f pattern from spec/test-vectors.json, and it is fine
+# here because it protects nothing (crypto-safety, key handling).
+observed=$(docker exec "${name}" mysql -uroot -N -B --default-character-set=utf8mb4 -e "
 SET @k = UNHEX('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');
 SELECT (SELECT COUNT(*) FROM mysql.component WHERE component_urn = 'file://component_gcm') AS installed,
+       LEFT(VERSION(), CHAR_LENGTH('${major}')) = '${major}' AS major_matches,
        gcm_decrypt(gcm_encrypt_det('홍길동', @k), @k) LIKE '%길%' AS korean_like,
        CHARSET(gcm_decrypt(gcm_encrypt_det('x', @k), @k)) AS result_charset,
        @@GLOBAL.\`gcm\`.\`strict\` AS strict_default;" 2>&1) || {
@@ -82,12 +95,14 @@ SELECT (SELECT COUNT(*) FROM mysql.component WHERE component_urn = 'file://compo
   exit 1
 }
 
-expected=$'1\t1\tutf8mb4\t1'
+expected=$'1\t1\t1\tutf8mb4\t1'
 if [ "${observed}" != "${expected}" ]; then
   echo "${image} smoke check mismatch" >&2
-  echo "  expected: installed korean_like result_charset strict_default = ${expected//$'\t'/ }" >&2
+  echo "  columns:  installed major_matches korean_like result_charset strict_default" >&2
+  echo "  expected: ${expected//$'\t'/ }" >&2
   echo "  observed: ${observed//$'\t'/ }" >&2
+  echo "  server:   $(docker exec "${name}" mysql -uroot -N -B -e 'SELECT VERSION()' 2>&1)" >&2
   exit 1
 fi
 
-echo "${image}: component installed, Korean LIKE hit, result utf8mb4, strict ON by default"
+echo "${image}: component installed, server is ${major}, Korean LIKE hit, result utf8mb4, strict ON"

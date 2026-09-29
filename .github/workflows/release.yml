@@ -27,20 +27,35 @@ jobs:
         with: { fetch-depth: 0 }   # merge-base below needs history, not just the tag
       - id: resolve
         name: Resolve the version and whether this run publishes
+        env:
+          # Through the environment, never interpolated into the script. `${{ inputs.x }}`
+          # is substituted as *text* before bash sees it, so a dispatch with
+          # `-f version='x"; id; #'` would run in this job.
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" != "push" ]; then
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            # Validated too: the value becomes an archive name, an artifact name and an
+            # image label, so an empty string or one with a slash breaks the run somewhere
+            # later and less clearly than here.
+            if ! printf '%s' "${VERSION_INPUT}" | grep -qE '^[0-9A-Za-z][0-9A-Za-z.-]*$'; then
+              echo "::error::version input must be alphanumeric with dots and dashes"
+              exit 1
+            fi
+            echo "version=${VERSION_INPUT}" >> "$GITHUB_OUTPUT"
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "dry run: building and checking everything, publishing nothing"
             exit 0
           fi
 
           version="${GITHUB_REF_NAME#v}"
-          case "${version}" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::tag ${GITHUB_REF_NAME} is not vMAJOR.MINOR.PATCH" ; exit 1 ;;
-          esac
+          # Exactly three numeric components. The glob this replaces also accepted
+          # `1.2.3.4`, `1abc.2.3` and `0.1.0-rc1` — and a prerelease reaching this branch
+          # would be published as a normal release *and* move the `mysql<major>` tag to it.
+          if ! printf '%s' "${version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
 
           # The release rule is: merge develop into main, then tag main. A v* tag anywhere
           # else would otherwise publish history that never went through main.
@@ -51,8 +66,10 @@ jobs:
           fi
 
           # Release notes are written by hand, before the tag. Publishing a version with no
-          # CHANGELOG section means nobody decided what this release is.
-          if ! grep -q "^## ${version}\b" CHANGELOG.md; then
+          # CHANGELOG section means nobody decided what this release is. The delimiter is
+          # explicit: `\b` treats `-` as a boundary, so `## 0.1.0-rc1` satisfied a search
+          # for version 0.1.0.
+          if ! grep -qE "^## ${version//./\\.}( |$)" CHANGELOG.md; then
             echo "::error::CHANGELOG.md has no '## ${version}' section"
             exit 1
           fi
@@ -89,9 +106,15 @@ jobs:
   # nothing else would notice a .so installed into the wrong plugin_dir or paired with the
   # wrong server major.
   #
-  # Needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them the
-  # push step fails and the GitHub Release below still publishes — the tarballs do not
-  # depend on it.
+  # The `-amd64` / `-arm64` tags are components of the multi-arch tag, not the tags anyone
+  # is told to pull (README documents `<version>-mysql<major>` and `mysql<major>` only).
+  # They are pushed as each matrix entry finishes, so a run that fails part way can leave
+  # some of them behind with no joined tag and no GitHub Release: delete those before
+  # re-running the tag.
+  #
+  # Needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them this
+  # job fails, and `package` needs it, so the release fails as a whole rather than shipping
+  # tarballs for images that were never published.
   image:
     needs: [guard, build]
     strategy:
@@ -134,7 +157,7 @@ jobs:
             GCM_VERSION=${{ needs.guard.outputs.version }}
           tags: "mysql-gcm-server:candidate"
       - name: Start the image and query it
-        run: scripts/smoke-image.sh mysql-gcm-server:candidate
+        run: scripts/smoke-image.sh mysql-gcm-server:candidate "${{ matrix.mysql }}"
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.guard.outputs.publish == 'true'
         with:
@@ -177,8 +200,14 @@ jobs:
           done
           docker buildx imagetools inspect "${repo}:${VERSION}-mysql${major}"
 
+  # needs `image`, not just `build`: a .so that fails scripts/smoke-image.sh is a broken
+  # .so, and the tarball would carry the same bytes. Gating the Release on the whole image
+  # matrix is also what makes the release atomic in the sense SECURITY.md promises — if any
+  # part of it fails, nothing appears under a name the documentation tells anyone to use.
+  # The cost is that a Docker Hub outage fails the release rather than degrading it, which
+  # is the intended trade: re-running the tag is cheap, un-publishing is not.
   package:
-    needs: [guard, build]
+    needs: [guard, build, image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write   # the GitHub Release
@@ -204,27 +233,41 @@ jobs:
             find dist -type f >&2
             exit 1
           }
-          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with: { path: ., output-file: dist/sbom.spdx.json }
+      # After the SBOM, so the checksums cover it too. SHA256SUMS is the only signed file,
+      # and it is only worth signing if it covers everything a consumer downloads.
+      - name: Checksum everything in the release
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum ./component_gcm-*.tar.gz ./sbom.spdx.json > SHA256SUMS)
+          cat dist/SHA256SUMS
       # Keyless: the signature is bound to this workflow's OIDC identity, so a verifier
-      # checks *which workflow in which repository* produced the checksums, not whether
-      # somebody holds a key. Only SHA256SUMS is signed — it covers every archive.
-      #   cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
-      #     --certificate-identity-regexp 'https://github.com/devgyurak/mysql-gcm/.*' \
-      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+      # checks *which workflow at which ref* produced the checksums, not whether somebody
+      # holds a key.
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign the checksum file
+        env:
+          PUBLISH: ${{ needs.guard.outputs.publish }}
         run: |
           set -euo pipefail
           cosign sign-blob --yes \
             --output-signature dist/SHA256SUMS.sig \
             --output-certificate dist/SHA256SUMS.pem \
             dist/SHA256SUMS
+          # The identity has to name the workflow *and* the ref. Matching the repository
+          # alone would accept anything it ever signed — including a dry run, which signs
+          # with the same OIDC identity at a branch ref and uploads the result as a public
+          # build artifact. A dry run therefore checks itself against the branch form, and
+          # only a tag run satisfies the form the documentation gives to consumers.
+          identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/heads/"
+          if [ "${PUBLISH}" = "true" ]; then
+            identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/tags/v"
+          fi
           cosign verify-blob \
             --certificate dist/SHA256SUMS.pem \
             --signature dist/SHA256SUMS.sig \
-            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-identity-regexp "${identity}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             dist/SHA256SUMS
       # A dry run keeps the same artifacts as a build artifact instead of a Release, so the

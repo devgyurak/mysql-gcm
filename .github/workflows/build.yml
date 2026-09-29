@@ -1,6 +1,11 @@
 name: build
 on: { pull_request: {}, push: { branches: [main, develop], tags: ["v*"] } }
 permissions: { contents: read, packages: write }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   matrix:
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}

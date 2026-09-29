@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import statistics
@@ -153,14 +154,31 @@ def time_one_session(runs: int) -> dict[str, list[float]]:
                 scalar(conn, QUERIES[variant], query_args(variant))
 
         timings: dict[str, list[float]] = {variant: [] for variant in QUERIES}
-        for _ in range(runs):
-            for variant in QUERIES:
+        variants = list(QUERIES)
+        for index in range(runs):
+            # And alternate which of the pair goes first. Interleaving fixes the *between
+            # variants* drift, but a fixed order inside each pair still hands one of them
+            # whatever the other just warmed or evicted, every single iteration.
+            order = variants if index % 2 == 0 else variants[::-1]
+            for variant in order:
                 started = time.perf_counter()
                 scalar(conn, QUERIES[variant], query_args(variant))
                 timings[variant].append((time.perf_counter() - started) * 1000.0)
         return timings
     finally:
         conn.close()
+
+
+def percentile(ordered: list[float], fraction: float) -> float:
+    """Nearest-rank percentile: the smallest sample at or above the rank.
+
+    `int(len * 0.95)` is one too high. At 20 samples it evaluates to 20, which after the
+    0-based index is the *maximum* — so "p95" at one session was the single worst of 20
+    requests, and a 1.05 gate on it would fail whenever one request happened to be 15%
+    slow. The rank is ceil(0.95 * n), which is 19 of 20.
+    """
+    rank = math.ceil(fraction * len(ordered))
+    return ordered[min(len(ordered) - 1, max(rank - 1, 0))]
 
 
 def summarise(rows: int, concurrency: int, variant: str, timings: list[float]) -> Measurement:
@@ -170,7 +188,7 @@ def summarise(rows: int, concurrency: int, variant: str, timings: list[float]) -
         concurrency=concurrency,
         variant=variant,
         p50_ms=round(statistics.median(ordered), 3),
-        p95_ms=round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))], 3),
+        p95_ms=round(percentile(ordered, 0.95), 3),
         max_ms=round(ordered[-1], 3),
     )
 

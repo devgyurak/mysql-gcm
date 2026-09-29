@@ -606,7 +606,8 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 - 부하 기준선: `gcm_decrypt` + LIKE 의 p95 가 `AES_DECRYPT` 대비 1.2배 이내인지 (10k/100k/300k, 동시 1/8/32).
   0.1.0 에서 CI 러너(ubuntu-24.04, 8.4.11, 300k 행) 3회 측정으로 확정: 비율 0.87~0.91, 직렬 p95 244~266ms. 게이트는 약속(1.2배)이 아니라 측정값에서 유도한 1.05배로 강제한다 — 근거와 표는 `docs/perf.md`.
   `tests/load/run.py --gate` 가 게이트이고 결과는 `docs/perf.md` 에 누적한다
-- 부하 baseline — 릴리스 빌드 + 알려진 하드웨어에서의 수치. 개발 머신 실측만 `docs/perf.md` 에 있다
+- ~~부하 baseline — 릴리스 빌드 + 알려진 하드웨어에서의 수치~~ → **확인됨**: CI 러너에서 3회 측정하고
+  `tests/load/baseline.json` 의 게이트를 그 값에서 유도했다 (`docs/perf.md` "Release baseline — 0.1.0")
 
 ## 9. 참고
 

@@ -6,6 +6,11 @@ on:
     inputs:
       mysql: { description: "MySQL major to run against (8.0 | 8.4 | 9)", default: "8.4" }
 permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Builds its own .so: actions/download-artifact@v4 cannot reach another workflow run,
   # so downloading build.yml's output here would leave this gate vacuously green.

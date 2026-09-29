@@ -22,7 +22,10 @@ x-server: &server
   environment:
     MYSQL_ALLOW_EMPTY_PASSWORD: "1"
   healthcheck:
-    test: ["CMD", "mysqladmin", "ping", "-uroot", "--silent"]
+    # Over TCP, not the socket: during a fresh initialisation the official image runs a
+    # temporary server that listens on the socket only (`port: 0`), and a socket ping
+    # would report healthy while that server is about to be stopped and replaced.
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306", "-uroot", "--silent"]
     interval: 2s
     timeout: 5s
     retries: 30

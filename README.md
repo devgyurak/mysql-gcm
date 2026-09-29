@@ -204,7 +204,7 @@ Every layer runs against a real server except the unit suite, which links libcry
 
 | Layer | What it proves | Command |
 |:--|:--|:--|
-| **unit** — 1,434 cases, ASan + UBSan | NIST CAVP KAT, every spec vector, envelope boundaries, key wiping, nonce-collision sampling | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| **unit** — 1,434 cases, ASan + UBSan | NIST CAVP KAT, every spec vector, envelope boundaries, key wiping, nonce-collision sampling | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | **integration** — 10 scenarios × 3 majors | Korean `LIKE`, strict semantics and its per-version scope, NULL and size edges, v1 dual-read, the 8.x argument defect | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | **MTR** — 7 tests | the same surface inside the server's own harness, plus ROW replication and the SBR divergence | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 scenarios | primary + replica + an independent shard, over SQL only | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |

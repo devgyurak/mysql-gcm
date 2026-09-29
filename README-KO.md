@@ -197,7 +197,7 @@ SELECT id FROM patients WHERE gcm_decrypt(name_enc, @k) LIKE '%길%';   -- 서�
 
 | 계층 | 무엇을 보증하는가 | 명령 |
 |:--|:--|:--|
-| **단위** — 1,434 케이스, ASan + UBSan | NIST CAVP KAT, 스펙 벡터 전체, 봉투 경계, 키 소거, nonce 충돌 샘플링 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| **단위** — 1,434 케이스, ASan + UBSan | NIST CAVP KAT, 스펙 벡터 전체, 봉투 경계, 키 소거, nonce 충돌 샘플링 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | **통합** — 10 시나리오 × 3 메이저 | 한글 `LIKE`, strict 의미론과 버전별 범위, NULL·크기 경계, v1 dual-read, 8.x 인자 결함 | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | **MTR** — 7 테스트 | 서버 자체 하니스에서의 같은 표면 + ROW 복제와 SBR 불일치 | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 시나리오 | primary + replica + 독립 샤드, SQL 만으로 | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |

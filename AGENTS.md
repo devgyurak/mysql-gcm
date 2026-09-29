@@ -70,7 +70,7 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 |---|---|---|
 | 개발 서버 기동 | `scripts/dev-up.sh 8.4` | `dev-container` |
 | component 빌드 (서버 소스 트리 in-tree) | `scripts/build-in-docker.sh 8.4` | `mysql-component` |
-| 단위 테스트 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` | `unit-tests` |
+| 단위 테스트 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` | `unit-tests` |
 | 통합 스모크 | `scripts/verify.sh 8.4` (컨테이너에 .so 설치 후 SQL 시나리오 diff) | `integration-tests` |
 | MTR | `scripts/mtr.sh 8.4` (`GCM_RECORD=1` 로 `.result` 재생성) | `integration-tests` |
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |

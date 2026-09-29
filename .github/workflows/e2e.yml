@@ -1,6 +1,6 @@
 name: e2e
 on:
-  push: { branches: [main] }
+  push: { branches: [main, develop] }
   pull_request: { types: [labeled, synchronize] }
   workflow_dispatch:
     inputs:

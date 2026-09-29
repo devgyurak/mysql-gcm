@@ -135,31 +135,35 @@ def query_args(variant: str) -> tuple[object, ...]:
     return (FIXTURE_KEY_HEX, IV_HEX, f"%{NEEDLE}%")
 
 
-def time_one_session(variant: str, runs: int) -> list[float]:
-    """Runs the query `runs` times on its own connection, returning milliseconds."""
+def time_one_session(runs: int) -> dict[str, list[float]]:
+    """Times both variants on one connection, alternating between them.
+
+    Interleaved on purpose. Running every GCM session and then every AES session
+    measures two different time windows, so anything that makes the host slow for a
+    while — a noisy neighbour on a shared runner, a checkpoint, another job on the same
+    machine — lands on one variant and shows up as a ratio. Alternating puts both under
+    the same ambient load and the same contention, which is what the ratio is supposed
+    to be about.
+    """
     conn = connect()
     try:
         execute(conn, "SET SESSION block_encryption_mode = 'aes-256-cbc'")
-        sql = QUERIES[variant]
-        args = query_args(variant)
-        for _ in range(WARMUP_RUNS):
-            scalar(conn, sql, args)
-        timings: list[float] = []
+        for variant in QUERIES:
+            for _ in range(WARMUP_RUNS):
+                scalar(conn, QUERIES[variant], query_args(variant))
+
+        timings: dict[str, list[float]] = {variant: [] for variant in QUERIES}
         for _ in range(runs):
-            started = time.perf_counter()
-            scalar(conn, sql, args)
-            timings.append((time.perf_counter() - started) * 1000.0)
+            for variant in QUERIES:
+                started = time.perf_counter()
+                scalar(conn, QUERIES[variant], query_args(variant))
+                timings[variant].append((time.perf_counter() - started) * 1000.0)
         return timings
     finally:
         conn.close()
 
 
-def measure(rows: int, concurrency: int, variant: str) -> Measurement:
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [
-            pool.submit(time_one_session, variant, MEASURED_RUNS) for _ in range(concurrency)
-        ]
-        timings = [t for future in futures for t in future.result()]
+def summarise(rows: int, concurrency: int, variant: str, timings: list[float]) -> Measurement:
     ordered = sorted(timings)
     return Measurement(
         rows=rows,
@@ -169,6 +173,19 @@ def measure(rows: int, concurrency: int, variant: str) -> Measurement:
         p95_ms=round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))], 3),
         max_ms=round(ordered[-1], 3),
     )
+
+
+def measure(rows: int, concurrency: int) -> list[Measurement]:
+    """One run at this concurrency, producing a Measurement per variant."""
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(time_one_session, MEASURED_RUNS) for _ in range(concurrency)]
+        per_session = [future.result() for future in futures]
+
+    merged: dict[str, list[float]] = {variant: [] for variant in QUERIES}
+    for session in per_session:
+        for variant, values in session.items():
+            merged[variant] += values
+    return [summarise(rows, concurrency, variant, merged[variant]) for variant in QUERIES]
 
 
 def tmp_disk_tables(conn: Connection) -> int:
@@ -229,8 +246,7 @@ def main() -> int:
 
         measurements: list[Measurement] = []
         for concurrency in concurrencies:
-            measurements.append(measure(args.rows, concurrency, "gcm"))
-            measurements.append(measure(args.rows, concurrency, "aes"))
+            measurements += measure(args.rows, concurrency)
 
         disk_after = status_value(setup, "Created_tmp_disk_tables")
         version = str(scalar(setup, "SELECT VERSION()"))

@@ -79,11 +79,12 @@ std::vector<Vector> vectors_where(const std::string &expect, const std::string &
   return out;
 }
 
-const Vector &vector_by_id(const std::string &id) {
+const Vector &vector_by_id(std::string_view id) {
   for (const Vector &v : all_vectors()) {
     if (v.id == id) return v;
   }
-  std::fprintf(stderr, "no vector with id %s\n", id.c_str());
+  /* %.*s, not %s: a string_view is not NUL terminated. */
+  std::fprintf(stderr, "no vector with id %.*s\n", static_cast<int>(id.size()), id.data());
   std::abort();
 }
 

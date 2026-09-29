@@ -49,7 +49,7 @@ The pyramid, and what each layer is for:
 
 | Layer | Runs | Command |
 |:--|:--|:--|
-| unit (GoogleTest, ASan + UBSan) | no server; the core links libcrypto only | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| unit (GoogleTest, ASan + UBSan) | no server; the core links libcrypto only | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | integration | a real server, once per major | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |

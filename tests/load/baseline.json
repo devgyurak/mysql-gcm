@@ -1,9 +1,23 @@
 {
   "_comment": [
-    "Load gate for tests/load/run.py (testing rule). Raising either number needs a PR",
-    "that states the hardware, the server version and why the regression is acceptable.",
-    "Measurements themselves are accumulated per version in docs/perf.md."
+    "Load gate for tests/load/run.py. Measurements themselves are accumulated per version",
+    "in docs/perf.md, which also records the hardware each number came from.",
+    "",
+    "max_p95_ratio is the *regression* gate, and it is deliberately tighter than the 1.2x",
+    "figure the documentation promises. Three consecutive runs on ubuntu-24.04 against",
+    "MySQL 8.4.11 measured 0.874 to 0.911 at 300k rows and 1, 8 and 32 sessions: GCM is",
+    "faster than the CBC builtin on this workload, so a 1.2 gate could never fire and a",
+    "doubling of per-row cost would pass unnoticed. The ratio is also the noise-immune",
+    "metric — it normalises away runner speed, and its own run-to-run spread was 1.04x —",
+    "which is why it is the number that can be tightened rather than the absolute one.",
+    "",
+    "max_p95_ms_at_largest_serial stays at the 1s promise from docs/design.md. Observed:",
+    "244 to 266 ms. It is an absolute ceiling on a shared runner, so tightening it would",
+    "buy sensitivity at the price of failures that say nothing about this component.",
+    "",
+    "Raising either number needs a PR that states the hardware, the server version and why",
+    "the regression is acceptable, and updates docs/perf.md in the same change."
   ],
-  "max_p95_ratio": 1.2,
+  "max_p95_ratio": 1.05,
   "max_p95_ms_at_largest_serial": 1000.0
 }

@@ -14,10 +14,22 @@ over the same plaintexts in two columns, after 3 warm-up runs, 20 measured runs 
 
 ## Gate
 
-`tests/load/baseline.json`: p95 within **1.2x** of the `AES_DECRYPT` baseline, and p95 at 300k rows
-with one session under **1000 ms**. The nightly `load` workflow enforces it with `--gate` and uploads
-the JSON as an artifact. Moving either number needs a PR that states the hardware, the server version
-and why the regression is acceptable.
+Two numbers in `tests/load/baseline.json`, and they do different jobs.
+
+**The promise** is p95 within **1.2x** of the `AES_DECRYPT` baseline, and p95 at 300k rows with one
+session under **1000 ms** (`docs/design.md` Phase 4). That is what this component claims about itself.
+
+**The enforced regression gate** is p95 within **1.05x** of `AES_DECRYPT`. It is tighter than the
+promise on purpose: the measured ratio is 0.87–0.91, so a 1.2 gate has 30% of dead space in it and a
+doubling of per-row cost would pass unnoticed. The ratio is also the metric that survives a shared
+runner — it normalises away machine speed, and its own run-to-run spread was 1.04x — so it is the one
+worth tightening. The absolute 1000 ms ceiling stays where the promise put it, because tightening an
+absolute number on a GitHub runner buys sensitivity by trading it for failures that say nothing about
+this code.
+
+The nightly `load` workflow enforces both with `--gate` and uploads the JSON as an artifact. Raising
+either number needs a PR that states the hardware, the server version and why the regression is
+acceptable, and updates this file in the same change.
 
 ## Results
 
@@ -40,7 +52,7 @@ Two things worth reading off this:
 * **AES-256-GCM is not slower than the CBC builtin here** — at every measured point the ratio is at
   or below 1.09, and above one session it is consistently below 0.9. GCM needs no padding and its
   authentication is cheap next to the row scan, so the cost that matters is the scan, which both
-  variants pay identically. The 1.2x gate has real headroom.
+  variants pay identically, and the release baseline below confirms it on CI hardware.
 * **`Created_tmp_disk_tables` did not move**, including at 32 concurrent sessions, which is the
   question `docs/design.md` §5.3 raised about plaintext reaching disk-based temporary tables. It is
   an observation over this workload, not a guarantee: a query that adds a sort or a large grouping
@@ -49,8 +61,35 @@ Two things worth reading off this:
 For scale: §1.2 estimated ~1.1 s to pull and decrypt 100,000 candidate rows in the application. The
 same filter server-side measures 41 ms p95 on this machine.
 
-### Release baseline
+### Release baseline — 0.1.0
 
-Empty on purpose. The gate numbers must come from a release build on known, unshared hardware, or
-they would encode laptop noise. Populate this section from the nightly `load` workflow artifact
-(Phase 4) and update `tests/load/baseline.json` in the same PR.
+The reference environment is the one CI actually uses, so the gate is checked against the same class
+of machine that produced it: **`ubuntu-24.04` GitHub-hosted runner, MySQL 8.4.11 in the official
+container, `RelWithDebInfo` component, 300,000 rows of which 29,918 match `'%김%'`.** Three
+consecutive `load` workflow runs, 20 measured iterations per session after 3 warm-ups, GCM and
+`AES_DECRYPT` interleaved on each connection.
+
+| Sessions | gcm p95 | aes p95 | p95 ratio |
+|---|---|---|---|
+| 1 | 244.3 / 266.3 / 252.0 ms | 275.6 / 292.2 / 277.3 ms | 0.886 / 0.911 / 0.909 |
+| 8 | 911.1 / 983.4 / 1008.1 ms | 1020.3 / 1124.7 / 1126.9 ms | 0.893 / 0.874 / 0.895 |
+| 32 | 3589.9 / 3927.4 / 3920.8 ms | 4092.5 / 4480.1 / 4413.7 ms | 0.877 / 0.877 / 0.888 |
+
+Three values per cell, one per run, in run order. What the three runs establish:
+
+* **Every ratio is below 0.92**, and the widest spread of a ratio across runs is 1.04x. That is what
+  makes the 1.05 gate safe to enforce — and it is only visible because the two variants are
+  interleaved on the same connection. Measuring all GCM sessions and then all AES sessions, as the
+  harness first did, let one slow period on a shared runner land entirely on one variant and reported
+  1.247 at eight sessions while the neighbouring points sat near 0.84.
+* **Absolute p95 varies by up to 1.11x between runs** on identical inputs, which is the runner, not
+  the component. An absolute gate has to carry that; a ratio gate does not.
+* **`Created_tmp_disk_tables` did not move in any run**, at any session count — the question
+  `docs/design.md` §5.3 raised about plaintext reaching disk-based temporary tables. It remains an
+  observation about this workload, not a guarantee; a query that adds a sort or a large grouping can
+  still spill, so every run keeps the counter in its JSON.
+* **300k rows scanned, decrypted and matched in 244 ms serially.** `docs/design.md` §1.2 estimated
+  ~1.1 s for pulling 100,000 candidate rows into the application and decrypting them there.
+
+Reproduce with `gh workflow run load.yml -f rows=300000`, or locally with
+`python tests/load/run.py --rows 300000 --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json`.

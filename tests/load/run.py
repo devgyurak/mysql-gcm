@@ -42,7 +42,12 @@ GIVEN = ("철수", "영희", "길동", "민수", "지훈", "서연", "하늘", "
 NEEDLE = "김"
 
 WARMUP_RUNS = 3
-MEASURED_RUNS = 20
+# 40, not 20. p95 of 20 samples is rank 19 of 20 — one sample short of the maximum, so the
+# statistic follows whichever single request was unluckiest. Measured across three otherwise
+# identical CI runs at one session, the *ratio* of two such numbers ranged 0.809 to 0.928,
+# a 1.15x spread on a gate set at 1.05. At 40 the rank is 38, with two samples above it.
+# docs/perf.md records what the spread became.
+MEASURED_RUNS = 40
 INSERT_BATCH = 1000
 
 

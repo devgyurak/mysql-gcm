@@ -125,6 +125,10 @@ jobs:
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
       VERSION: ${{ needs.guard.outputs.version }}
+      # No build-record artifact: nothing reads it, and it lands in the same run as the
+      # artifacts `package` collects.
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+      DOCKER_BUILD_SUMMARY: "false"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -216,8 +220,15 @@ jobs:
       VERSION: ${{ needs.guard.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # `pattern`, not every artifact in the run. Without it this downloads the
+      # `*.dockerbuild` build records that docker/build-push-action uploads as well — junk
+      # the packaging loop skips, but a single flaky download of one of them failed the
+      # whole release. It only became reachable once `package` started waiting for `image`,
+      # which is exactly the kind of thing the dry run exists to find.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with: { path: artifacts }
+        with:
+          pattern: "component_gcm-mysql*"
+          path: artifacts
       - name: Package every major and architecture
         run: |
           set -euo pipefail

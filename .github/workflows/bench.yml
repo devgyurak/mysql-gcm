@@ -6,8 +6,9 @@ name: bench
 # is far finer. It also covers plaintext sizes the load fixture never produces — its rows are
 # Korean names, so nothing else here ever benchmarks a 64 KiB value.
 #
-# Not a PR gate yet: tests/bench/baseline.json has no ceilings until they are measured on this
-# runner three times, which is how tests/load/baseline.json was settled.
+# Gated at 1.10 on every case — the finest-grained gate in the project. Not on the branch
+# protection's required list, because it only runs when the core or the benchmarks change and a
+# required check that never reports blocks the merge button forever.
 on:
   schedule: [{ cron: "0 19 * * *" }]   # 04:00 KST nightly, an hour after `load`
   workflow_dispatch:
@@ -15,10 +16,17 @@ on:
       min_time:
         description: "Per-case measurement budget, e.g. 0.5s"
         default: "0.5s"
-  # Labelled rather than automatic: the value is in comparing runs on the same machine, and a
-  # number from every PR is noise nobody reads. Add `bench` when touching gcm.cc, nonce.cc,
-  # envelope.cc or the benchmarks themselves.
-  pull_request: { types: [labeled, synchronize] }
+  # Path-filtered rather than labelled: it runs exactly when there is something to measure, with
+  # no one having to remember a label. A PR that touches none of these has nothing to compare, so
+  # the job not running is the correct outcome rather than a gap. `labeled` is kept as a type so a
+  # re-run can be forced by toggling any label on a PR that does match.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "src/**"
+      - "tests/bench/**"
+      - "scripts/bench.sh"
+      - ".github/workflows/bench.yml"
 permissions: { contents: read }
 # A new push supersedes the run before it; see integration.yml for why. Pushes to main and
 # develop are never cancelled — they are the gate on the branch, not a preview of it.
@@ -27,7 +35,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   bench:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'bench')
     runs-on: ubuntu-24.04
     env:
       # The runner is the reference environment, so the benchmark builds on it directly. The

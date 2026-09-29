@@ -73,7 +73,7 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   훌륭한 수치로 측정한다. 기준(`ref/*`) 쪽도 같다 — 기준이 조용히 실패하면 모든 비율이 회귀로 보인다.
 - 샌타이저를 끈 `RelWithDebInfo` 로 빌드한다(`tests/unit` 과 별도 CMake). ASan 이 켜진 수치는 배포물과 무관하다.
 - GWT 이름 규칙은 적용하지 않는다: 단언이 아니라 측정이다. 대신 위의 성공 확인이 그 자리를 대신한다.
-- nightly + `bench` 라벨. PR 마다 돌리지 않는다. 기준치는 `tests/bench/baseline.json`,
+- nightly + `src/**`·`tests/bench/**` 를 건드리는 PR 에서 자동 실행. 잴 것이 없는 PR 에서 돌지 않는 것이 정상이므로 **필수 체크 목록에 넣지 않는다** (보고되지 않는 필수 체크는 머지를 영구히 막는다). 기준치는 `tests/bench/baseline.json`,
   측정은 `docs/perf.md` 에 누적한다.
 
 ## E2E (`tests/e2e`)

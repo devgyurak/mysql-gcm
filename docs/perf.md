@@ -52,62 +52,91 @@ SQL, and divides each case by a bare-OpenSSL equivalent measured in the same run
 load suite structurally cannot:
 
 * **Resolution.** The load ratio's run-to-run spread is 1.19x, which is why its gate sits at 1.10
-  and why a regression under roughly 20% is invisible to it. A ratio taken in process against a
-  reference on the same core is far steadier, so a change of a few percent is legible.
+  and why a regression under roughly 20% is invisible to it. In process against a work-matched
+  reference the spread is 1.025x, so the gate here — also 1.10 — catches a ~7% regression.
 * **Attribution.** When the load ratio moves, nothing says whether it was sealing, opening, nonce
   derivation, envelope parsing, buffer handling or the server. Each of those has its own case here.
 * **Sizes the fixture never produces.** The load rows are Korean names, so every load number is
   from the small end. 4 KiB and 64 KiB are measured only here.
 * **Cost.** Seconds, with no server, so it can run per pull request if it ever needs to.
 
-Run it with `scripts/bench.sh` (add `--gate` once the baseline has ceilings). The reference
+Run it with `scripts/bench.sh --gate`. Keep the default measurement budget when gating: at
+`GCM_BENCH_MIN_TIME=0.05s` the same machine that produced 1.02 produced 1.11, which is the gate
+failing on the budget rather than on the code. The reference
 environment is `ubuntu-24.04` with GCC and the distribution's OpenSSL 3, which is what
 `bench.yml` runs on; on any other host the script reproduces that in a container, because a ratio
 compared against a baseline recorded elsewhere means nothing.
 
-### Developer-machine run (indicative — the CI baseline is not recorded yet)
+### Reference baseline
 
-Docker `ubuntu:24.04` on an arm64 macOS laptop. AES and SHA instruction sets differ between this
-and an x86-64 runner, so the ratios will move; the shape of the findings should not.
+`ubuntu-24.04` GitHub-hosted runner, GCC, the distribution's OpenSSL 3, `RelWithDebInfo`, three
+consecutive `bench` workflow runs. **Every gated ratio is the case divided by a straight-line
+implementation of the same algorithm**, so ~1.0 means this project's structure — envelope bytes,
+error mapping, buffer handling, `OPENSSL_cleanse` — costs nothing measurable.
 
 | Case | 16 B | 256 B | 4 KiB | 64 KiB |
 |---|---|---|---|---|
-| `open` / bare EVP open | 0.998 | 0.997 | 1.019 | 1.017 |
-| `seal_random` / bare EVP seal | 2.411 | 2.189 | 1.646 | 1.061 |
-| `seal_det` / bare EVP seal | 4.155 | 3.990 | 3.928 | 3.561 |
+| `open` | 1.016 / 1.007 / 1.019 | 1.025 / 1.018 / 1.029 | 1.007 / 1.008 / 1.012 | 1.006 / 1.000 / 1.002 |
+| `seal_random` | 0.996 / 1.011 / 0.996 | 1.002 / 0.986 / 1.011 | 1.014 / 1.006 / 1.008 | 1.012 / 1.005 / 1.006 |
+| `seal_det` | 1.009 / 1.011 / 1.012 | 1.013 / 1.019 / 1.013 | 1.009 / 1.010 / 1.003 | 1.003 / 1.003 / 0.999 |
 
-Three things fell out of the first run:
+An arm64 macOS laptop running the same suite in the container measures 0.965–1.020 across the twelve,
+so the gate holds on both architectures. That is the point of a work-matched reference: the ratio is
+a property of this code, not of the machine. Only the un-gated "against a plain seal" numbers below
+move with hardware.
 
-* **The decrypt path adds nothing measurable.** `open` sits within 2% of a bare EVP decrypt at
-  every size — and that is the path every row of a `LIKE` query goes through, which is the
-  operation the whole project exists to make viable.
-* **`gcm_encrypt` costs a constant ~425 ns over a bare seal**, invisible at 64 KiB and a factor of
-  2.4 at 16 bytes. That is `RAND_bytes(12)`, and it is the price of a fresh nonce rather than
-  overhead to remove.
-* **`gcm_encrypt_det` costs 3.6–4.2x a bare seal, and it is the HMAC, not the cipher.** Two
-  HMAC-SHA256 passes per call (`spec/envelope.md` §3) come to ~900 ns at 16 bytes against a
-  ~300 ns seal, and at 64 KiB HMAC-SHA256 is still slower per byte than AES-GCM
-  (19.4 µs vs 7.9 µs for the same 64 KiB), so the ratio stays near 3.6 rather than converging to
-  one. Anyone choosing between the two variants for a write-heavy column should know the
-  deterministic one is several times the cost, and no document said so before this ran.
+All twelve land between **0.986 and 1.029**, with a run-to-run spread of **1.025x**. The gate is
+therefore 1.10 — 7% above the worst observation and about double the observed variance — which makes
+this the finest-grained gate in the project: it fails on a ~7% structural regression where the load
+gate cannot see anything under ~20%.
 
-`envelope/parse` is 1.21–1.23 ns and identical across v1, v2 and v3, which is the invariant that
-case exists to hold: parsing reads a version byte and computes offsets, and must never start
-scanning the body.
+That any of this is gateable is a property of the references, and it was not true of the first
+version. Dividing all three encrypt cases by a bare seal spread `seal_det` by **2.69x** across
+identical runners (worst 9.673, best 3.590 for the same inputs) while the absolute HMAC numbers held
+to 1.15x — because that quotient is the runner's SHA-to-AES throughput ratio, not a property of this
+code. Matching each reference to its case's work mix collapsed the spread from 2.69x to 1.025x.
+
+### What determinism costs
+
+Reported, never gated: each encrypt variant against a **plain** seal. This is the number to read when
+choosing between `gcm_encrypt` and `gcm_encrypt_det`, and it is exactly the number that moves with the
+machine, which is why it cannot be a threshold.
+
+| Against a plain seal | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `gcm_encrypt` | 2.74–3.17 | 2.56–3.00 | 1.64–1.78 | 1.07–1.08 |
+| `gcm_encrypt_det` | 4.87–4.90 | 4.65–4.83 | 3.96–4.04 | 3.56–3.60 |
+
+* **`gcm_encrypt` pays a constant ~450 ns for `RAND_bytes(12)`** — a factor of ~3 on a 16-byte value,
+  ~7% at 64 KiB. The price of a fresh nonce, not overhead to remove.
+* **`gcm_encrypt_det` costs roughly 3.5–5x a plain seal, and the cost is HMAC rather than the
+  cipher.** Two HMAC-SHA256 passes (`spec/envelope.md` §3) dominate at every size measured here.
+  Nothing in this project's documentation said the deterministic variant was several times the cost
+  before these benchmarks ran; it is worth knowing before putting it on a write-heavy column.
+* **The ratio's direction with size depends on the CPU.** On these runs it falls from 4.9 to 3.6, and
+  on a different `ubuntu-24.04` runner with faster AES it *rose* from 5.6 to 9.7 — AES-GCM has
+  hardware acceleration nearly everywhere while SHA-256 often does not, so the balance between them
+  varies by machine. Treat "several times a plain seal" as the durable statement and re-measure on
+  the hardware you care about.
+
+`envelope/parse` is ~2.2–3.1 ns and equal across v1, v2 and v3, which is the invariant that case
+exists to hold: parsing reads a version byte and computes offsets, and must never begin scanning the
+body. It is recorded rather than ratio-gated — there is no OpenSSL operation to divide it by, and an
+absolute ceiling of a few nanoseconds on a shared runner would be a coin toss, not a gate.
 
 ### An optimisation this found, and why it is not taken here
 
-`derive_nonce_key` — `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` — measures 455 ns and depends on
-**nothing but the key**, yet `encrypt_det` recomputes it on every call: it is roughly half of the
-896 ns that deterministic nonce derivation costs at 16 bytes, and about a third of `seal_det`.
-Caching it per `UDF_INIT` would be a ~36% cut to the deterministic encrypt path at small sizes.
+`derive_nonce_key` — `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` — measures 830–1120 ns on the
+reference runner and depends on **nothing but the key**, yet `encrypt_det` recomputes it on every
+call: roughly half of deterministic nonce derivation at small sizes, and around 40% of `seal_det`.
+Caching it per `UDF_INIT` is a real saving on the deterministic encrypt path.
 
-It is deliberately not done in this change. The key arrives as a per-row SQL argument, so a cache
-has to hold a copy of the key to know whether it is still valid — and holding derived key material
-and a key copy across rows is exactly what `crypto-safety.md` pushes against ("복사본을 만들었다면
-사용 직후 `OPENSSL_cleanse`"). That is a design decision with a security dimension, so it belongs in
-`docs/design.md` as an amendment before it belongs in `src/`. Recording the measurement is the
-useful half; this file is where the argument would start.
+It is deliberately not done. The key arrives as a per-row SQL argument, so a cache must also hold a
+copy of the key to know whether it is still valid — and keeping derived key material plus a key copy
+alive across rows is precisely what `crypto-safety.md` pushes against. That is a design decision with
+a security dimension, so per `AGENTS.md` §9 it belongs in `docs/design.md` as an amendment before it
+belongs in `src/`. Recording the measurement is the useful half; this is where the argument would
+start.
 
 ## Results
 

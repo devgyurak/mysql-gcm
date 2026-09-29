@@ -1,17 +1,42 @@
 {
   "_comment": [
-    "Ratio ceilings for tests/bench/gate.py. Each key is <case>/<plaintext bytes> and each",
-    "value is the most that case may cost relative to the bare-OpenSSL reference measured in",
-    "the same process (tests/bench/bench_support.h explains the reference).",
+    "Ratio ceilings for tests/bench/gate.py. Each key is <case>/<plaintext bytes>; each value is",
+    "the most that case may cost relative to a straight-line implementation of the same algorithm",
+    "measured in the same process (tests/bench/bench_support.h explains the references).",
     "",
-    "max_ratio is null on purpose: recording only, not gating. The numbers depend on the CPU's",
-    "AES and SHA instructions, so a ceiling taken from a developer machine would be wrong on a",
-    "CI runner in whichever direction happened to be convenient. Fill this from three runs of",
-    "the bench workflow on the reference runner, the way tests/load/baseline.json was filled,",
-    "and record the measurements in docs/perf.md in the same change.",
+    "Every ceiling is 1.10, and that one number is the whole claim: this project's structure — the",
+    "envelope bytes, the error mapping, the buffer handling, the OPENSSL_cleanse calls — must cost",
+    "under 10% on top of the cryptography it performs. It is not a performance target so much as an",
+    "assertion that there is no hidden per-call work: a fetch that stopped being cached, a buffer",
+    "reallocated per row, one more copy of the plaintext would each land far outside it.",
     "",
-    "A missing ceiling for a case that exists is a violation, not a pass — otherwise a new",
-    "benchmark would be added and silently ungated."
+    "Three runs on ubuntu-24.04 measured every one of the twelve between 0.986 and 1.029, with a",
+    "run-to-run spread of 1.025x. So 1.10 clears the worst observation by 7% and the observed",
+    "variance by roughly double. The measurements are in docs/perf.md.",
+    "",
+    "That this is gateable at all is a property of the references. An earlier version divided all",
+    "three encrypt cases by a bare seal, which spread seal_det by 2.69x across identical runners —",
+    "an HMAC-dominated measurement over an AES-only reference is the runner's SHA-to-AES throughput",
+    "ratio, not a property of this code.",
+    "",
+    "A case that exists with no ceiling here is a violation, not a pass: adding a benchmark must",
+    "force a decision about what it is allowed to cost.",
+    "",
+    "Raising a ceiling needs a PR that says on what hardware, against which server version, and why",
+    "the regression is acceptable, and updates docs/perf.md in the same change."
   ],
-  "max_ratio": null
+  "max_ratio": {
+    "seal_random/16": 1.1,
+    "seal_random/256": 1.1,
+    "seal_random/4096": 1.1,
+    "seal_random/65536": 1.1,
+    "seal_det/16": 1.1,
+    "seal_det/256": 1.1,
+    "seal_det/4096": 1.1,
+    "seal_det/65536": 1.1,
+    "open/16": 1.1,
+    "open/256": 1.1,
+    "open/4096": 1.1,
+    "open/65536": 1.1
+  }
 }

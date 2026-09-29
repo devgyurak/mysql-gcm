@@ -17,7 +17,10 @@ usage: scripts/bench.sh [--gate]
 
 environment:
   GCM_BENCH_LOCAL=1       build and run on the host instead of in a container
-  GCM_BENCH_MIN_TIME=0.5s per-case measurement budget (default 0.5s)
+  GCM_BENCH_MIN_TIME=0.5s per-case measurement budget (default 0.5s). Lowering it to run
+                          quickly makes the ratios noisy enough to breach the gate on their
+                          own — measured: 0.05s produced ratios up to 1.11 where 0.5s on the
+                          same machine produced 1.02. Do not use --gate with a shorter budget.
   GCM_BENCH_REPS=1        --benchmark_repetitions
 
 Writes build/bench/results.json (raw Google Benchmark) and build/bench/ratios.json.

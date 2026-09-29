@@ -66,5 +66,8 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 
 ## 부하 (`tests/load`)
 - 측정: `gcm_decrypt(col,@k) LIKE '%김%'` p50/p95 @ 10k/100k/300k 행, 동시 세션 1/8/32, `AES_DECRYPT` 동일 쿼리 대비 비율, 서버 RSS, `Created_tmp_disk_tables` 증가량.
-- 게이트: p95 가 AES_DECRYPT 대비 **1.2배** 초과 또는 300k 행 p95 > 1.0초면 실패. 기준치는 `tests/load/baseline.json`, 갱신 시 PR 에 근거.
+- 약속(문서·README): p95 가 `AES_DECRYPT` 대비 **1.2배** 이내, 300k 행 직렬 p95 < **1.0초**.
+- 실제 게이트(`tests/load/baseline.json`): p95 비율 **1.10배**. 측정값이 0.80~0.95 라 1.2 로는 행당 비용이 두 배가 되어도 통과한다. 더 조이지 않는 이유는 신중함이 아니라 측정된 노이즈다 — CI 6회 중 최악이 0.947 이고 그 느슨한 값들은 모두 동시 세션 1 축이다(표본 40개. 세션 8·32 는 320·1280 개이고 런 간 분산이 1.06·1.04배). 절대값 1.0초 게이트는 공용 러너에서 이 코드와 무관한 실패를 만들기 때문에 약속 그대로 둔다(실측 235~266ms).
+- p95 는 nearest-rank(`ceil(0.95n)`). 표본 수를 줄이면 p95 가 최댓값에 붙어 게이트가 단일 요청 하나로 흔들린다.
+- 기준치를 **올리려면** 하드웨어·서버 버전·회귀를 받아들이는 이유를 PR 에 적고 `docs/perf.md` 를 같은 PR 에서 갱신한다.
 - nightly + `workflow_dispatch`. PR 마다 돌리지 않는다.

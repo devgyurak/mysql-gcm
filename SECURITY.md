@@ -50,8 +50,21 @@ vulnerabilities to report:
 
 ## Supported versions
 
-There is no released version yet, so only the tip of `main` is supported. Once releases exist, the
-latest tag for each MySQL major in the support matrix will be.
+Fixes go to the tip of `main` and to the latest release line, which is `0.1.x`. There is nothing
+older to support.
+
+A component is built per MySQL major, so a fix is not available to you until the artifact for *your*
+major is republished: a security patch ships as a new tag with all six tarballs and all three Docker
+tags rebuilt, never as a partial release. Verify what you install —
+`cosign verify-blob` over `SHA256SUMS`, as in [CONTRIBUTING.md](CONTRIBUTING.md#cutting-a-release).
+
+Upgrading is always safe on the data: the envelope carries a version byte, and no release removes the
+ability to read an envelope an earlier release wrote (`spec/envelope.md` §2).
+
+Downgrading is not symmetrical. `spec/envelope.md` §2.4 requires an unknown version byte to be
+rejected with `bad_envelope`, regardless of `gcm.strict` — so if a later release introduces a new
+version byte, going back to an earlier one makes every envelope written in between unreadable. A
+release that adds a version byte says so in its `CHANGELOG.md` compatibility note.
 
 **This component has not had an independent cryptographic review** (`docs/ops-constraints.md` item
 13). Treat that as the headline caveat when deciding whether to deploy it.

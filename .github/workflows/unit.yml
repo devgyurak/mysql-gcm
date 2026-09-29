@@ -1,27 +1,31 @@
 name: unit
 on:
   pull_request: {}
-  push: { branches: [main] }
+  push: { branches: [main, develop] }
   schedule: [{ cron: "0 17 * * *" }]   # 02:00 KST nightly, for the 1M collision run
 permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   cpp-asan:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libgtest-dev
       - run: cmake -S tests/unit -B build/unit -G Ninja -DGCM_SANITIZE=ON && cmake --build build/unit
-      # gtest_discover_tests registers one ctest entry per case, and each one re-reads
-      # the 434 KB vector file, so serially this is minutes of mostly parsing. Run them
-      # in parallel; the cases share no state.
-      # testing.md: 100k deterministic-nonce collision samples on every PR, 1M nightly.
-      - run: ctest --test-dir build/unit --output-on-failure --parallel "$(nproc)"
+      # One ctest entry runs the whole binary; see tests/unit/CMakeLists.txt for why
+      # per-case discovery is not used. testing.md: 100k deterministic-nonce collision
+      # samples on every PR, 1M nightly.
+      - run: ctest --test-dir build/unit --output-on-failure
         env: { GCM_COLLISION_N: "${{ github.event_name == 'schedule' && '1000000' || '100000' }}" }
   vectors:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: pip install -r scripts/requirements.txt
       - run: python scripts/gen-vectors.py --check

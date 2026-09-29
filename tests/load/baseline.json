@@ -1,9 +1,27 @@
 {
   "_comment": [
-    "Load gate for tests/load/run.py (testing rule). Raising either number needs a PR",
-    "that states the hardware, the server version and why the regression is acceptable.",
-    "Measurements themselves are accumulated per version in docs/perf.md."
+    "Load gate for tests/load/run.py. The measurements themselves, and the hardware each",
+    "number came from, are in docs/perf.md.",
+    "",
+    "max_p95_ratio is the regression gate, and it is deliberately tighter than the 1.2x the",
+    "documentation promises: GCM measures 0.80-0.95 of the CBC builtin on this workload, so a",
+    "1.2 gate has a quarter of its range in dead space and a doubling of per-row cost would",
+    "pass unnoticed. It is not tighter still because of measured noise, not caution. Six CI",
+    "runs put the worst observed ratio at 0.947, all of them at one session — the axis with",
+    "40 samples where 8 and 32 sessions have 320 and 1280, and correspondingly a 1.19x",
+    "run-to-run spread against 1.06x and 1.04x. 1.10 clears the worst observation by 16% and",
+    "sits about 26% above the centre of the distribution, so it fails on a regression rather",
+    "than on an unlucky request.",
+    "",
+    "max_p95_ms_at_largest_serial stays at the 1s promise from docs/design.md §1.2. Observed:",
+    "235-266 ms across six runs. It is an absolute number on a shared runner whose hardware",
+    "is not ours to pin, so tightening it would buy sensitivity by trading it for failures",
+    "that say nothing about this component. The ratio is the noise-immune metric and is where",
+    "the sensitivity belongs.",
+    "",
+    "Raising either number needs a PR that states the hardware, the server version and why",
+    "the regression is acceptable, and updates docs/perf.md in the same change."
   ],
-  "max_p95_ratio": 1.2,
+  "max_p95_ratio": 1.1,
   "max_p95_ms_at_largest_serial": 1000.0
 }

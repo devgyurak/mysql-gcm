@@ -52,9 +52,25 @@ target_compile_definitions(gcm_unit PRIVATE GCM_REPO_ROOT="${GCM_REPO_ROOT}")
 target_compile_options(gcm_unit PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(gcm_unit PRIVATE gcm_core GTest::gtest_main)
 
-# enable_testing() must come before gtest_discover_tests: without it CMake writes no
-# CTestTestfile.cmake and `ctest` reports "No tests were found" while still exiting 0 —
-# a green CI gate that ran nothing.
+# enable_testing() must come first: without it CMake writes no CTestTestfile.cmake and
+# `ctest` reports "No tests were found" while still exiting 0 — a green gate that ran
+# nothing.
 enable_testing()
-include(GoogleTest)
-gtest_discover_tests(gcm_unit WORKING_DIRECTORY ${GCM_REPO_ROOT})
+
+# One ctest entry for the whole binary, deliberately, instead of gtest_discover_tests.
+#
+# The suite is parameterised over spec/test-vectors.json, so the parameter lists are
+# built during static initialisation: loading and parsing 783 vectors under ASan costs
+# ~24 s before main() runs. gtest_discover_tests pays that once for discovery and then
+# once more per case, and there are 1434 cases — on a four-core runner that is hours.
+# Running the binary once pays it a single time: ~41 s in total, of which ~18 s is the
+# tests themselves.
+#
+# The cost is coarser reporting from ctest. gtest still names the failing case in its own
+# output, and --output-on-failure surfaces it, so nothing is actually lost. A single case
+# is still reachable directly: build/unit/gcm_unit --gtest_filter='DetNonce.*'
+add_test(NAME gcm_unit COMMAND gcm_unit)
+set_tests_properties(gcm_unit PROPERTIES
+  WORKING_DIRECTORY ${GCM_REPO_ROOT}
+  TIMEOUT 900
+)

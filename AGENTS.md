@@ -56,6 +56,9 @@ mysql-test/suite/gcm/          MTR .test/.result (서버 소스 트리 빌드에
 tests/e2e/                     compose: mysql(ROW) + replica + Python SQL runner → LIKE / 복제 / dual-read
 tests/load/                    부하: 10k/100k/300k 행 decrypt+LIKE, AES_DECRYPT 대비 회귀 게이트
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
+  unit-in-docker.sh           단위 테스트를 CI 와 같은 GCC·ubuntu 에서 실행 (호스트 clang 이 통과시키는 것을 잡는다)
+  smoke-image.sh              릴리스 서버 이미지를 기동·쿼리 (component 설치·major·한글 LIKE·strict)
+  check-action-pins.py        워크플로의 모든 액션이 SHA 로 핀됐는지 검사
   gen-vectors.py              내부 벡터 생성·검증 도구 (cryptography, 배포 API 아님)
   check-architecture.py       코어 의존·테스트 진입점 경계 검사 (개정 A6)
 docker/                        build.Dockerfile (configure 된 서버 소스 트리) + build-component.sh + versions.json
@@ -70,7 +73,7 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 |---|---|---|
 | 개발 서버 기동 | `scripts/dev-up.sh 8.4` | `dev-container` |
 | component 빌드 (서버 소스 트리 in-tree) | `scripts/build-in-docker.sh 8.4` | `mysql-component` |
-| 단위 테스트 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` | `unit-tests` |
+| 단위 테스트 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` | `unit-tests` |
 | 통합 스모크 | `scripts/verify.sh 8.4` (컨테이너에 .so 설치 후 SQL 시나리오 diff) | `integration-tests` |
 | MTR | `scripts/mtr.sh 8.4` (`GCM_RECORD=1` 로 `.result` 재생성) | `integration-tests` |
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |
@@ -115,9 +118,11 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 
 ## 6. 현재 단계와 로드맵
 
-현재: **Phase 2 (구현)**. Phase S·1 은 완료됐고 그 결과는 `docs/design.md` §8 에 있다.
-Phase 2 의 남은 항목은 **부하 baseline** 뿐이다 (릴리스 빌드 + 알려진 하드웨어). MTR `.result` 는
-`scripts/mtr.sh 8.4` 로 기록해 `mysql-test/suite/gcm/r/` 에 들어와 있다.
+현재: **Phase 4 (배포) — 0.1.0 태깅 대기**. Phase S·1·2·3 은 완료됐고 결과는 `docs/design.md` §8 에 있다.
+부하 baseline 은 CI 러너 3회 측정으로 확정해 `docs/perf.md` 와 `tests/load/baseline.json` 에 들어갔고,
+릴리스 파이프라인은 드라이런(`gh workflow run release.yml -f version=...`)으로 끝까지 검증했다.
+남은 것은 태그 자체와 Docker Hub 시크릿뿐이다. MTR `.result` 는 `scripts/mtr.sh 8.4` 로 기록해
+`mysql-test/suite/gcm/r/` 에 들어와 있다 (8.4 기준 — 다른 major 는 기록하지 않았다).
 
 | Phase | 산출물 | 완료 기준 |
 |---|---|---|

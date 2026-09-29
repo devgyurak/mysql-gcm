@@ -22,10 +22,19 @@ x-server: &server
   environment:
     MYSQL_ALLOW_EMPTY_PASSWORD: "1"
   healthcheck:
-    test: ["CMD", "mysqladmin", "ping", "-uroot", "--silent"]
+    # Over TCP, not the socket: during a fresh initialisation the official image runs a
+    # temporary server that listens on the socket only (`port: 0`), and a socket ping
+    # would report healthy while that server is about to be stopped and replaced.
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-P", "3306", "-uroot", "--silent"]
     interval: 2s
     timeout: 5s
     retries: 30
+    # A TCP probe answers nothing until initialisation finishes, so unlike the socket ping
+    # it spends the retry budget. start_period keeps those failures from counting: compose
+    # aborts the whole run the moment a dependency goes unhealthy and does not wait for it
+    # to recover, and four servers initialising at once on a shared runner should not have
+    # to fit inside 30 x 2s. Measured at 9s for three from cold on a developer machine.
+    start_period: 90s
   volumes:
     - ${GCM_SO:-../../build/8.4/component_gcm.so}:/usr/lib64/mysql/plugin/component_gcm.so:ro
 

@@ -5,6 +5,15 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.0 — 2026-09-29
+
+First release: the component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x, and
+the envelope format is frozen by `spec/envelope.md` and `spec/test-vectors.json`. Anything sealed by
+this version stays readable by later ones — that is what a version byte is for, and v1 dual-read
+already demonstrates the mechanism.
+
 ### Added
 - Component implementation: `component.cc`, `udf_encrypt.cc`, `udf_decrypt.cc`, `udf_glue.{h,cc}`,
   `sysvar.{h,cc}` and the in-tree `src/CMakeLists.txt`. Registers `gcm_encrypt`, `gcm_encrypt_det`
@@ -18,9 +27,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 - MTR suite `mysql-test/suite/gcm/` — signature, envelope, Korean LIKE, strict semantics, NULL and
   boundary sizes, v1 dual-read, and ROW-binlog replication.
 - E2E suite `tests/e2e/` — compose primary + replica + a SQL-only Python runner, six scenarios.
-- Load harness `tests/load/run.py` with the gate in `tests/load/baseline.json`
-  (p95 within 1.2x of `AES_DECRYPT`, and under 1s at the largest row count serially). First
-  indicative measurements are in `docs/perf.md`; the release baseline is still empty on purpose.
+- Load harness `tests/load/run.py` with the gate in `tests/load/baseline.json`. The documented promise
+  is p95 within 1.2x of `AES_DECRYPT` and under 1s at the largest row count serially; the enforced
+  regression gate is 1.10x, derived from the measured baseline in `docs/perf.md`.
 - `scripts/mtr.sh` to build the server in a container and run the MTR suite, with `GCM_RECORD=1`
   for regenerating `.result`.
 - `.clang-format`: the MySQL 8.4 config with `ColumnLimit` raised to 100 to match this codebase.
@@ -103,3 +112,130 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   result `utf8mb4`, and a v1 envelope never went through the converting encryption path, so a latin1
   `Müller` returns ill-formed and `LIKE '%ller%'` yields 0 with no error. Pinned in both the
   integration and MTR dual-read cases, together with the correct migration.
+
+### Release tooling
+- `release.yml` refuses to publish unless the tag is `vMAJOR.MINOR.PATCH`, the tagged commit is
+  contained in `main`, and `CHANGELOG.md` has a section for that version. A `workflow_dispatch` dry
+  run executes the identical pipeline and publishes nothing, so the release path is exercised before
+  a tag exists rather than debugged in public with a tag already pushed.
+- Each server image is started and queried before it is pushed (`scripts/smoke-image.sh`: the
+  component is installed by the init script, a Korean `LIKE` over a decrypted value hits, the result
+  is `utf8mb4`, strict is ON). The suites run against unmodified official images on purpose, so
+  nothing else in CI would catch a `.so` installed into the wrong `plugin_dir` or paired with the
+  wrong server major.
+- `SHA256SUMS` is signed with keyless cosign and verified in the same job. Verification checks which
+  workflow in which repository produced the checksums; there is no long-lived key to hold or leak.
+  `CONTRIBUTING.md` and both READMEs carry the `cosign verify-blob` invocation.
+
+### Fixed before release
+- The unit suite did not compile under GCC: `-Wdangling-reference` fires on
+  `const Vector &v = vector_by_id("id")` because the parameter was a `const std::string &` and GCC
+  cannot prove the returned reference does not point into the temporary bound to it. With `-Werror`
+  that is fatal, and the whole gate was only ever verified under clang on a developer machine.
+  `scripts/unit-in-docker.sh` now runs the suite under GCC in a container, which is what CI does.
+- `gtest_discover_tests` timed out. Static initialisation parses 783 vectors under ASan — about 24 s
+  before `main()` — and discovery pays that once to list the tests and again per case, for 1434
+  cases. One `ctest` entry runs the binary once instead: the whole suite in ~41 s.
+- Integration failed against a freshly initialised server on 8.4 and 9. While the official image
+  initialises an empty data directory it starts a *temporary* server that listens on the socket only,
+  so `mysqladmin ping` over the socket reported healthy, the component was installed into that
+  server, and the entrypoint then stopped it and started the real one. The healthcheck goes over TCP,
+  which excludes the temporary server by construction, and `dev-up.sh` additionally waits for a query
+  to answer. It passed locally for weeks because the containers were already initialised.
+- The load harness measured every GCM session and then every AES session, so a slow period on a
+  shared runner landed on one variant and surfaced as a ratio: the nightly reported 1.247 at eight
+  sessions while one and thirty-two sessions were near 0.84. The variants are interleaved per
+  iteration on one connection now, under the same ambient load and contention.
+- `develop` was absent from the CI push triggers, so a maintainer push — which the branch protection
+  deliberately allows — reached it ungated.
+
+### Supply chain
+- Every action in every workflow is pinned to a commit SHA with the tag in a trailing comment,
+  which the `stack-ci-docker` rule already required and a `TODO` in `build.yml` admitted was not
+  done. A tag reference is whatever the owner last pointed it at, and an action runs with this
+  workflow's token — in `release.yml`, next to the OIDC identity that signs the artifacts consumers
+  verify. `scripts/check-action-pins.py` enforces it and rejects a SHA with no version comment.
+- `lint.yml` gained a `workflows` job: the pin check plus actionlint, from a digest-pinned image.
+  Nothing had been checking the workflow files, so an expression that was syntactically fine and
+  semantically wrong first surfaced as a failed run on the branch it was meant to guard.
+
+### Fixed in pre-release review
+- `release.yml` could publish a **partial release**. The `image` matrix pushes each architecture tag
+  as it finishes and `fail-fast: false`, while `package` depended only on `build` — so one failing
+  entry left some `<version>-mysql<major>-<arch>` tags public, no joined multi-arch tag, and a full
+  GitHub Release with six tarballs, contradicting SECURITY.md's "never as a partial release".
+  `package` now needs `image`, so nothing appears under a documented name unless every image built and
+  passed `scripts/smoke-image.sh`. The trade is deliberate: a Docker Hub outage now fails the release
+  instead of degrading it, because re-running a tag is cheap and un-publishing is not. The
+  per-architecture tags are documented as components of the multi-arch tag, and a failed attempt can
+  leave some behind — delete those before re-running the tag.
+- The guard's version check accepted `0.1.0-rc1`, `1.2.3.4` and `1abc.2.3`: a shell glob of
+  `[0-9]*.[0-9]*.[0-9]*` constrains almost nothing. A prerelease tag would have shipped as a normal
+  release and moved the rolling `mysql<major>` tag onto it. It is `^[0-9]+\.[0-9]+\.[0-9]+$` now.
+- The CHANGELOG gate could be satisfied by the wrong section. `grep "^## ${version}\b"` treats `-` as
+  a word boundary, so a search for `0.1.0` matched `## 0.1.0-rc1`. The delimiter is explicit now, and
+  the version's dots are escaped rather than matching any character.
+- `${{ inputs.version }}` was interpolated into a `run:` script, where it is substituted as text before
+  bash parses it — `-f version='x"; id; #'` would have executed in the guard job. It arrives through
+  the environment now and is validated, which also keeps an empty or slash-bearing value from reaching
+  an archive name, an artifact name and an image label.
+- The documented `cosign verify-blob` identity matched the repository alone, so it accepted anything
+  this repository ever signed — including a dry run, which signs with the same OIDC identity at a
+  branch ref and uploads the result as a public build artifact. Consumers now verify
+  `…/.github/workflows/release.yml@refs/tags/v`, and the workflow's own check uses the form matching
+  the run it is in.
+- `SHA256SUMS` did not cover `sbom.spdx.json`: the checksums were computed before the SBOM existed.
+  Since `SHA256SUMS` is the only signed file, anything outside it was unsigned.
+- `scripts/check-action-pins.sh` only matched `uses:` when a `-` began the line, so
+  `- { uses: actions/checkout@v4 }` passed unexamined — in a repository that uses flow style
+  throughout. It is `scripts/check-action-pins.py` now: it reads every `uses:` regardless of style,
+  covers `.yaml` as well as `.yml`, accepts a `docker://…@sha256:` digest, and fails when it finds no
+  references at all rather than reporting success for a wrong path. Verified against flow-style
+  violations of both kinds.
+- `scripts/smoke-image.sh` claimed to check that the `.so` matches the server in the image but never
+  looked at the server version, so a `docker/versions.json` entry mapping a major to the wrong image —
+  paired with a `.so` built for that same wrong image — would have passed and published, say, an 8.4
+  server as `mysql9`. It takes the expected major and compares `VERSION()`. It also sets
+  `--default-character-set=utf8mb4`, without which the Korean literal in the smoke query tested the
+  container's locale rather than the component.
+- `p95` was the maximum. `int(len * 0.95)` is one rank too high, and at 20 samples per session that is
+  the last index — so the reported p95 at one session was the worst single request of twenty, and a
+  gate set close to the measured value would have failed whenever one request happened to be 15% slow.
+  It is the nearest-rank percentile now, `ceil(0.95n)`.
+- The interleaved harness still ran GCM first within every pair, handing one variant whatever the other
+  had just warmed or evicted on every iteration. The order alternates.
+- `tests/e2e/compose.yml` had no `start_period`, so the retry budget for a TCP healthcheck — which,
+  unlike the socket ping it replaced, answers nothing until initialisation finishes — was 30 x 2s for
+  four servers starting at once. Compose aborts the run as soon as a dependency goes unhealthy and
+  does not wait for recovery.
+- `CONTRIBUTING.md` listed "eight `lint` jobs" and claimed 18 required checks; `lint.yml` has seven,
+  and the eighteenth is `vectors` from `unit`, which was not mentioned. It now names every required
+  check as GitHub reports it, and lists `mtr` among the deliberate exclusions.
+- `SECURITY.md` said downgrading is always safe on the data. `spec/envelope.md` §2.4 requires an
+  unknown version byte to be rejected, so a downgrade past a release that added one makes those
+  envelopes unreadable. Upgrading is the direction that is guaranteed.
+- The `unit-tests` skill still offered `gtest_discover_tests` as its CMake pattern, which is what this
+  release removed for timing out CI, so the next person following the skill would have reintroduced it.
+- No workflow declared a `concurrency` group, so every push to a PR started another `mtr` job — an
+  hour-plus MySQL build — without cancelling the superseded one. Four pushes meant four concurrent
+  server builds. PR runs now supersede; pushes to `main`, to `develop`, and tag runs never cancel, and
+  `load` keeps none so baseline runs can be dispatched in parallel.
+
+### Settled after re-measuring
+- The release baseline is three CI runs at **40 samples per session**, not 20. p95 of 20 samples is
+  rank 19 of 20, so it tracks whichever single request was unluckiest: three runs put the one-session
+  ratio between 0.809 and 0.928, a 1.19x spread. At 40 samples the same axis spreads 0.799–0.947 and
+  the 8- and 32-session axes — which accumulate 320 and 1280 samples — settle to 1.06x and 1.04x.
+- The enforced gate is **1.10x**, not 1.05x. 1.05 would have sat 11% above the worst of nine
+  observations, on the axis with the fewest samples; 1.10 clears it by 16% and still leaves the 1.2x
+  promise with room. `docs/perf.md` carries the table and the reasoning, and the testing rule states
+  the promise and the gate as two separate things so nobody has to reconcile them.
+- The release dry run earned its place twice more. It caught `package` collecting every artifact in the
+  run — including the `*.dockerbuild` records that `docker/build-push-action` uploads, one of which
+  failed to download and killed a release whose six components had all built and passed their smoke
+  tests. Reachable only once `package` started waiting for `image`, which is to say only after the
+  partial-release fix. It now downloads `component_gcm-mysql*` and the image job produces no records.
+- Verified on the final dry run rather than asserted: `package` starts after all six `image` jobs,
+  `SHA256SUMS` covers the SBOM, every checksum matches, and the documented `cosign verify-blob`
+  command **rejects** a dry run's artifacts — the certificate names `@refs/heads/...`, so only a tag
+  run satisfies the identity consumers are given.

@@ -39,10 +39,18 @@ if ! docker inspect "${name}" >/dev/null 2>&1; then
 
   # general_log=OFF even in development: keys and plaintext travel as SQL
   # arguments, so the log would hold them (docs/design.md §6).
+  # The healthcheck goes over TCP on purpose. While the official image initialises a
+  # fresh data directory it starts a *temporary* server that listens on the socket only
+  # (the log says `port: 0`), and `mysqladmin ping` over the socket answers from that
+  # one — so a socket healthcheck reports healthy, the caller installs the component,
+  # and moments later the entrypoint stops that server and starts the real one, losing
+  # everything. Requiring a TCP connection excludes the temporary server by
+  # construction. This only shows up on a first initialisation, which is why it passed
+  # locally on reused containers and failed on a fresh CI runner.
   docker run -d --name "${name}" \
     -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
     -p 0:3306 \
-    --health-cmd='mysqladmin ping -uroot --silent' \
+    --health-cmd='mysqladmin ping -h 127.0.0.1 -P 3306 -uroot --silent' \
     --health-interval=2s \
     --health-retries=30 \
     "${image}" "${server_args[@]}" >/dev/null
@@ -58,6 +66,19 @@ while [ "$(docker inspect -f '{{.State.Health.Status}}' "${name}")" != healthy ]
     exit 1
   fi
   sleep 2
+done
+
+# Belt and braces: the healthcheck says the server answers, this says it answers *us*
+# and has finished starting. A fresh container that is still running init scripts can
+# accept a connection and still reject a query.
+probe_deadline=$((SECONDS + 120))
+until docker exec "${name}" mysql -uroot -N -e 'SELECT 1' >/dev/null 2>&1; do
+  if [ "${SECONDS}" -ge "${probe_deadline}" ]; then
+    echo "${name} is healthy but not answering queries; last log lines:" >&2
+    docker logs --tail 40 "${name}" >&2
+    exit 1
+  fi
+  sleep 1
 done
 
 port="$(docker port "${name}" 3306/tcp | head -1 | cut -d: -f2)"

@@ -5,6 +5,15 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.0 — 2026-09-29
+
+First release: the component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x, and
+the envelope format is frozen by `spec/envelope.md` and `spec/test-vectors.json`. Anything sealed by
+this version stays readable by later ones — that is what a version byte is for, and v1 dual-read
+already demonstrates the mechanism.
+
 ### Added
 - Component implementation: `component.cc`, `udf_encrypt.cc`, `udf_decrypt.cc`, `udf_glue.{h,cc}`,
   `sysvar.{h,cc}` and the in-tree `src/CMakeLists.txt`. Registers `gcm_encrypt`, `gcm_encrypt_det`
@@ -103,3 +112,39 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   result `utf8mb4`, and a v1 envelope never went through the converting encryption path, so a latin1
   `Müller` returns ill-formed and `LIKE '%ller%'` yields 0 with no error. Pinned in both the
   integration and MTR dual-read cases, together with the correct migration.
+
+### Release tooling
+- `release.yml` refuses to publish unless the tag is `vMAJOR.MINOR.PATCH`, the tagged commit is
+  contained in `main`, and `CHANGELOG.md` has a section for that version. A `workflow_dispatch` dry
+  run executes the identical pipeline and publishes nothing, so the release path is exercised before
+  a tag exists rather than debugged in public with a tag already pushed.
+- Each server image is started and queried before it is pushed (`scripts/smoke-image.sh`: the
+  component is installed by the init script, a Korean `LIKE` over a decrypted value hits, the result
+  is `utf8mb4`, strict is ON). The suites run against unmodified official images on purpose, so
+  nothing else in CI would catch a `.so` installed into the wrong `plugin_dir` or paired with the
+  wrong server major.
+- `SHA256SUMS` is signed with keyless cosign and verified in the same job. Verification checks which
+  workflow in which repository produced the checksums; there is no long-lived key to hold or leak.
+  `CONTRIBUTING.md` and both READMEs carry the `cosign verify-blob` invocation.
+
+### Fixed before release
+- The unit suite did not compile under GCC: `-Wdangling-reference` fires on
+  `const Vector &v = vector_by_id("id")` because the parameter was a `const std::string &` and GCC
+  cannot prove the returned reference does not point into the temporary bound to it. With `-Werror`
+  that is fatal, and the whole gate was only ever verified under clang on a developer machine.
+  `scripts/unit-in-docker.sh` now runs the suite under GCC in a container, which is what CI does.
+- `gtest_discover_tests` timed out. Static initialisation parses 783 vectors under ASan — about 24 s
+  before `main()` — and discovery pays that once to list the tests and again per case, for 1434
+  cases. One `ctest` entry runs the binary once instead: the whole suite in ~41 s.
+- Integration failed against a freshly initialised server on 8.4 and 9. While the official image
+  initialises an empty data directory it starts a *temporary* server that listens on the socket only,
+  so `mysqladmin ping` over the socket reported healthy, the component was installed into that
+  server, and the entrypoint then stopped it and started the real one. The healthcheck goes over TCP,
+  which excludes the temporary server by construction, and `dev-up.sh` additionally waits for a query
+  to answer. It passed locally for weeks because the containers were already initialised.
+- The load harness measured every GCM session and then every AES session, so a slow period on a
+  shared runner landed on one variant and surfaced as a ratio: the nightly reported 1.247 at eight
+  sessions while one and thirty-two sessions were near 0.84. The variants are interleaved per
+  iteration on one connection now, under the same ambient load and contention.
+- `develop` was absent from the CI push triggers, so a maintainer push — which the branch protection
+  deliberately allows — reached it ungated.

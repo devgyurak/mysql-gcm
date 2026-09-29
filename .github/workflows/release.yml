@@ -1,14 +1,71 @@
 name: release
 # A release is a tag v* on main, and nothing else publishes anything:
 # CONTRIBUTING.md — feature -> develop -> main -> tag v*.
-on: { push: { tags: ["v*"] } }
-permissions: { contents: write }
+#
+# workflow_dispatch runs the identical pipeline and publishes nothing, so the release path
+# can be exercised before a tag exists. A pipeline whose first real run is the release is a
+# pipeline that debugs itself in public, with a tag already pushed.
+on:
+  push: { tags: ["v*"] }
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp a dry run with, no leading v"
+        default: "0.0.0-dry"
+permissions: { contents: read }
 
 jobs:
+  # Everything below reads `publish` from here rather than testing the event itself, so a
+  # dry run and a release differ in exactly one value.
+  guard:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # merge-base below needs history, not just the tag
+      - id: resolve
+        name: Resolve the version and whether this run publishes
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "dry run: building and checking everything, publishing nothing"
+            exit 0
+          fi
+
+          version="${GITHUB_REF_NAME#v}"
+          case "${version}" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::tag ${GITHUB_REF_NAME} is not vMAJOR.MINOR.PATCH" ; exit 1 ;;
+          esac
+
+          # The release rule is: merge develop into main, then tag main. A v* tag anywhere
+          # else would otherwise publish history that never went through main.
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" FETCH_HEAD; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not contained in main; releases are tagged on main only"
+            exit 1
+          fi
+
+          # Release notes are written by hand, before the tag. Publishing a version with no
+          # CHANGELOG section means nobody decided what this release is.
+          if ! grep -q "^## ${version}\b" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## ${version}' section"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "releasing ${version} from $(git rev-parse --short "${GITHUB_SHA}") on main"
+
   # One job per (major, arch) so both architectures actually get built. The build runs
   # here rather than being downloaded from build.yml, because actions/download-artifact@v4
   # is scoped to its own workflow run — the jobs below are in this same run.
   build:
+    needs: guard
     strategy:
       fail-fast: false
       matrix:
@@ -27,27 +84,30 @@ jobs:
   # (docker/server.Dockerfile). Pushed per architecture, then joined into one multi-arch
   # tag by `manifest` below, so `docker run` picks the right one automatically.
   #
-  # Needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them
-  # this job fails and the GitHub Release below still publishes — the tarballs do not
+  # Each image is started and queried before it is pushed. That is the only gate this
+  # artifact has: the test suites deliberately run against unmodified official images, so
+  # nothing else would notice a .so installed into the wrong plugin_dir or paired with the
+  # wrong server major.
+  #
+  # Needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them the
+  # push step fails and the GitHub Release below still publishes — the tarballs do not
   # depend on it.
   image:
-    needs: build
+    needs: [guard, build]
     strategy:
       fail-fast: false
       matrix:
         mysql: ["8.0", "8.4", "9"]
         arch: [amd64, arm64]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
           path: "build/${{ matrix.mysql }}"
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Resolve the base image for this major
         id: base
         run: |
@@ -58,30 +118,48 @@ jobs:
               print(json.load(fh)[sys.argv[1]]['image'])
           " "${{ matrix.mysql }}")
           echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      # Built and loaded locally first, so the smoke test below runs on the exact image
+      # that gets pushed. `push: true` here would publish a broken image and then test it.
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/server.Dockerfile
-          push: true
+          load: true
+          push: false
           provenance: false
           build-args: |
             SERVER_IMAGE=${{ steps.base.outputs.image }}
             SO_PATH=build/${{ matrix.mysql }}/component_gcm.so
             MYSQL_MAJOR=${{ matrix.mysql }}
-            GCM_VERSION=${{ steps.base.outputs.version }}
-          tags: >-
-            ${{ secrets.DOCKERHUB_USERNAME }}/mysql-gcm-server:${{ steps.base.outputs.version }}-mysql${{ matrix.mysql }}-${{ matrix.arch }}
+            GCM_VERSION=${{ needs.guard.outputs.version }}
+          tags: "mysql-gcm-server:candidate"
+      - name: Start the image and query it
+        run: scripts/smoke-image.sh mysql-gcm-server:candidate
+      - uses: docker/login-action@v3
+        if: needs.guard.outputs.publish == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push the image that passed
+        if: needs.guard.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ secrets.DOCKERHUB_USERNAME }}/mysql-gcm-server:${VERSION}-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
+          docker tag mysql-gcm-server:candidate "${tag}"
+          docker push "${tag}"
 
   # Joins the per-architecture tags into one multi-arch tag per major, and points
   # `<major>` at the release just published. No `latest`: which major it would mean is
   # ambiguous, and picking one silently would be the wrong kind of convenience.
   manifest:
-    needs: image
+    needs: [guard, image]
+    if: needs.guard.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix: { mysql: ["8.0", "8.4", "9"] }
     runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
     steps:
       - uses: docker/login-action@v3
         with:
@@ -91,18 +169,22 @@ jobs:
         run: |
           set -euo pipefail
           repo="${{ secrets.DOCKERHUB_USERNAME }}/mysql-gcm-server"
-          ver="${GITHUB_REF_NAME#v}"
           major="${{ matrix.mysql }}"
-          for tag in "${ver}-mysql${major}" "mysql${major}"; do
+          for tag in "${VERSION}-mysql${major}" "mysql${major}"; do
             docker buildx imagetools create -t "${repo}:${tag}" \
-              "${repo}:${ver}-mysql${major}-amd64" \
-              "${repo}:${ver}-mysql${major}-arm64"
+              "${repo}:${VERSION}-mysql${major}-amd64" \
+              "${repo}:${VERSION}-mysql${major}-arm64"
           done
-          docker buildx imagetools inspect "${repo}:${ver}-mysql${major}"
+          docker buildx imagetools inspect "${repo}:${VERSION}-mysql${major}"
 
   package:
-    needs: build
+    needs: [guard, build]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # the GitHub Release
+      id-token: write   # cosign keyless signing
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -110,12 +192,11 @@ jobs:
       - name: Package every major and architecture
         run: |
           set -euo pipefail
-          ver="${GITHUB_REF_NAME#v}"
           mkdir dist
           for d in artifacts/component_gcm-mysql*; do
             name=$(basename "$d")                       # component_gcm-mysql8.4-amd64
             suffix=${name#component_gcm-}               # mysql8.4-amd64
-            tar -C "$d" -czf "dist/component_gcm-${ver}-${suffix}.tar.gz" component_gcm.so
+            tar -C "$d" -czf "dist/component_gcm-${VERSION}-${suffix}.tar.gz" component_gcm.so
           done
           count=$(find dist -name '*.tar.gz' -type f | wc -l)
           test "$count" -eq 6 || {
@@ -126,7 +207,33 @@ jobs:
           (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
       - uses: anchore/sbom-action@v0
         with: { path: ., output-file: dist/sbom.spdx.json }
+      # Keyless: the signature is bound to this workflow's OIDC identity, so a verifier
+      # checks *which workflow in which repository* produced the checksums, not whether
+      # somebody holds a key. Only SHA256SUMS is signed — it covers every archive.
+      #   cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+      #     --certificate-identity-regexp 'https://github.com/devgyurak/mysql-gcm/.*' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the checksum file
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature dist/SHA256SUMS.sig \
+            --output-certificate dist/SHA256SUMS.pem \
+            dist/SHA256SUMS
+          cosign verify-blob \
+            --certificate dist/SHA256SUMS.pem \
+            --signature dist/SHA256SUMS.sig \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/SHA256SUMS
+      # A dry run keeps the same artifacts as a build artifact instead of a Release, so the
+      # packaging, the checksums and the signature are all inspectable before a tag exists.
+      - uses: actions/upload-artifact@v4
+        if: needs.guard.outputs.publish != 'true'
+        with: { name: "release-dry-run-${{ needs.guard.outputs.version }}", path: dist/* }
       - uses: softprops/action-gh-release@v2
+        if: needs.guard.outputs.publish == 'true'
         with:
           files: dist/*
           generate_release_notes: true

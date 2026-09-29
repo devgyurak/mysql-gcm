@@ -151,6 +151,24 @@ docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_g
 `plugin_dir`는 이미지마다 다릅니다. Oracle Linux 기반 이미지에서는 `/usr/lib64/mysql/plugin/`입니다.
 경로를 하드코딩하지 말고 서버에 조회하세요.
 
+### 릴리스 파일 검증
+
+릴리스에는 tar 6개(major 3종 x amd64/arm64), `SHA256SUMS`, 그에 대한 서명과 인증서, SPDX SBOM 이
+들어 있습니다. 서명은 키 없는(keyless) 방식이라 검증으로 확인하는 것은 **어느 저장소의 어느 워크플로가
+그 체크섬을 만들었는지**입니다. 우리가 보관하거나 유출될 장기 키가 없습니다.
+
+```sh
+gh release download v0.1.0 -R devgyurak/mysql-gcm
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/devgyurak/mysql-gcm/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+tar xzf component_gcm-0.1.0-mysql8.4-amd64.tar.gz     # -> component_gcm.so
+```
+
+받은 `.so` 를 해당 서버의 `plugin_dir` 에 복사하고 위와 같이 설치합니다. major 를 맞추세요.
+8.4 용으로 빌드한 component 는 9.x 에 로드되지 않습니다.
+
 ## 함수
 
 | 함수 | 봉투 | 반환 | 용도 |

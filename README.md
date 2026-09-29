@@ -158,6 +158,25 @@ docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_g
 `plugin_dir` differs between images (`/usr/lib64/mysql/plugin/` on the Oracle Linux based ones), so
 ask the server rather than hardcoding it.
 
+### Verifying a release download
+
+A release carries six tarballs (three majors x amd64/arm64), `SHA256SUMS`, a signature and
+certificate for it, and an SPDX SBOM. The signature is keyless, so what you verify is *which
+workflow in which repository produced the checksums* — there is no long-lived key of ours to
+trust or to leak:
+
+```sh
+gh release download v0.1.0 -R devgyurak/mysql-gcm
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/devgyurak/mysql-gcm/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+tar xzf component_gcm-0.1.0-mysql8.4-amd64.tar.gz     # -> component_gcm.so
+```
+
+Then copy the `.so` into that server's `plugin_dir` and install it, as above. Match the major: a
+component built for 8.4 does not load into 9.x.
+
 ## Functions
 
 | Function | Envelope | Returns | Use it for |

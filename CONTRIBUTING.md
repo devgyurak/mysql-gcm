@@ -98,6 +98,48 @@ python scripts/gen-vectors.py --check
 
 CI runs all of these. Nothing here needs network access except the Docker builds.
 
+## Cutting a release
+
+The maintainer cuts releases. `.github/workflows/release.yml` refuses to publish unless all three
+hold:
+
+- the tag is `vMAJOR.MINOR.PATCH`,
+- the tagged commit is contained in `main`, so nothing reaches a release without going through it,
+- `CHANGELOG.md` has a `## <version>` section. Release notes are written before the tag by someone
+  who decided what the release is, not generated afterwards from commit subjects.
+
+1. Open a PR from `develop` to `main` with the CHANGELOG section for the version filled in.
+2. Dry-run the whole pipeline on that branch — it publishes nothing:
+
+   ```sh
+   gh workflow run release.yml --ref develop -f version=0.2.0-rc1
+   ```
+
+   It builds all six artifacts, builds each server image and **starts it and queries it**
+   (`scripts/smoke-image.sh`: component installed, Korean `LIKE` hit, result `utf8mb4`, strict ON),
+   signs the checksums, and uploads the lot as a build artifact for inspection.
+3. Merge, then tag `main`:
+
+   ```sh
+   git tag -a v0.2.0 -m 'v0.2.0' && git push origin v0.2.0
+   ```
+
+4. Check what came out: six tarballs, `SHA256SUMS` with its `.sig` and `.pem`, `sbom.spdx.json`, and
+   the Docker Hub tags `<version>-mysql<major>` plus the moving `mysql<major>`.
+
+Downloads are verifiable without holding any key of ours — the signature is bound to this
+repository's workflow identity, so what you check is *what produced the file*:
+
+```sh
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/devgyurak/mysql-gcm/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+```
+
+The image jobs need the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets. Without them
+those jobs fail and the GitHub Release still publishes; the tarballs do not depend on Docker Hub.
+
 ## Reporting a security issue
 
 Full policy: [SECURITY.md](SECURITY.md). In short: do not open a public issue for a cryptographic flaw. Use GitHub's private vulnerability reporting on

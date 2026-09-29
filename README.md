@@ -20,7 +20,7 @@
 legacy UDF plugin). The decrypted value is charset-tagged `utf8mb4`, so MySQL's own collation drives
 `LIKE '%길%'` **inside the server** — keeping partial-match search on encrypted columns, which is the
 reason this project exists. On CI hardware, **300,000 rows are scanned, decrypted and matched in
-244 ms p95** on one session — and GCM lands at **0.87–0.91x** of the `AES_DECRYPT` baseline at every
+255 ms p95** on one session — and GCM lands **below 0.95x** of the `AES_DECRYPT` baseline at every
 measured point, so the authenticated cipher is not the cost here; the row scan is, and both variants
 pay it. `docs/design.md` §1.2 estimates ~1.1 s for pulling just 100,000 candidate rows into the
 application and decrypting them there. `docs/perf.md` has the three runs behind those numbers.

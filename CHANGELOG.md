@@ -27,9 +27,9 @@ already demonstrates the mechanism.
 - MTR suite `mysql-test/suite/gcm/` — signature, envelope, Korean LIKE, strict semantics, NULL and
   boundary sizes, v1 dual-read, and ROW-binlog replication.
 - E2E suite `tests/e2e/` — compose primary + replica + a SQL-only Python runner, six scenarios.
-- Load harness `tests/load/run.py` with the gate in `tests/load/baseline.json`
-  (p95 within 1.2x of `AES_DECRYPT`, and under 1s at the largest row count serially). First
-  indicative measurements are in `docs/perf.md`; the release baseline is still empty on purpose.
+- Load harness `tests/load/run.py` with the gate in `tests/load/baseline.json`. The documented promise
+  is p95 within 1.2x of `AES_DECRYPT` and under 1s at the largest row count serially; the enforced
+  regression gate is 1.10x, derived from the measured baseline in `docs/perf.md`.
 - `scripts/mtr.sh` to build the server in a container and run the MTR suite, with `GCM_RECORD=1`
   for regenerating `.result`.
 - `.clang-format`: the MySQL 8.4 config with `ColumnLimit` raised to 100 to match this codebase.
@@ -199,9 +199,9 @@ already demonstrates the mechanism.
   `--default-character-set=utf8mb4`, without which the Korean literal in the smoke query tested the
   container's locale rather than the component.
 - `p95` was the maximum. `int(len * 0.95)` is one rank too high, and at 20 samples per session that is
-  the last index — so the reported p95 at one session was the worst single request of twenty, and the
-  new 1.05 gate would have failed whenever one request happened to be 15% slow. It is the nearest-rank
-  percentile now, `ceil(0.95n)`.
+  the last index — so the reported p95 at one session was the worst single request of twenty, and a
+  gate set close to the measured value would have failed whenever one request happened to be 15% slow.
+  It is the nearest-rank percentile now, `ceil(0.95n)`.
 - The interleaved harness still ran GCM first within every pair, handing one variant whatever the other
   had just warmed or evicted on every iteration. The order alternates.
 - `tests/e2e/compose.yml` had no `start_period`, so the retry budget for a TCP healthcheck — which,
@@ -220,3 +220,22 @@ already demonstrates the mechanism.
   hour-plus MySQL build — without cancelling the superseded one. Four pushes meant four concurrent
   server builds. PR runs now supersede; pushes to `main`, to `develop`, and tag runs never cancel, and
   `load` keeps none so baseline runs can be dispatched in parallel.
+
+### Settled after re-measuring
+- The release baseline is three CI runs at **40 samples per session**, not 20. p95 of 20 samples is
+  rank 19 of 20, so it tracks whichever single request was unluckiest: three runs put the one-session
+  ratio between 0.809 and 0.928, a 1.19x spread. At 40 samples the same axis spreads 0.799–0.947 and
+  the 8- and 32-session axes — which accumulate 320 and 1280 samples — settle to 1.06x and 1.04x.
+- The enforced gate is **1.10x**, not 1.05x. 1.05 would have sat 11% above the worst of nine
+  observations, on the axis with the fewest samples; 1.10 clears it by 16% and still leaves the 1.2x
+  promise with room. `docs/perf.md` carries the table and the reasoning, and the testing rule states
+  the promise and the gate as two separate things so nobody has to reconcile them.
+- The release dry run earned its place twice more. It caught `package` collecting every artifact in the
+  run — including the `*.dockerbuild` records that `docker/build-push-action` uploads, one of which
+  failed to download and killed a release whose six components had all built and passed their smoke
+  tests. Reachable only once `package` started waiting for `image`, which is to say only after the
+  partial-release fix. It now downloads `component_gcm-mysql*` and the image job produces no records.
+- Verified on the final dry run rather than asserted: `package` starts after all six `image` jobs,
+  `SHA256SUMS` covers the SBOM, every checksum matches, and the documented `cosign verify-blob`
+  command **rejects** a dry run's artifacts — the certificate names `@refs/heads/...`, so only a tag
+  run satisfies the identity consumers are given.

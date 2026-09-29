@@ -28,13 +28,17 @@ Two numbers in `tests/load/baseline.json`, and they do different jobs.
 **The promise** is p95 within **1.2x** of the `AES_DECRYPT` baseline, and p95 at 300k rows with one
 session under **1000 ms** (`docs/design.md` Phase 4). That is what this component claims about itself.
 
-**The enforced regression gate** is p95 within **1.05x** of `AES_DECRYPT`. It is tighter than the
-promise on purpose: the measured ratio is 0.87–0.91, so a 1.2 gate has 30% of dead space in it and a
-doubling of per-row cost would pass unnoticed. The ratio is also the metric that survives a shared
-runner — it normalises away machine speed, and its own run-to-run spread was 1.04x — so it is the one
-worth tightening. The absolute 1000 ms ceiling stays where the promise put it, because tightening an
-absolute number on a GitHub runner buys sensitivity by trading it for failures that say nothing about
-this code.
+**The enforced regression gate** is p95 within **1.10x** of `AES_DECRYPT`. It is tighter than the
+promise because the measured ratio is 0.80–0.95: a 1.2 gate has a quarter of its range in dead space,
+and per-row cost could double without tripping it. It is not tighter *still* because of measured
+noise rather than caution — see the baseline below, where the worst of nine observations is 0.947 and
+every one of the loose ones is at a single session. 1.10 clears that by 16% and sits roughly 26% above
+the centre of the distribution, so it fails on a regression and not on one unlucky request.
+
+The absolute **1000 ms** ceiling stays where the promise put it. Observed: 235–266 ms. It is an
+absolute number on a shared runner whose hardware is not ours to pin, so tightening it would buy
+sensitivity at the price of failures that say nothing about this code. The ratio normalises machine
+speed away, which is why the sensitivity belongs there.
 
 The nightly `load` workflow enforces both with `--gate` and uploads the JSON as an artifact. Raising
 either number needs a PR that states the hardware, the server version and why the regression is
@@ -77,33 +81,37 @@ same filter server-side measures 41 ms p95 on this machine.
 
 ### Release baseline — 0.1.0
 
-The reference environment is the one CI actually uses, so the gate is checked against the same class
-of machine that produced it: **`ubuntu-24.04` GitHub-hosted runner, MySQL 8.4.11 in the official
-container, `RelWithDebInfo` component, 300,000 rows of which 29,918 match `'%김%'`.** Three
-consecutive `load` workflow runs, 20 measured iterations per session after 3 warm-ups, GCM and
-`AES_DECRYPT` interleaved on each connection.
+The reference environment is the one CI uses, so the gate is checked against the same class of machine
+that produced it: **`ubuntu-24.04` GitHub-hosted runner, MySQL 8.4.11 in the official container,
+`RelWithDebInfo` component, 300,000 rows of which 29,918 match `'%김%'`.** Three consecutive `load`
+workflow runs, 40 measured iterations per session after 3 warm-ups, GCM and `AES_DECRYPT` interleaved
+per iteration with the order alternating.
 
-| Sessions | gcm p95 | aes p95 | p95 ratio |
-|---|---|---|---|
-| 1 | 244.3 / 266.3 / 252.0 ms | 275.6 / 292.2 / 277.3 ms | 0.886 / 0.911 / 0.909 |
-| 8 | 911.1 / 983.4 / 1008.1 ms | 1020.3 / 1124.7 / 1126.9 ms | 0.893 / 0.874 / 0.895 |
-| 32 | 3589.9 / 3927.4 / 3920.8 ms | 4092.5 / 4480.1 / 4413.7 ms | 0.877 / 0.877 / 0.888 |
+| Sessions | gcm p50 | gcm p95 | aes p95 | p95 ratio | ratio spread |
+|---|---|---|---|---|---|
+| 1 | 233 / 245 / 234 ms | 235 / 255 / 238 ms | 295 / 269 / 277 ms | 0.799 / 0.947 / 0.859 | 1.19x |
+| 8 | 930 / 1004 / 995 ms | 1007 / 1073 / 1061 ms | 1147 / 1154 / 1180 ms | 0.878 / 0.930 / 0.899 | 1.06x |
+| 32 | 3736 / 4000 / 4009 ms | 3882 / 4172 / 4161 ms | 4412 / 4555 / 4557 ms | 0.880 / 0.916 / 0.913 | 1.04x |
 
-Three values per cell, one per run, in run order. What the three runs establish:
+Three values per cell, one per run, in run order. What the runs establish:
 
-* **Every ratio is below 0.92**, and the widest spread of a ratio across runs is 1.04x. That is what
-  makes the 1.05 gate safe to enforce — and it is only visible because the two variants are
-  interleaved on the same connection. Measuring all GCM sessions and then all AES sessions, as the
-  harness first did, let one slow period on a shared runner land entirely on one variant and reported
-  1.247 at eight sessions while the neighbouring points sat near 0.84.
-* **Absolute p95 varies by up to 1.11x between runs** on identical inputs, which is the runner, not
-  the component. An absolute gate has to carry that; a ratio gate does not.
+* **GCM is faster than the CBC builtin at every measured point** — every ratio is below 0.95. The
+  authenticated cipher is not what this costs; the row scan is, and `AES_DECRYPT` pays the same one.
+* **The ratio is only as stable as the number of samples behind it.** One session means 40 samples,
+  where 8 and 32 sessions accumulate 320 and 1280, and the spread follows exactly that: 1.19x, 1.06x,
+  1.04x. This is why the gate is 1.10 rather than 1.05. An earlier set of three runs at 20 samples
+  spread the one-session ratio 0.809–0.928 for the same reason, and before that the same code reported
+  the *maximum* of 20 as "p95", which happened to look steadier while measuring something else.
+* **Interleaving is what makes any of this comparable.** Measuring every GCM session and then every AES
+  session let one slow period on a shared runner land entirely on one variant: the nightly reported
+  1.247 at eight sessions while its neighbours sat near 0.84.
 * **`Created_tmp_disk_tables` did not move in any run**, at any session count — the question
-  `docs/design.md` §5.3 raised about plaintext reaching disk-based temporary tables. It remains an
-  observation about this workload, not a guarantee; a query that adds a sort or a large grouping can
-  still spill, so every run keeps the counter in its JSON.
-* **300k rows scanned, decrypted and matched in 244 ms serially.** `docs/design.md` §1.2 estimated
-  ~1.1 s for pulling 100,000 candidate rows into the application and decrypting them there.
+  `docs/design.md` §5.3 raised about plaintext reaching disk-based temporary tables. It stays an
+  observation about this workload rather than a guarantee: a query that adds a sort or a large grouping
+  can still spill, so every run keeps the counter in its JSON.
+* **300,000 rows scanned, decrypted and matched in 255 ms p95 serially**, worst of three runs.
+  `docs/design.md` §1.2 estimated ~1.1 s for pulling 100,000 candidate rows into the application and
+  decrypting them there.
 
 Reproduce with `gh workflow run load.yml -f rows=300000`, or locally with
 `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json`.

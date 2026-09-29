@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a change to the SQL surface, the envelope, or the tooling
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `docs/design.md` is the source of rationale, and several directions are **out of scope
+        by decision**: managed MySQL, proxy-based encryption, language SDKs and driver
+        integrations, and key management itself (§0, amendments A1 and A4). A proposal in
+        those areas is welcome as a design amendment, not as code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What cannot be done today, and what you had to do instead.
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: |
+        If this touches the SQL surface, the envelope bytes or a sysvar, say so explicitly —
+        those changes go through `docs/design.md` and `spec/envelope.md` before any code.
+    validations: { required: true }
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require a new envelope version byte, or I am proposing one deliberately
+        - label: I have read the relevant section of docs/design.md

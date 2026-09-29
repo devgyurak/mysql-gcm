@@ -1,6 +1,11 @@
 name: build
-on: { pull_request: {}, push: { branches: [main], tags: ["v*"] } }
+on: { pull_request: {}, push: { branches: [main, develop], tags: ["v*"] } }
 permissions: { contents: read, packages: write }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   matrix:
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
@@ -10,11 +15,11 @@ jobs:
         mysql: ["8.0", "8.4", "9"]
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
       - name: Build component (cached configured MySQL tree in GHCR)
         run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}", path: "build/${{ matrix.mysql }}/component_gcm.so" }
 

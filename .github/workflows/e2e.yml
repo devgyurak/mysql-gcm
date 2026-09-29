@@ -1,11 +1,16 @@
 name: e2e
 on:
-  push: { branches: [main] }
+  push: { branches: [main, develop] }
   pull_request: { types: [labeled, synchronize] }
   workflow_dispatch:
     inputs:
       mysql: { description: "MySQL major to run against (8.0 | 8.4 | 9)", default: "8.4" }
 permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main
+# and develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Builds its own .so: actions/download-artifact@v4 cannot reach another workflow run,
   # so downloading build.yml's output here would leave this gate vacuously green.
@@ -15,7 +20,7 @@ jobs:
     env:
       MYSQL_MAJOR: ${{ inputs.mysql || '8.4' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/build-in-docker.sh "$MYSQL_MAJOR"
       # The server image has to follow the selected major as well. A component is bound
       # to the server version it was built against, so pairing a 9.x .so with the
@@ -35,6 +40,6 @@ jobs:
       - name: Collect logs
         if: failure()
         run: docker compose -f tests/e2e/compose.yml logs --no-color > e2e-logs.txt || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with: { name: "e2e-logs-${{ inputs.mysql || '8.4' }}", path: e2e-logs.txt }

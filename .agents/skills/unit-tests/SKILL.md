@@ -28,8 +28,13 @@ option(GCM_SANITIZE "ASan/UBSan" ON)
 if(GCM_SANITIZE) add_compile_options(-fsanitize=address,undefined) add_link_options(-fsanitize=address,undefined) endif()
 add_executable(gcm_unit envelope_test.cc nonce_test.cc gcm_test.cc vectors.cc)
 target_link_libraries(gcm_unit gcm_core GTest::gtest_main)
-include(GoogleTest) gtest_discover_tests(gcm_unit WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../..)
+enable_testing()
+add_test(NAME gcm_unit COMMAND gcm_unit)
+set_tests_properties(gcm_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../.. TIMEOUT 900)
 ```
+- `enable_testing()` 없이는 `ctest` 가 "No tests were found" 를 출력하면서 **0 으로 종료**한다 — 게이트가 아무것도
+  실행하지 않는다. `gtest_discover_tests` 는 쓰지 않는다: 벡터를 정적 초기화에서 파싱하므로 케이스별 discovery 가
+  그 비용을 케이스 수만큼 되풀이한다(ASan 에서 바이너리 하나 실행 ~40초 vs 목록 조회만 ~24초).
 - `vectors.cc`: JSON 파서는 단일 헤더(nlohmann 을 `third_party/` 에 핀). 벡터 로드 실패는 테스트 실패(스킵 아님).
 - 파일 대응: `envelope_test.cc`(파싱 경계), `nonce_test.cc`(유도·충돌), `gcm_test.cc`(KAT·변조·왕복).
 - 파라미터화: `TEST_P(Kat, GivenNistVector_WhenSeal_ThenMatches)` + `INSTANTIATE_TEST_SUITE_P` 벡터 id 를 이름으로.

@@ -12,20 +12,25 @@
   <img alt="MySQL 8.0 | 8.4 | 9.x" src="https://img.shields.io/badge/MySQL-8.0%20%7C%208.4%20%7C%209.x-4479A1?logo=mysql&logoColor=white">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
   <img alt="OpenSSL 3" src="https://img.shields.io/badge/OpenSSL-3.x-721412?logo=openssl&logoColor=white">
-  <img alt="status: Phase 2" src="https://img.shields.io/badge/status-Phase%202%20(%EA%B5%AC%ED%98%84)-orange">
+  <img alt="status: 0.1.0 ready to tag" src="https://img.shields.io/badge/status-0.1.0%20%ED%83%9C%EA%B9%85%20%EC%A4%80%EB%B9%84-brightgreen">
   <a href="LICENSE"><img alt="license: GPLv2" src="https://img.shields.io/badge/license-GPLv2-blue"></a>
 </p>
 
 `gcm_encrypt`, `gcm_encrypt_det`, `gcm_decrypt` 를 MySQL **component** 로 등록합니다(레거시 UDF
 플러그인이 아닙니다). 복호화 결과에 `utf8mb4` 문자셋을 태깅하므로 MySQL 자신의 collation 이
 `LIKE '%길%'` 를 **서버 안에서** 처리합니다 — 암호화된 컬럼에 부분일치 검색을 유지하는 것이 이
-프로젝트의 존재 이유입니다. 개발 머신에서 10만 행을 서버측으로 필터링하면 **p95 41ms** 이고,
-`docs/design.md` §1.2 는 같은 후보 집합을 애플리케이션으로 가져와 복호화하는 비용을 ~1.1초로 추정합니다.
-릴리스 baseline 이 아니라 참고 수치이며, 무엇을 어디서 측정했는지는 `docs/perf.md` 에 있습니다.
+프로젝트의 존재 이유입니다. CI 하드웨어에서 **30만 행을 스캔·복호화·부분일치까지 직렬 p95 255ms**
+에 처리하며, 측정한 모든 지점에서 `AES_DECRYPT` 대비 **0.95배 미만**입니다. 비용은 인증 암호가 아니라
+행 스캔이고 두 방식이 똑같이 냅니다.
+`docs/design.md` §1.2 는 후보 10만 행을 애플리케이션으로 가져와 복호화하는 비용만으로 ~1.1초를 추정합니다.
+근거가 된 3회 측정은 `docs/perf.md` 에 있습니다.
 
-> **현재 단계: Phase 2(구현).** MySQL 8.0 · 8.4 · 9.x 서버 소스 트리에서 빌드·설치되고 단위 · 통합 ·
-> MTR · E2E · 부하 테스트를 통과합니다. **아직 릴리스하지 않았습니다**: 공개 배포 파일, 기준
-> 하드웨어에서의 부하 baseline, 라이선스 법률 검토가 남아 있습니다. `docs/design.md` 를 참고하세요.
+> **현재 상태: 0.1.0 태깅 준비 완료.** MySQL 8.0 · 8.4 · 9.x 서버 소스 트리에서 빌드되고, CI 에서 세 major
+> 전부에 대해 단위 · 통합 테스트를, 8.4 에서 MTR · E2E · 부하 테스트를 통과합니다. 봉투 형식은 확정(`spec/envelope.md`),
+> 부하 게이트는 CI 하드웨어 3회 측정으로 설정, 릴리스 파이프라인은 끝까지 드라이런했습니다 — 아티팩트 6개,
+> 서버 이미지 3종 기동·쿼리 검증, 체크섬 서명 및 독립 검증. **아직 공개된 것은 없습니다**: 태그가 없으므로
+> GitHub Release 도 Docker Hub 태그도 없습니다. 그대로 남아 있는 단서: **독립적인 암호 검토를 받지
+> 않았습니다**(제약 13).
 
 ## 먼저 확인하세요 — 운영 제약
 
@@ -151,6 +156,26 @@ docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_g
 `plugin_dir`는 이미지마다 다릅니다. Oracle Linux 기반 이미지에서는 `/usr/lib64/mysql/plugin/`입니다.
 경로를 하드코딩하지 말고 서버에 조회하세요.
 
+### 릴리스 파일 검증
+
+릴리스에는 tar 6개(major 3종 x amd64/arm64), `SHA256SUMS`, 그에 대한 서명과 인증서, SPDX SBOM 이
+들어 있습니다(SBOM 도 체크섬 대상입니다). 서명은 키 없는(keyless) 방식이라 검증으로 확인하는 것은
+**어느 저장소의 어느 워크플로가 어느 ref 에서 그 체크섬을 만들었는지**입니다. 우리가 보관하거나 유출될
+장기 키가 없습니다. 신원의 `@refs/tags/v` 부분을 빼지 마세요 — 빼면 같은 저장소가 브랜치에서 만든 서명,
+즉 릴리스 드라이런의 산출물까지 통과합니다.
+
+```sh
+gh release download v0.1.0 -R devgyurak/mysql-gcm
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github\.com/devgyurak/mysql-gcm/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+tar xzf component_gcm-0.1.0-mysql8.4-amd64.tar.gz     # -> component_gcm.so
+```
+
+받은 `.so` 를 해당 서버의 `plugin_dir` 에 복사하고 위와 같이 설치합니다. major 를 맞추세요.
+8.4 용으로 빌드한 component 는 9.x 에 로드되지 않습니다.
+
 ## 함수
 
 | 함수 | 봉투 | 반환 | 용도 |
@@ -197,7 +222,7 @@ SELECT id FROM patients WHERE gcm_decrypt(name_enc, @k) LIKE '%길%';   -- 서�
 
 | 계층 | 무엇을 보증하는가 | 명령 |
 |:--|:--|:--|
-| **단위** — 1,434 케이스, ASan + UBSan | NIST CAVP KAT, 스펙 벡터 전체, 봉투 경계, 키 소거, nonce 충돌 샘플링 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| **단위** — 1,434 케이스, ASan + UBSan | NIST CAVP KAT, 스펙 벡터 전체, 봉투 경계, 키 소거, nonce 충돌 샘플링 | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | **통합** — 10 시나리오 × 3 메이저 | 한글 `LIKE`, strict 의미론과 버전별 범위, NULL·크기 경계, v1 dual-read, 8.x 인자 결함 | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | **MTR** — 7 테스트 | 서버 자체 하니스에서의 같은 표면 + ROW 복제와 SBR 불일치 | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 시나리오 | primary + replica + 독립 샤드, SQL 만으로 | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |

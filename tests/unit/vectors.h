@@ -8,6 +8,7 @@
 #define MYSQL_GCM_TESTS_VECTORS_H
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gcm_test {
@@ -32,8 +33,14 @@ const std::vector<Vector> &all_vectors();
 /* Vectors filtered by `expect`, and by kind when `kind` is not empty. */
 std::vector<Vector> vectors_where(const std::string &expect, const std::string &kind = "");
 
-/* Single vector by id; fails the test if absent. */
-const Vector &vector_by_id(const std::string &id);
+/* Single vector by id; fails the test if absent.
+
+   The parameter is a string_view *by value* rather than a const reference: with a
+   reference parameter, GCC's -Wdangling-reference fires on every
+   `const Vector &v = vector_by_id("some-id")` call site, because it cannot tell that
+   the returned reference points into the static vector list rather than into the
+   temporary argument. The project builds with -Werror, so that warning is fatal. */
+const Vector &vector_by_id(std::string_view id);
 
 std::string to_hex(const unsigned char *data, size_t size);
 

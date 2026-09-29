@@ -28,9 +28,30 @@ feature branch ──PR──▶ develop ──PR──▶ main ──tag v*─�
 
 - `develop` is where work lands. Open the PR against `develop`.
 - A PR to `develop` needs review from the maintainer (`@devgyurak`, see `.github/CODEOWNERS`).
-- `main` takes no direct pushes. It advances only by merging `develop`.
+- `main` takes no direct pushes **from anyone, administrators included**. It advances only by merging
+  `develop`.
 - A release is a tag `v*` on `main`. That is what publishes artifacts and Docker images; nothing else
-  does.
+  does, and `release.yml` verifies the tag is contained in `main` before it publishes anything.
+
+Both branches require the same 18 checks, under the names GitHub reports them by: the seven `lint`
+jobs (`cpp`, `python`, `agents-sync`, `architecture`, `shell`, `secrets`, `workflows`), `cpp-asan` and
+`vectors` from `unit`, the six `matrix (<major>, <arch>)` entries from `build`, and `smoke (8.0)`,
+`smoke (8.4)`, `smoke (9)` from `integration`.
+
+Two jobs are deliberately **not** required:
+
+- `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
+  waiting for a check that never reports. Add the label when the change touches replication,
+  sharding, dual-read or the runner itself.
+- `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
+  every push to `develop` and `main`, and a failure there is as blocking in practice as a required
+  check — it just is not allowed to hold the merge button hostage for an hour.
+
+Branches also do not have to be up to date before merging: for a repository this size the alternative
+is rebasing and re-running a six-entry build matrix for every merge that lands ahead of yours.
+
+Pushing to `develop` runs the same workflows as a PR to it, so a maintainer push — which the
+protection deliberately allows — is gated too.
 
 ## What a reviewable PR looks like
 
@@ -49,7 +70,7 @@ The pyramid, and what each layer is for:
 
 | Layer | Runs | Command |
 |:--|:--|:--|
-| unit (GoogleTest, ASan + UBSan) | no server; the core links libcrypto only | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| unit (GoogleTest, ASan + UBSan) | no server; the core links libcrypto only | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | integration | a real server, once per major | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
@@ -90,6 +111,7 @@ Performance work must not remove a check. If a change alters per-row cost, show 
 ```sh
 python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
+python3 scripts/check-action-pins.py             # no workflow uses a mutable action tag
 clang-format --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*')
 ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
@@ -98,9 +120,53 @@ python scripts/gen-vectors.py --check
 
 CI runs all of these. Nothing here needs network access except the Docker builds.
 
+## Cutting a release
+
+The maintainer cuts releases. `.github/workflows/release.yml` refuses to publish unless all three
+hold:
+
+- the tag is exactly `vMAJOR.MINOR.PATCH` — no prerelease suffix. `v0.2.0-rc1` is refused, because a
+  prerelease reaching the publishing path would ship as a normal release *and* move the `mysql<major>`
+  tag onto it. A name like `0.2.0-rc1` is for the dry run below, which publishes nothing,
+- the tagged commit is contained in `main`, so nothing reaches a release without going through it,
+- `CHANGELOG.md` has a `## <version>` section. Release notes are written before the tag by someone
+  who decided what the release is, not generated afterwards from commit subjects.
+
+1. Open a PR from `develop` to `main` with the CHANGELOG section for the version filled in.
+2. Dry-run the whole pipeline on that branch — it publishes nothing:
+
+   ```sh
+   gh workflow run release.yml --ref develop -f version=0.2.0-rc1
+   ```
+
+   It builds all six artifacts, builds each server image and **starts it and queries it**
+   (`scripts/smoke-image.sh`: component installed, Korean `LIKE` hit, result `utf8mb4`, strict ON),
+   signs the checksums, and uploads the lot as a build artifact for inspection.
+3. Merge, then tag `main`:
+
+   ```sh
+   git tag -a v0.2.0 -m 'v0.2.0' && git push origin v0.2.0
+   ```
+
+4. Check what came out: six tarballs, `SHA256SUMS` with its `.sig` and `.pem`, `sbom.spdx.json`, and
+   the Docker Hub tags `<version>-mysql<major>` plus the moving `mysql<major>`.
+
+Downloads are verifiable without holding any key of ours — the signature is bound to this
+repository's workflow identity, so what you check is *what produced the file*:
+
+```sh
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github\.com/devgyurak/mysql-gcm/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+```
+
+The image jobs need the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets. Without them
+those jobs fail and the GitHub Release still publishes; the tarballs do not depend on Docker Hub.
+
 ## Reporting a security issue
 
-Do not open a public issue for a cryptographic flaw. Use GitHub's private vulnerability reporting on
+Full policy: [SECURITY.md](SECURITY.md). In short: do not open a public issue for a cryptographic flaw. Use GitHub's private vulnerability reporting on
 this repository. Include the server version, the envelope version byte, and the shape of the failing
 query — never a real key or real plaintext.
 

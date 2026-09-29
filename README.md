@@ -12,21 +12,26 @@
   <img alt="MySQL 8.0 | 8.4 | 9.x" src="https://img.shields.io/badge/MySQL-8.0%20%7C%208.4%20%7C%209.x-4479A1?logo=mysql&logoColor=white">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
   <img alt="OpenSSL 3" src="https://img.shields.io/badge/OpenSSL-3.x-721412?logo=openssl&logoColor=white">
-  <img alt="status: Phase 2" src="https://img.shields.io/badge/status-Phase%202%20(implementation)-orange">
+  <img alt="status: 0.1.0 ready to tag" src="https://img.shields.io/badge/status-0.1.0%20ready%20to%20tag-brightgreen">
   <a href="LICENSE"><img alt="license: GPLv2" src="https://img.shields.io/badge/license-GPLv2-blue"></a>
 </p>
 
 `gcm_encrypt`, `gcm_encrypt_det` and `gcm_decrypt` are registered as a MySQL **component** (not a
 legacy UDF plugin). The decrypted value is charset-tagged `utf8mb4`, so MySQL's own collation drives
 `LIKE '%길%'` **inside the server** — keeping partial-match search on encrypted columns, which is the
-reason this project exists. On a developer machine at 100,000 rows the server-side filter measures
-**41 ms p95**, where `docs/design.md` §1.2 estimates ~1.1 s for pulling the same candidate set into
-the application and decrypting it there. Those are indicative numbers, not a release baseline —
-`docs/perf.md` says what was measured and on what.
+reason this project exists. On CI hardware, **300,000 rows are scanned, decrypted and matched in
+255 ms p95** on one session — and GCM lands **below 0.95x** of the `AES_DECRYPT` baseline at every
+measured point, so the authenticated cipher is not the cost here; the row scan is, and both variants
+pay it. `docs/design.md` §1.2 estimates ~1.1 s for pulling just 100,000 candidate rows into the
+application and decrypting them there. `docs/perf.md` has the three runs behind those numbers.
 
-> **Status: Phase 2 (implementation).** Builds in-tree against MySQL 8.0, 8.4 and 9.x, installs, and
-> passes unit, integration, MTR, E2E and load suites. **Not released**: no published artifacts, no
-> load baseline on reference hardware, no legal sign-off on the license. See `docs/design.md`.
+> **Status: ready to tag 0.1.0.** Builds in-tree against MySQL 8.0, 8.4 and 9.x and passes the unit
+> and integration suites on all three majors in CI, plus MTR, E2E and load on 8.4. The envelope format is frozen
+> (`spec/envelope.md`), the load gate is set from three measured runs on CI hardware, and the release
+> pipeline has been dry-run end to end — six artifacts, all three server images started and queried,
+> checksums signed and the signature verified independently. **Nothing is published yet**: no tag, so
+> no GitHub Release and no Docker Hub tags. The standing caveat is unchanged — **no independent
+> cryptographic review** (constraint 13).
 
 ## Read this first — operational constraints
 
@@ -158,6 +163,27 @@ docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_g
 `plugin_dir` differs between images (`/usr/lib64/mysql/plugin/` on the Oracle Linux based ones), so
 ask the server rather than hardcoding it.
 
+### Verifying a release download
+
+A release carries six tarballs (three majors x amd64/arm64), `SHA256SUMS`, a signature and
+certificate for it, and an SPDX SBOM (covered by the checksums too). The signature is keyless, so
+what you verify is *which workflow, in which repository, at which ref produced the checksums* —
+there is no long-lived key of ours to trust or to leak. Keep the `@refs/tags/v` part of the identity:
+without it the same command would also accept a signature this repository produced on a branch,
+including a release dry run:
+
+```sh
+gh release download v0.1.0 -R devgyurak/mysql-gcm
+cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github\.com/devgyurak/mysql-gcm/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum -c SHA256SUMS
+tar xzf component_gcm-0.1.0-mysql8.4-amd64.tar.gz     # -> component_gcm.so
+```
+
+Then copy the `.so` into that server's `plugin_dir` and install it, as above. Match the major: a
+component built for 8.4 does not load into 9.x.
+
 ## Functions
 
 | Function | Envelope | Returns | Use it for |
@@ -204,7 +230,7 @@ Every layer runs against a real server except the unit suite, which links libcry
 
 | Layer | What it proves | Command |
 |:--|:--|:--|
-| **unit** — 1,434 cases, ASan + UBSan | NIST CAVP KAT, every spec vector, envelope boundaries, key wiping, nonce-collision sampling | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit -j"$(getconf _NPROCESSORS_ONLN)"` |
+| **unit** — 1,434 cases, ASan + UBSan | NIST CAVP KAT, every spec vector, envelope boundaries, key wiping, nonce-collision sampling | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` |
 | **integration** — 10 scenarios × 3 majors | Korean `LIKE`, strict semantics and its per-version scope, NULL and size edges, v1 dual-read, the 8.x argument defect | `scripts/verify.sh 8.0` · `8.4` · `9` |
 | **MTR** — 7 tests | the same surface inside the server's own harness, plus ROW replication and the SBR divergence | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 scenarios | primary + replica + an independent shard, over SQL only | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |

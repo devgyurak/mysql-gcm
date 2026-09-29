@@ -1,6 +1,14 @@
 name: integration
-on: { pull_request: {}, push: { branches: [main] } }
+on: { pull_request: {}, push: { branches: [main, develop] } }
 permissions: { contents: read }
+# A new push supersedes the run before it. Without this every push to a PR started
+# another `mtr` job, which builds MySQL from source for an hour or more, while the
+# superseded ones kept going: four pushes meant four concurrent server builds competing
+# for runners, and the check never settled in a useful order. Only pull_request runs are
+# cancelled — a push to main or develop must finish, because it is the gate on that branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # The component is built here rather than downloaded: actions/download-artifact@v4
   # only sees artifacts from its own workflow run, so pulling build.yml's output from
@@ -11,7 +19,7 @@ jobs:
     strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
       - run: scripts/verify.sh "${{ matrix.mysql }}"
       - name: Collect diagnostics
@@ -21,7 +29,7 @@ jobs:
             'SELECT * FROM mysql.component' > "build/${{ matrix.mysql }}/components.txt" || true
           docker logs --tail 200 "mysql-dev-${{ matrix.mysql }}" \
             > "build/${{ matrix.mysql }}/server.log" 2>&1 || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: "integration-${{ matrix.mysql }}"
@@ -40,9 +48,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/build-in-docker.sh 8.4
       - run: scripts/mtr.sh 8.4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with: { name: mtr-logs, path: "build/8.4/mtr/" }

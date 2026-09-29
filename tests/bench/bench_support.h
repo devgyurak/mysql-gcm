@@ -8,11 +8,25 @@
  * performs the equivalent OpenSSL calls directly, and what the gate compares is the ratio,
  * which divides the machine out.
  *
- * The reference is deliberately *not* a fair implementation of the feature. It does the EVP
- * work and nothing else: no nonce, no envelope bytes, no error mapping. So a ratio above one
- * is expected and is exactly the quantity of interest — everything this project adds on top
- * of the cipher. `seal_det` in particular pays two HMACs the reference does not, so its ratio
- * is several times one at small sizes. The gate watches for that number *changing*.
+ * Each case's reference performs the *same work mix*, and that is not a detail. The first
+ * version of this file had one reference — a bare seal — for all three encrypt cases, and
+ * three runs on identical CI runners showed why that cannot work:
+ *
+ *     open         (reference matches the work exactly)   run-to-run spread 1.03x
+ *     seal_random  (reference omits RAND_bytes)                             1.31x
+ *     seal_det     (reference omits two HMACs)                              2.69x
+ *
+ * Dividing an HMAC-dominated measurement by an AES-only reference does not divide the machine
+ * out; it measures how that CPU's SHA throughput compares to its AES throughput, and across
+ * GitHub's runner fleet that varies by nearly 3x. So `reference_seal_det` derives the nonce
+ * exactly as spec/envelope.md §3 specifies and then seals, and `reference_seal_random` draws a
+ * nonce from RAND_bytes and then seals. The ratio against those measures what it was always
+ * meant to: the structural overhead this project adds over a straight-line implementation of
+ * the same algorithm, with the algorithm's own cost cancelled.
+ *
+ * `reference_seal` stays, un-gated, so the *cost of determinism itself* is still reported.
+ * `seal_det` against a bare seal is a real and useful number for anyone choosing between the
+ * two SQL functions; it just cannot be a gate, because it moves with the runner.
  */
 
 #ifndef MYSQL_GCM_BENCH_SUPPORT_H
@@ -57,6 +71,16 @@ void reference_deinit();
 bool reference_seal(const unsigned char *key, const unsigned char *nonce,
                     const unsigned char *plaintext, size_t plaintext_len, unsigned char *out,
                     unsigned char *tag);
+
+/* RAND_bytes(12) then seal: what gcm_encrypt costs a straight-line implementation. */
+bool reference_seal_random(const unsigned char *key, const unsigned char *plaintext,
+                           size_t plaintext_len, unsigned char *out, unsigned char *tag);
+
+/* The derivation of spec/envelope.md §3 — HMAC(key, label), then HMAC(nonce_key, plaintext),
+   first 12 bytes — then seal. The same two HMACs src/nonce.cc performs, so a ratio against
+   this is overhead rather than algorithm. */
+bool reference_seal_det(const unsigned char *key, const unsigned char *plaintext,
+                        size_t plaintext_len, unsigned char *out, unsigned char *tag);
 bool reference_open(const unsigned char *key, const unsigned char *nonce,
                     const unsigned char *ciphertext, size_t ciphertext_len,
                     const unsigned char *tag, unsigned char *out);

@@ -20,13 +20,22 @@ import json
 import sys
 from typing import Any
 
-# Each ratio is <case> / <reference>. seal_random and seal_det share a reference on purpose:
-# what separates them is precisely what this project adds, a fresh nonce in one case and two
-# HMACs in the other, and both are measured against the same bare seal.
+# Gated: each case divided by a reference that performs the *same work mix*. An earlier version
+# divided all three encrypt cases by a bare seal, and three runs on identical CI runners spread
+# `seal_det` by 2.69x — because that quotient is really the runner's SHA-to-AES throughput ratio,
+# which varies across the fleet. bench_support.h has the numbers.
 RATIO_PAIRS = {
-    "seal_random": ("gcm/seal_random", "ref/seal"),
-    "seal_det": ("gcm/seal_det", "ref/seal"),
+    "seal_random": ("gcm/seal_random", "ref/seal_random"),
+    "seal_det": ("gcm/seal_det", "ref/seal_det"),
     "open": ("gcm/open", "ref/open"),
+}
+
+# Reported, never gated: the cost of each variant against a plain seal. This is the number that
+# tells someone choosing between gcm_encrypt and gcm_encrypt_det what determinism costs, and it
+# is exactly the number that moves with the machine — useful to read, useless to gate.
+INFORMATIONAL_PAIRS = {
+    "seal_random_vs_plain": ("gcm/seal_random", "ref/seal"),
+    "seal_det_vs_plain": ("gcm/seal_det", "ref/seal"),
 }
 
 
@@ -60,9 +69,11 @@ def sizes_for(results: dict[str, float], prefix: str) -> list[int]:
     return sorted(found)
 
 
-def comparisons(results: dict[str, float]) -> list[dict[str, Any]]:
+def comparisons(
+    results: dict[str, float], pairs: dict[str, tuple[str, str]]
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for case, (measured, reference) in RATIO_PAIRS.items():
+    for case, (measured, reference) in pairs.items():
         for size in sizes_for(results, measured):
             ours = results[f"{measured}/{size}"]
             base = results.get(f"{reference}/{size}")
@@ -121,14 +132,25 @@ def main() -> int:
     args = parser.parse_args()
 
     results = load_results(args.results)
-    rows = comparisons(results)
-    summary: dict[str, Any] = {"comparisons": rows, "recorded": recorded(results)}
+    rows = comparisons(results, RATIO_PAIRS)
+    summary: dict[str, Any] = {
+        "comparisons": rows,
+        "informational": comparisons(results, INFORMATIONAL_PAIRS),
+        "recorded": recorded(results),
+    }
 
+    print("gated — against a reference doing the same work:", file=sys.stderr)
     for row in rows:
         print(
             f"  {row['case']:<12} {row['size']:>6}B  "
             f"{row['cpu_ns']:>9.1f} ns vs ref {row['reference_ns']:>9.1f} ns  "
             f"ratio {row['ratio']}",
+            file=sys.stderr,
+        )
+    print("reported — against a plain seal, moves with the machine:", file=sys.stderr)
+    for row in summary["informational"]:
+        print(
+            f"  {row['case']:<22} {row['size']:>6}B  ratio {row['ratio']}",
             file=sys.stderr,
         )
 

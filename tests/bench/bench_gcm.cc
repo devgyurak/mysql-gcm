@@ -96,7 +96,10 @@ void open_envelope(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-/* The reference pair: same sizes, same key, same nonce length, EVP calls and nothing else. */
+/* References. `ref/seal` is a bare seal and is *not* what the gate divides by — it exists so the
+ * cost of determinism itself stays visible in the recorded output. The gated references below it
+ * perform the same work mix as the case they pair with, which is what makes the ratio a property
+ * of this code rather than of the runner's SHA-to-AES throughput ratio (bench_support.h). */
 
 void reference_seal(benchmark::State &state) {
   const size_t size = static_cast<size_t>(state.range(0));
@@ -138,6 +141,40 @@ void reference_open(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
+void reference_seal_random(benchmark::State &state) {
+  const size_t size = static_cast<size_t>(state.range(0));
+  Buffers b = buffers_for(size);
+  unsigned char tag[gcm::kTagLen] = {};
+  bool ok = true;
+
+  for ([[maybe_unused]] auto iteration : state) {
+    ok = gcm_bench::reference_seal_random(fixture_key().data, b.plaintext.data(), size,
+                                          b.envelope.data(), tag) &&
+         ok;
+    benchmark::DoNotOptimize(b.envelope.data());
+    benchmark::DoNotOptimize(tag);
+  }
+  if (!ok) state.SkipWithError("reference random seal failed");
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
+}
+
+void reference_seal_det(benchmark::State &state) {
+  const size_t size = static_cast<size_t>(state.range(0));
+  Buffers b = buffers_for(size);
+  unsigned char tag[gcm::kTagLen] = {};
+  bool ok = true;
+
+  for ([[maybe_unused]] auto iteration : state) {
+    ok = gcm_bench::reference_seal_det(fixture_key().data, b.plaintext.data(), size,
+                                       b.envelope.data(), tag) &&
+         ok;
+    benchmark::DoNotOptimize(b.envelope.data());
+    benchmark::DoNotOptimize(tag);
+  }
+  if (!ok) state.SkipWithError("reference deterministic seal failed");
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
+}
+
 }  // namespace
 
 /* The names are the contract with tests/bench/gate.py, which pairs `gcm/<case>/<size>` against
@@ -159,6 +196,14 @@ BENCHMARK(open_envelope)
     ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
 BENCHMARK(reference_seal)
     ->Name("ref/seal")
+    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
+    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
+BENCHMARK(reference_seal_random)
+    ->Name("ref/seal_random")
+    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
+    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
+BENCHMARK(reference_seal_det)
+    ->Name("ref/seal_det")
     ->RangeMultiplier(gcm_bench::kSizeMultiplier)
     ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
 BENCHMARK(reference_open)

@@ -72,7 +72,7 @@ else
 fi
 
 echo >&2
-echo "ratios against the bare-OpenSSL reference:" >&2
+echo "benchmark ratios:" >&2
 # shellcheck disable=SC2086  # gate_arg is a deliberate two-word option or empty
 python3 tests/bench/gate.py build/bench/results.json --out build/bench/ratios.json ${gate_arg} \
   >/dev/null

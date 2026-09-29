@@ -1,13 +1,40 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "bench_support.h"
 
+#include <openssl/core_names.h>
 #include <openssl/evp.h>
+#include <openssl/params.h>
+#include <openssl/rand.h>
+
+#include "nonce.h"
 
 namespace gcm_bench {
 namespace {
 
 /* Fetched once, like the component does. */
 EVP_CIPHER *g_gcm = nullptr;
+EVP_MAC *g_hmac = nullptr;
+
+/* HMAC-SHA256 the way src/nonce.cc does it, so the reference pays the same OpenSSL costs —
+   a context per call, the digest passed as a parameter — and the difference that remains is
+   this project's structure rather than a different way of calling the library. */
+bool reference_hmac(const unsigned char *key, size_t key_len, const unsigned char *msg,
+                    size_t msg_len, unsigned char *out) {
+  char digest[] = "SHA256";
+  OSSL_PARAM params[] = {
+      OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST, digest, 0),
+      OSSL_PARAM_construct_end(),
+  };
+  EVP_MAC_CTX *ctx = EVP_MAC_CTX_new(g_hmac);
+  if (ctx == nullptr) return false;
+  const unsigned char empty = 0;
+  size_t out_len = 0;
+  const bool ok = EVP_MAC_init(ctx, key, key_len, params) == 1 &&
+                  EVP_MAC_update(ctx, msg_len != 0 ? msg : &empty, msg_len) == 1 &&
+                  EVP_MAC_final(ctx, out, &out_len, gcm::kHmacLen) == 1 && out_len == gcm::kHmacLen;
+  EVP_MAC_CTX_free(ctx);
+  return ok;
+}
 
 /* A 64-bit LCG. Benchmark input only — see the header. */
 uint64_t next(uint64_t *state) {
@@ -33,13 +60,18 @@ std::vector<unsigned char> filler(size_t len, uint64_t seed) {
 }
 
 bool reference_init() {
+  /* By name, not `EVP_aes_256_gcm()` / `HMAC()`: a number that src/ is judged against must not
+     be produced through symbols src/ is forbidden to use (crypto-safety). */
   g_gcm = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
-  return g_gcm != nullptr;
+  g_hmac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
+  return g_gcm != nullptr && g_hmac != nullptr;
 }
 
 void reference_deinit() {
   EVP_CIPHER_free(g_gcm);
   g_gcm = nullptr;
+  EVP_MAC_free(g_hmac);
+  g_hmac = nullptr;
 }
 
 bool reference_seal(const unsigned char *key, const unsigned char *nonce,
@@ -80,6 +112,28 @@ bool reference_open(const unsigned char *key, const unsigned char *nonce,
   int final_written = 0;
   ok = ok && EVP_DecryptFinal_ex(ctx, out + written, &final_written) == 1;
   EVP_CIPHER_CTX_free(ctx);
+  return ok;
+}
+
+bool reference_seal_random(const unsigned char *key, const unsigned char *plaintext,
+                           size_t plaintext_len, unsigned char *out, unsigned char *tag) {
+  unsigned char nonce[gcm::kNonceLen];
+  if (RAND_bytes(nonce, static_cast<int>(sizeof(nonce))) != 1) return false;
+  return reference_seal(key, nonce, plaintext, plaintext_len, out, tag);
+}
+
+bool reference_seal_det(const unsigned char *key, const unsigned char *plaintext,
+                        size_t plaintext_len, unsigned char *out, unsigned char *tag) {
+  unsigned char nonce_key[gcm::kHmacLen];
+  unsigned char mac[gcm::kHmacLen];
+  /* No OPENSSL_cleanse here, deliberately: the reference is meant to be the cheapest correct
+     implementation of the algorithm, so wiping — which src/nonce.cc does and must — stays on
+     this project's side of the ratio where it can be seen. */
+  bool ok = reference_hmac(key, gcm::kKeyLen,
+                           reinterpret_cast<const unsigned char *>(gcm::kDetNonceLabel),
+                           gcm::kDetNonceLabelLen, nonce_key) &&
+            reference_hmac(nonce_key, sizeof(nonce_key), plaintext, plaintext_len, mac);
+  ok = ok && reference_seal(key, mac, plaintext, plaintext_len, out, tag);
   return ok;
 }
 

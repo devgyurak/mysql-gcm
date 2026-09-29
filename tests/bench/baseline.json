@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Ratio ceilings for tests/bench/gate.py. Each key is <case>/<plaintext bytes> and each",
+    "value is the most that case may cost relative to the bare-OpenSSL reference measured in",
+    "the same process (tests/bench/bench_support.h explains the reference).",
+    "",
+    "max_ratio is null on purpose: recording only, not gating. The numbers depend on the CPU's",
+    "AES and SHA instructions, so a ceiling taken from a developer machine would be wrong on a",
+    "CI runner in whichever direction happened to be convenient. Fill this from three runs of",
+    "the bench workflow on the reference runner, the way tests/load/baseline.json was filled,",
+    "and record the measurements in docs/perf.md in the same change.",
+    "",
+    "A missing ceiling for a case that exists is a violation, not a pass — otherwise a new",
+    "benchmark would be added and silently ungated."
+  ],
+  "max_ratio": null
+}

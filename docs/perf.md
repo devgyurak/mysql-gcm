@@ -44,6 +44,71 @@ The nightly `load` workflow enforces both with `--gate` and uploads the JSON as 
 either number needs a PR that states the hardware, the server version and why the regression is
 acceptable, and updates this file in the same change.
 
+## Core micro-benchmarks
+
+`tests/bench` measures `gcm.cc`, `nonce.cc` and `envelope.cc` in process, with no server and no
+SQL, and divides each case by a bare-OpenSSL equivalent measured in the same run
+(`tests/bench/bench_support.h`). It is not a substitute for the load suite; it answers what the
+load suite structurally cannot:
+
+* **Resolution.** The load ratio's run-to-run spread is 1.19x, which is why its gate sits at 1.10
+  and why a regression under roughly 20% is invisible to it. A ratio taken in process against a
+  reference on the same core is far steadier, so a change of a few percent is legible.
+* **Attribution.** When the load ratio moves, nothing says whether it was sealing, opening, nonce
+  derivation, envelope parsing, buffer handling or the server. Each of those has its own case here.
+* **Sizes the fixture never produces.** The load rows are Korean names, so every load number is
+  from the small end. 4 KiB and 64 KiB are measured only here.
+* **Cost.** Seconds, with no server, so it can run per pull request if it ever needs to.
+
+Run it with `scripts/bench.sh` (add `--gate` once the baseline has ceilings). The reference
+environment is `ubuntu-24.04` with GCC and the distribution's OpenSSL 3, which is what
+`bench.yml` runs on; on any other host the script reproduces that in a container, because a ratio
+compared against a baseline recorded elsewhere means nothing.
+
+### Developer-machine run (indicative — the CI baseline is not recorded yet)
+
+Docker `ubuntu:24.04` on an arm64 macOS laptop. AES and SHA instruction sets differ between this
+and an x86-64 runner, so the ratios will move; the shape of the findings should not.
+
+| Case | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open` / bare EVP open | 0.998 | 0.997 | 1.019 | 1.017 |
+| `seal_random` / bare EVP seal | 2.411 | 2.189 | 1.646 | 1.061 |
+| `seal_det` / bare EVP seal | 4.155 | 3.990 | 3.928 | 3.561 |
+
+Three things fell out of the first run:
+
+* **The decrypt path adds nothing measurable.** `open` sits within 2% of a bare EVP decrypt at
+  every size — and that is the path every row of a `LIKE` query goes through, which is the
+  operation the whole project exists to make viable.
+* **`gcm_encrypt` costs a constant ~425 ns over a bare seal**, invisible at 64 KiB and a factor of
+  2.4 at 16 bytes. That is `RAND_bytes(12)`, and it is the price of a fresh nonce rather than
+  overhead to remove.
+* **`gcm_encrypt_det` costs 3.6–4.2x a bare seal, and it is the HMAC, not the cipher.** Two
+  HMAC-SHA256 passes per call (`spec/envelope.md` §3) come to ~900 ns at 16 bytes against a
+  ~300 ns seal, and at 64 KiB HMAC-SHA256 is still slower per byte than AES-GCM
+  (19.4 µs vs 7.9 µs for the same 64 KiB), so the ratio stays near 3.6 rather than converging to
+  one. Anyone choosing between the two variants for a write-heavy column should know the
+  deterministic one is several times the cost, and no document said so before this ran.
+
+`envelope/parse` is 1.21–1.23 ns and identical across v1, v2 and v3, which is the invariant that
+case exists to hold: parsing reads a version byte and computes offsets, and must never start
+scanning the body.
+
+### An optimisation this found, and why it is not taken here
+
+`derive_nonce_key` — `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` — measures 455 ns and depends on
+**nothing but the key**, yet `encrypt_det` recomputes it on every call: it is roughly half of the
+896 ns that deterministic nonce derivation costs at 16 bytes, and about a third of `seal_det`.
+Caching it per `UDF_INIT` would be a ~36% cut to the deterministic encrypt path at small sizes.
+
+It is deliberately not done in this change. The key arrives as a per-row SQL argument, so a cache
+has to hold a copy of the key to know whether it is still valid — and holding derived key material
+and a key copy across rows is exactly what `crypto-safety.md` pushes against ("복사본을 만들었다면
+사용 직후 `OPENSSL_cleanse`"). That is a design decision with a security dimension, so it belongs in
+`docs/design.md` as an amendment before it belongs in `src/`. Recording the measurement is the
+useful half; this file is where the argument would start.
+
 ## Results
 
 ### Developer-machine run (indicative only — NOT the baseline, and a previous harness)

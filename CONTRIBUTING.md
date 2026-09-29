@@ -75,6 +75,7 @@ The pyramid, and what each layer is for:
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | load | p95 against the `AES_DECRYPT` baseline | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| bench | the core against a bare-OpenSSL reference, no server | `scripts/bench.sh` (add `--gate` once the baseline has ceilings) |
 
 Rules that reviewers will hold you to (`.agents/rules/testing.md`):
 

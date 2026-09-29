@@ -1,0 +1,56 @@
+name: bench
+# Core micro-benchmarks. Separate from `load` because they answer a different question: `load`
+# measures the SQL path end to end and can only resolve regressions of roughly 20% or more (its
+# run-to-run ratio spread is 1.19x at one session); this measures gcm.cc / nonce.cc / envelope.cc
+# in process against a bare-OpenSSL reference, where the machine divides out and the resolution
+# is far finer. It also covers plaintext sizes the load fixture never produces — its rows are
+# Korean names, so nothing else here ever benchmarks a 64 KiB value.
+#
+# Not a PR gate yet: tests/bench/baseline.json has no ceilings until they are measured on this
+# runner three times, which is how tests/load/baseline.json was settled.
+on:
+  schedule: [{ cron: "0 19 * * *" }]   # 04:00 KST nightly, an hour after `load`
+  workflow_dispatch:
+    inputs:
+      min_time:
+        description: "Per-case measurement budget, e.g. 0.5s"
+        default: "0.5s"
+  # Labelled rather than automatic: the value is in comparing runs on the same machine, and a
+  # number from every PR is noise nobody reads. Add `bench` when touching gcm.cc, nonce.cc,
+  # envelope.cc or the benchmarks themselves.
+  pull_request: { types: [labeled, synchronize] }
+permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main and
+# develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  bench:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'bench')
+    runs-on: ubuntu-24.04
+    env:
+      # The runner is the reference environment, so the benchmark builds on it directly. The
+      # container path in scripts/bench.sh exists for developers whose host is not ubuntu-24.04.
+      GCM_BENCH_LOCAL: "1"
+      GCM_BENCH_MIN_TIME: ${{ inputs.min_time || '0.5s' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential cmake libssl-dev
+          cmake --version
+          openssl version
+      - name: Build and run
+        run: scripts/bench.sh --gate
+      # Uploaded whether or not the gate passed: a failing run is the one whose numbers someone
+      # needs to look at.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: "bench-result-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: |
+            build/bench/results.json
+            build/bench/ratios.json

@@ -8,7 +8,7 @@ jobs:
   cpp-asan:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev libgtest-dev
       - run: cmake -S tests/unit -B build/unit -G Ninja -DGCM_SANITIZE=ON && cmake --build build/unit
       # One ctest entry runs the whole binary; see tests/unit/CMakeLists.txt for why
@@ -19,8 +19,8 @@ jobs:
   vectors:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: pip install -r scripts/requirements.txt
       - run: python scripts/gen-vectors.py --check

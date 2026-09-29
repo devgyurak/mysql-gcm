@@ -28,9 +28,22 @@ feature branch ──PR──▶ develop ──PR──▶ main ──tag v*─�
 
 - `develop` is where work lands. Open the PR against `develop`.
 - A PR to `develop` needs review from the maintainer (`@devgyurak`, see `.github/CODEOWNERS`).
-- `main` takes no direct pushes. It advances only by merging `develop`.
+- `main` takes no direct pushes **from anyone, administrators included**. It advances only by merging
+  `develop`.
 - A release is a tag `v*` on `main`. That is what publishes artifacts and Docker images; nothing else
-  does.
+  does, and `release.yml` verifies the tag is contained in `main` before it publishes anything.
+
+Both branches require the same 18 checks: the eight `lint` jobs, `cpp-asan` from `unit`, the six
+`build` matrix entries, and the three `integration` smoke jobs. Two are deliberately not required:
+
+- `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
+  waiting for a check that never reports. Add the label when the change touches replication,
+  sharding, dual-read or the runner itself.
+- branches do not have to be up to date before merging. For a repository this size the alternative is
+  rebasing and re-running a six-entry build matrix for every merge that lands ahead of yours.
+
+Pushing to `develop` runs the same workflows as a PR to it, so a maintainer push — which the
+protection deliberately allows — is gated too.
 
 ## What a reviewable PR looks like
 
@@ -90,6 +103,7 @@ Performance work must not remove a check. If a change alters per-row cost, show 
 ```sh
 python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
+scripts/check-action-pins.sh                     # no workflow uses a mutable action tag
 clang-format --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*')
 ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh

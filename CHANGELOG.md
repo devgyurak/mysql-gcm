@@ -148,3 +148,13 @@ already demonstrates the mechanism.
   iteration on one connection now, under the same ambient load and contention.
 - `develop` was absent from the CI push triggers, so a maintainer push — which the branch protection
   deliberately allows — reached it ungated.
+
+### Supply chain
+- Every action in every workflow is pinned to a commit SHA with the tag in a trailing comment,
+  which the `stack-ci-docker` rule already required and a `TODO` in `build.yml` admitted was not
+  done. A tag reference is whatever the owner last pointed it at, and an action runs with this
+  workflow's token — in `release.yml`, next to the OIDC identity that signs the artifacts consumers
+  verify. `scripts/check-action-pins.sh` enforces it and rejects a SHA with no version comment.
+- `lint.yml` gained a `workflows` job: the pin check plus actionlint, from a digest-pinned image.
+  Nothing had been checking the workflow files, so an expression that was syntactically fine and
+  semantically wrong first surfaced as a failed run on the branch it was meant to guard.

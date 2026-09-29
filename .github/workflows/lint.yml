@@ -5,7 +5,7 @@ jobs:
   cpp:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4   # TODO pin to SHA (stack-ci-docker.md)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get update && sudo apt-get install -y clang-format-18 clang-tidy-18
       # .clang-format is the MySQL 8.4 config with ColumnLimit raised to 100; see the
       # comment at the top of that file.
@@ -17,8 +17,8 @@ jobs:
   python:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: pip install ruff mypy -r scripts/requirements.txt && ruff check . && ruff format --check .
       - run: mypy --strict scripts/gen-vectors.py scripts/import-nist.py scripts/check-architecture.py
@@ -27,13 +27,13 @@ jobs:
   agents-sync:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/agents-sync.sh --check
   architecture:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       # Module boundaries of docs/design.md amendment A6: the core must stay free of
       # server headers, version macros and test seams.
@@ -41,16 +41,30 @@ jobs:
   shell:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get install -y shellcheck && shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
   secrets:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }
       # .gitleaks.toml allowlists exactly two paths, both holding published NIST vectors
       # and the documented fixture key. Everything else that trips a rule is a finding.
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           GITLEAKS_CONFIG: .gitleaks.toml
+  # Nothing checked the workflows themselves. actionlint catches an expression that is
+  # syntactically fine and semantically wrong — a misspelled context, a matrix key that no
+  # job defines, a shell quoting mistake inside `run` — which otherwise surfaces as a failed
+  # run on the branch it was supposed to guard. The image is pinned by digest for the same
+  # reason the actions are.
+  workflows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: scripts/check-action-pins.sh
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667

@@ -23,7 +23,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       publish: ${{ steps.resolve.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }   # merge-base below needs history, not just the tag
       - id: resolve
         name: Resolve the version and whether this run publishes
@@ -73,9 +73,9 @@ jobs:
         arch: [amd64, arm64]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
           path: "build/${{ matrix.mysql }}/component_gcm.so"
@@ -103,8 +103,8 @@ jobs:
     env:
       VERSION: ${{ needs.guard.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: "component_gcm-mysql${{ matrix.mysql }}-${{ matrix.arch }}"
           path: "build/${{ matrix.mysql }}"
@@ -120,7 +120,7 @@ jobs:
           echo "image=$image" >> "$GITHUB_OUTPUT"
       # Built and loaded locally first, so the smoke test below runs on the exact image
       # that gets pushed. `push: true` here would publish a broken image and then test it.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: docker/server.Dockerfile
@@ -135,7 +135,7 @@ jobs:
           tags: "mysql-gcm-server:candidate"
       - name: Start the image and query it
         run: scripts/smoke-image.sh mysql-gcm-server:candidate
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: needs.guard.outputs.publish == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -161,7 +161,7 @@ jobs:
     env:
       VERSION: ${{ needs.guard.outputs.version }}
     steps:
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -186,8 +186,8 @@ jobs:
     env:
       VERSION: ${{ needs.guard.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: artifacts }
       - name: Package every major and architecture
         run: |
@@ -205,7 +205,7 @@ jobs:
             exit 1
           }
           (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
-      - uses: anchore/sbom-action@v0
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with: { path: ., output-file: dist/sbom.spdx.json }
       # Keyless: the signature is bound to this workflow's OIDC identity, so a verifier
       # checks *which workflow in which repository* produced the checksums, not whether
@@ -213,7 +213,7 @@ jobs:
       #   cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig \
       #     --certificate-identity-regexp 'https://github.com/devgyurak/mysql-gcm/.*' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign the checksum file
         run: |
           set -euo pipefail
@@ -229,10 +229,10 @@ jobs:
             dist/SHA256SUMS
       # A dry run keeps the same artifacts as a build artifact instead of a Release, so the
       # packaging, the checksums and the signature are all inspectable before a tag exists.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: needs.guard.outputs.publish != 'true'
         with: { name: "release-dry-run-${{ needs.guard.outputs.version }}", path: dist/* }
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         if: needs.guard.outputs.publish == 'true'
         with:
           files: dist/*

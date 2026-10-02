@@ -141,7 +141,13 @@ mysql_service_status_t gcm_component_init() {
          earlier one is in use, or unregister_variable to fail. udf_register fails on
          a duplicate name or an allocation failure, and unregister_variable fails on
          allocation too, so the two are correlated under memory pressure rather than
-         independent. Not reproduced; it came out of review as a question. */
+         independent. Not reproduced; it came out of review as a question.
+
+         Untested, deliberately and tracked: issue #7. Forcing either failure means
+         substituting the component services, and this file cannot be linked by
+         tests/unit — it includes server headers, which the architecture rule keeps out
+         of that build — so it needs a target that does not exist yet. The same issue
+         carries the dlclose limitation above, which no amount of code here can fix. */
       const bool udfs_gone = unregister_first(i);
       const bool sysvar_gone = !gcm::sysvar_unregister();
       if (udfs_gone && sysvar_gone) gcm::crypto_deinit();

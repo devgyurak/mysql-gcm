@@ -66,6 +66,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   that now. `gcm_component_deinit` is where the original reasoning does hold, because a refused
   `UNINSTALL` leaves the library mapped. An ASan build would have made the wrong claim look correct.
 
+  Two things are deliberately left open and tracked in issue #7: there is no test for the branch that
+  decides whether to release the algorithms, because forcing a service failure needs a target that can
+  stub the component services and `component.cc` cannot be linked by `tests/unit`; and the underlying
+  limitation — a registration that survives a failed install points into a library the loader has
+  already unloaded — cannot be fixed from inside a component at all.
+
   `reads_as_off()` matches `len == 3` rather than a prefix: `>= 3` would have read a future `"OFFLINE"`
   or `"OFF (deprecated)"` as off, which is the one direction the helper exists to get right.
 

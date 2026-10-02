@@ -51,6 +51,222 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   a filtered workflow does not report on a pull request that misses the filter, and a required check
   that does not report blocks the merge button indefinitely.
 
+### Fixed
+- **`gcm.strict` was read without synchronisation on MySQL 8.0 and 8.4.** `strict_enabled()` loaded
+  `g_strict` — the byte handed to `register_variable` as the variable's storage — directly, while the
+  server assigns into it from `update_func_bool()` holding `LOCK_global_system_variables`. That is a
+  C++ data race, and the comment that defended it argued from practice ("one aligned byte cannot
+  tear") rather than from the memory model, which is not the standard's position and not what a
+  sanitizer build reports.
+
+  It now reads through `component_sys_variable_register::get_variable()`, which takes the same mutex
+  on the way to `sys_var::value_ptr` — where the server itself asserts ownership of it. That service
+  method has existed since **8.0.11** and sits on a service the component already requires, so the fix
+  costs no new dependency. `strict_enabled()` runs once per `UDF_INIT` — per statement rather than
+  per row (architecture rule §5). That is a structural claim, not a measurement: the bench suite covers
+  the server-independent core only, so nothing times this mutex acquisition, and a prepared statement
+  or a stored routine pays it per execution.
+
+  The two version branches stay separate rather than being unified on this one call: `get_variable()`
+  returns the **GLOBAL** value on every version including 9.x, so using it there would silently ignore
+  `SET SESSION gcm.strict` on the one major where session scope exists. 9.x keeps
+  `mysql_system_variable_reader`.
+
+  `g_strict` is now write-only from this component's side — it exists because `register_variable`
+  needs somewhere to put the value. It stays a plain `bool` because it has to: the server performs a
+  non-atomic store through that pointer, so declaring it `std::atomic<bool>` would not have removed
+  the race, only hidden the evidence.
+
+  Both read paths now share one `reads_as_off()` helper, so the fail-closed rule — anything that is
+  not an explicit `"OFF"` leaves strict **on** — is decided in one place rather than twice.
+
+  `tests/e2e/scenarios/strict_scope_global.py` gains a case where one session turns strict off and a
+  *second session on the same server* decrypts. That pins the observable contract; it cannot prove a
+  race is gone, and the scenario's docstring says so, but it would catch the read regressing to a
+  cached or default value.
+- **The component's init rollback freed cipher handles it might not have owned.** On a failed
+  `udf_register`, `unregister_first()` discarded every `udf_unregister` result and `gcm_component_init`
+  then called `crypto_deinit()` unconditionally — so a function that refused to unregister stayed
+  callable while the `EVP_CIPHER` and `EVP_MAC` handles it uses were freed underneath it.
+  `unregister_first()` reports whether everything is gone now, and the handles are released only when
+  it is, which is the position `gcm_component_deinit` already took. Leaking them until restart is the
+  lesser outcome.
+
+  Reaching this needs `udf_register` to fail on a later function *and* an earlier one to be in use,
+  which during `INSTALL COMPONENT` means a session that resolved a name registered moments earlier in
+  the same init. Narrow enough that it has not been reproduced — it came out of review as a question,
+  not a defect — and cheap enough that the asymmetry was not worth keeping.
+
+  Review of this change found that the init rollback still discarded `sysvar_unregister()`'s result —
+  the more reachable half of the same defect. A variable left in the dictionary points `&g_strict` into
+  memory the loader has already `dlclose()`d, and **any** session reaches it with
+  `SELECT @@global.gcm.strict`, where a dangling UDF needs a session that had resolved the name. Both
+  results are checked now, and `register_first()` reports failure too, so the asymmetry review started
+  from is closed in both directions.
+
+  The same review showed the rationale first written here was wrong, by reading the loader. On a failed
+  `INSTALL COMPONENT` the rollback unloads the library, and `dlopen` is given `RTLD_NODELETE` only in
+  ASan/LSan builds (verified in the 8.4.11 tree) — so anything still registered points into an unmapped
+  segment and its caller dies regardless of what happened to the cipher handles. Keeping them is about
+  not adding a second fault to a broken install, not about preventing a crash, and the comment says
+  that now. `gcm_component_deinit` is where the original reasoning does hold, because a refused
+  `UNINSTALL` leaves the library mapped. An ASan build would have made the wrong claim look correct.
+
+  Two things are deliberately left open and tracked in issue #7: there is no test for the branch that
+  decides whether to release the algorithms, because forcing a service failure needs a target that can
+  stub the component services and `component.cc` cannot be linked by `tests/unit`; and the underlying
+  limitation — a registration that survives a failed install points into a library the loader has
+  already unloaded — cannot be fixed from inside a component at all.
+
+  `reads_as_off()` matches `len == 3` rather than a prefix: `>= 3` would have read a future `"OFFLINE"`
+  or `"OFF (deprecated)"` as off, which is the one direction the helper exists to get right.
+
+### Added
+- `tests/bench` — micro-benchmarks for `gcm.cc`, `nonce.cc` and `envelope.cc`, run by
+  `scripts/bench.sh` and by `bench.yml` on a merge to `develop` or `main` that touches the core, plus
+  nightly. Deliberately **not** on pull requests: a benchmark on every PR is four minutes and a number
+  nobody reads, and the regressions it catches are rare enough that minutes after the merge is soon
+  enough. The cost is stated rather than hidden — such a change can land on `develop` before anything
+  measures it, though it cannot reach `main` unnoticed, since `main` advances only by merging
+  `develop` and the workflow runs on both. Built with sanitizers
+  off at the optimisation level the component ships with, which is why it cannot live in
+  `tests/unit`.
+
+  The metric is a **ratio against a bare-OpenSSL equivalent measured in the same process**, the same
+  trick `tests/load/run.py` uses against `AES_DECRYPT` one layer down: absolute nanoseconds from a
+  shared runner are not comparable between runs, a ratio divides the machine out. The load suite can
+  only resolve regressions of roughly 20% or more, cannot say *which* part got slower, and never
+  measures a plaintext larger than a Korean name; this closes all three gaps in seconds and without
+  a server.
+
+  Every case asserts the operation succeeded, including the reference. An error path returns fast, so
+  a benchmark without that check happily reports excellent numbers for code that does nothing — and a
+  silently failing reference would make every ratio above it look like a regression.
+
+
+  The gate is **1.10 on every case**, and that one number is the whole claim: this project's structure
+  — envelope bytes, error mapping, buffer handling, `OPENSSL_cleanse` — must cost under 10% on top of
+  the cryptography it performs. Three reference runs measured all twelve cases between 0.986 and 1.029
+  with a 1.025x run-to-run spread, so it fails on a ~7% structural regression where the load gate
+  cannot see anything under ~20%.
+
+### Fixed
+- **The documented workaround for the 8.x argument defect did not work.** `docs/ops-constraints.md`
+  item 10, `docs/design.md` amendment A7 and both READMEs offered "a derived table" as a way to
+  materialise a computed value before passing it to `gcm_encrypt*`. With the default
+  `derived_merge=on` the optimizer merges the derived table's expression back into the outer query,
+  so the argument is computed per row after all — the documentation was recommending a route straight
+  into the defect it was warning about, and the result is silently sealing the wrong bytes.
+
+  Measured on 8.4.11 with three rows: `FROM (SELECT CONCAT(nm, id) AS v FROM t) d` round-trips
+  `1, 0, 0`; the same query with `/*+ NO_MERGE(d) */` or `optimizer_switch='derived_merge=off'`
+  gives `1, 1, 1`, as does a real `CREATE TEMPORARY TABLE ... AS SELECT`. 8.0.46 and 9.4.0 do not
+  reproduce this shape. The guidance is now "write it into a real table", with the two forced
+  materialisation forms described as what they are: optimizer discretion that happens to work today.
+
+  `tests/integration/91_server_udf_arg_defect.sql` scenario 4 pins all three forms per major, so the
+  claim is a recorded measurement rather than a sentence. No existing expectation changed — scenario 3
+  always used a real temporary table — and the suite passes on 8.0, 8.4 and 9.
+- `tests/bench/gate.py` passed when measurements were **missing**. It checked only the rows present in
+  the results file, so a run with every gated case absent — a build that produced nothing, a renamed
+  benchmark, a stray `--benchmark_filter` — exited 0 with no ratios to check. Verified: a results file
+  reduced to one nonce measurement returned 0 before, and now reports 12 violations. This is the mirror
+  of the missing-ceiling check written beside it, which makes missing it the more annoying.
+- Re-running an already-released tag would have failed in `package`. `anchore/sbom-action` defaults
+  `upload-release-assets` to true, and on a tag push it looks up a release for that tag and attaches
+  the SBOM if one exists. A first run finds nothing, because `publish` has not created the release yet
+  — but a re-run finds it and tries to upload with the `contents: read` that job now has, after
+  everything else has already succeeded. Both of the action's uploads are off now; the SBOM reaches the
+  release through `dist/*` like every other file.
+- `release.yml` could publish a GitHub Release after `manifest` failed. `package` created the Release
+  and depended on `image` but not on `manifest`, so a failure while joining the per-architecture tags
+  into the multi-arch tag — the one the README tells people to pull — still shipped six tarballs. That
+  is the partial release SECURITY.md promises never happens, and the earlier fix for it stopped one job
+  short. Publishing is now its own `publish` job behind `needs: [guard, manifest, package]`.
+
+  Adding `manifest` to `package`'s `needs` would not have worked: `manifest` is conditional on
+  publishing, and a skipped dependency skips the dependent, so every dry run would have stopped before
+  packaging. `package` now always uploads the signed distribution as an artifact — on a dry run that
+  artifact is the deliverable, and on a release it is what `publish` downloads, which is what lets
+  publishing wait for `manifest` without rebuilding or re-signing anything.
+
+### Changed
+- `mtr` moved out of `integration.yml` into its own `mtr.yml`, so it can be path-filtered. It runs on a
+  pull request that touches `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to
+  `develop` or `main`. Measured runs take **49 to 63 minutes** — it compiles MySQL from source, because
+  MTR needs a built `mysqld` and not the configured tree `build.yml` caches — and a documentation-only
+  PR was spending one of them to validate a change that cannot affect it.
+
+  It could not simply be filtered in place: `smoke (8.0|8.4|9)` live in the same workflow and **are**
+  required checks, so a `paths` filter there would stop them reporting on an unrelated PR and leave the
+  merge button blocked forever. The split is what makes the filter safe, and the rule now says so, as a
+  general constraint rather than a note about this one job.
+
+  Unlike `bench`, this is not moved to merge-only. MTR is the only gate that runs the component inside
+  the server's own harness, which fails a test on an unexpected line in the error log — the reason
+  `gcm_replication.test` has to call `mtr.add_suppression`. A crash during shutdown or a component that
+  pollutes the log appears there and nowhere else, and for a change under `src/` that is worth the hour.
+
+### Documented
+- The READMEs, `CONTRIBUTING.md` and `AGENTS.md` had not caught up with the benchmark layer: the test
+  tables, the layout trees and the script inventories all predate it. They list it now, and say that
+  it runs on the merge rather than on a pull request so nobody looks for it in their checks.
+- `CONTRIBUTING.md`'s clang-format command was broken twice over. It used
+  `$(git ls-files ...)`, which zsh does not word-split — a contributor on the default macOS shell
+  got `No such file or directory` — and which in bash would split a path containing a space into two
+  arguments and silently skip both. It is now `git ls-files -z | xargs -0`, the form `lint.yml`
+  actually runs, and it covers `tests/bench` as CI does. Verified by running the documented pipeline
+  over all 24 files rather than trusting it.
+- `docs/ops-constraints.md` item 6 and both README constraint lists now say that `gcm_encrypt_det`
+  costs **3.5–5x a plain seal** and that decryption costs the same for either variant. The constraint
+  previously covered only what determinism leaks, which left the cost to be discovered in production
+  by whoever put it on a write-heavy column.
+- `docs/design.md` records what the benchmarks answered — no measurable overhead on the decrypt path,
+  under 10% structural cost on all three encrypt paths — and opens one question rather than burying
+  it: `derive_nonce_key` is recomputed per call although it depends only on the key, and caching it
+  requires keeping a copy of the key alive across rows, which is a `crypto-safety.md` decision and
+  not a performance tweak.
+- The pull request template asks whether `scripts/bench.sh --gate` was run, since the benchmark gate
+  is no longer on the PR.
+
+### Fixed before it shipped
+- The first version of the metric measured the runner rather than the code. One reference — a bare
+  seal — served all three encrypt cases, and three runs behind the same `ubuntu-24.04` label put a
+  bare 64 KiB seal at 4,565 / 6,541 / 17,058 ns while `seal_det`'s ratio tracked that inversely at
+  9.673 / 6.803 / 3.590. The fleet varies by **3.7x** on AES-GCM throughput; the absolute HMAC numbers
+  over the same runs held to 1.15x. So the quotient was reporting how that CPU's SHA throughput
+  compares to its AES throughput, not anything about this code. Each gated case now divides by a
+  straight-line implementation of *the same algorithm*, which collapsed the spread to 1.025x and is
+  what made a gate possible at all. Stated as a limit rather than glossed: all four runs with the new
+  references landed on the slow end of the fleet, so the cross-architecture check — arm64, absolute
+  times 2.2x apart, ratios within 0.965–1.029 — is what currently stands in for observing the metric
+  across that 3.7x spread.
+
+### Measured
+- The **decrypt path adds nothing measurable** — `open` against an equivalent bare EVP decrypt is
+  1.000–1.029 across three runs at every size. That is the path every row of a `LIKE` query takes.
+- `gcm_encrypt` and `gcm_encrypt_det` likewise add nothing over a straight-line implementation of what
+  they do: 0.986–1.019. There is no hidden per-call work — no fetch that stopped being cached, no
+  buffer reallocated per row, no extra copy.
+- **`gcm_encrypt_det` costs roughly 3.5–5x a *plain* seal, and the cost is HMAC rather than the
+  cipher.** Two HMAC-SHA256 passes (`spec/envelope.md` §3) dominate at every measured size. Nothing in
+  the documentation said the deterministic variant was several times the cost; `docs/perf.md` does now,
+  which matters for anyone putting it on a write-heavy column.
+- **The direction of that ratio with size depends on the CPU.** It fell 4.9 → 3.6 on the reference
+  runs and *rose* 5.6 → 9.7 on a different `ubuntu-24.04` runner with faster AES: AES-GCM is
+  hardware-accelerated nearly everywhere and SHA-256 often is not, so the balance is a property of the
+  machine. "Several times a plain seal" is the durable statement.
+- `gcm_encrypt`'s constant ~450 ns is `RAND_bytes(12)` — the price of a fresh nonce, ~3x on a 16-byte
+  value and ~7% at 64 KiB.
+- `envelope/parse` is ~2.2–3.1 ns and equal across v1, v2 and v3 — the invariant that case exists to
+  hold, since parsing must never begin scanning the body.
+- `derive_nonce_key` (830–1120 ns) depends on nothing but the key, yet `encrypt_det` recomputes it
+  every call: around 40% of `seal_det` at small sizes. Caching it per `UDF_INIT` is a real saving and
+  deliberately **not** taken here — the key is a per-row argument, so a cache must also hold a copy of
+  the key, and keeping derived key material alive across rows is a `crypto-safety.md` question that
+  belongs in `docs/design.md` before it belongs in `src/`. The measurement and the argument are in
+  `docs/perf.md`.
+
 ## 0.1.0 — 2026-09-29
 
 First release: the component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x, and

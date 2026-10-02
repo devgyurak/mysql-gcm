@@ -47,9 +47,11 @@ Two jobs are deliberately **not** required:
   `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
   minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
   after the merge is soon enough. It therefore cannot be a required check.
-- `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
-  every push to `develop` and `main`, and a failure there is as blocking in practice as a required
-  check — it just is not allowed to hold the merge button hostage for an hour.
+- `mtr` builds the server from source: 49 to 63 minutes measured. It runs on a PR that touches
+  `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to `develop` or `main`,
+  from its own `mtr.yml` — a documentation-only PR cannot change its outcome, so it does not run one.
+  A failure there is as blocking in practice as a required check; it just is not allowed to hold the
+  merge button hostage for an hour.
 
 Branches also do not have to be up to date before merging: for a repository this size the alternative
 is rebasing and re-running a six-entry build matrix for every merge that lands ahead of yours.
@@ -117,13 +119,21 @@ Performance work must not remove a check. If a change alters per-row cost, show 
 python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
 python3 scripts/check-action-pins.py             # no workflow uses a mutable action tag
-clang-format --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*')
-ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/
+git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+    'tests/bench/*.cc' 'tests/bench/*.h' | xargs -0 clang-format --dry-run --Werror
+ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/ \
+    tests/bench/gate.py
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
 python scripts/gen-vectors.py --check
 ```
 
 CI runs all of these. Nothing here needs network access except the Docker builds.
+
+Two more exist and are not pre-push checks, because both need Docker and neither is fast:
+`scripts/unit-in-docker.sh` runs the unit suite under GCC the way CI does — worth it before touching
+`tests/unit`, since the host toolchain here is clang and GCC rejects things clang accepts — and
+`scripts/bench.sh --gate` measures the core. The benchmark runs in CI on the merge rather than on the
+pull request, so running it locally is how you find out before pushing.
 
 ## Cutting a release
 

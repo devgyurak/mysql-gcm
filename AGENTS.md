@@ -66,7 +66,8 @@ scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.
 docker/                        build.Dockerfile (configure 된 서버 소스 트리) + build-component.sh + versions.json
 docs/perf.md                   부하 측정 누적 — 설계 §1.2 의 추정치를 실측으로 대체한다
 CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 메모와 함께
-.github/workflows/             CI (lint · unit · build matrix · integration · e2e · load(nightly) · release)
+.github/workflows/             CI (lint · unit · build matrix · integration(스모크) · mtr(경로 필터)
+                               · e2e · load(nightly) · bench(머지) · release(tag))
 ```
 
 ## 4. 빌드 · 검증 명령 (스킬이 상세를 가진다)
@@ -156,6 +157,7 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 | EVP·봉투·nonce 코드 작성/수정 | 스킬 `gcm-crypto` → 완료 후 서브에이전트 `crypto-reviewer` |
 | 서버 API 시그니처가 불확실할 때 | 서브에이전트 `component-api-researcher` (추측 금지, 헤더 확인) |
 | 테스트 작성 | 스킬 `unit-tests` / `integration-tests` / `e2e-load-tests` |
+| 코어 성능이 걱정될 때 | `scripts/bench.sh --gate` → 수치는 `docs/perf.md`. 게이트 변경은 근거를 PR 에 |
 | 로컬 검증·Phase S 체크 | 스킬 `dev-container` → 서브에이전트 `verify-runner` |
 | 벡터 생성·검증 | 스킬 `unit-tests`, 암호 구성 변경 시 `crypto-reviewer` |
 | PR 리뷰 | 스킬 `code-review` → 서브에이전트 `code-reviewer` (+ `crypto-reviewer`) |

@@ -7,13 +7,14 @@ paths:
 ---
 # CI · Docker · 스크립트 관례
 
-- GitHub Actions. 워크플로 분리: `lint.yml`, `unit.yml`, `build.yml`(매트릭스), `integration.yml`, `e2e.yml`, `load.yml`(nightly/dispatch), `bench.yml`(develop·main 머지 + nightly), `release.yml`(tag). 하나의 거대한 파일 금지.
+- GitHub Actions. 워크플로 분리: `lint.yml`, `unit.yml`, `build.yml`(매트릭스), `integration.yml`(스모크 — 필수 체크), `mtr.yml`(경로 필터), `e2e.yml`, `load.yml`(nightly/dispatch), `bench.yml`(develop·main 머지 + nightly), `release.yml`(tag). 하나의 거대한 파일 금지.
 - 액션은 SHA 로 핀 (`actions/checkout@<sha> # v4`). 태그 참조 금지 (공급망). `scripts/check-action-pins.py` 가 강제하며 `lint.yml` 의 `workflows` 잡에서 돈다. 핀 갱신: `gh api repos/<owner>/<action>/commits/<tag> -q .sha`. 워크플로 자체는 같은 잡에서 digest 로 핀된 actionlint 이미지로 검사한다.
 - 빌드 매트릭스 축: MySQL `8.0.x / 8.4.x / 9.x`(정확한 패치 버전은 `docker/versions.json` 한 곳) × `amd64 / arm64`. OpenSSL 은 각 서버 이미지의 시스템 것.
 - MySQL 소스 트리 configure/build 는 비싸다. 빌드 이미지(`docker/build.Dockerfile`)를 GHCR 에 푸시하고 `versions.json` 해시로 캐시. 소스 변경 없으면 재빌드하지 않는다.
 - 통합·E2E 는 공식 `mysql:<ver>` 이미지에 `.so` 를 `docker cp` 한다. **테스트는 커스텀 서버 이미지를 쓰지 않는다** — 그래야 component 버그가 이미지 빌드 문제로 가려지지 않는다.
 - 예외는 **릴리스 배포 이미지** 하나뿐이다: `docker/server.Dockerfile` 이 공식 이미지에 `.so` 와 초기화 SQL 을 얹어 Docker Hub 로 나간다 (`release.yml` 의 `image`·`manifest` 잡, 태그 `v*` 에서만). 테스트 경로는 이 이미지에 의존하지 않는다. 자격증명은 `DOCKERHUB_USERNAME`·`DOCKERHUB_TOKEN` 시크릿.
-- PR 게이트 워크플로(`lint`·`unit`·`build`·`integration`·`e2e`)에는 `concurrency` 그룹을 둔다: `group: ${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress` 는 `pull_request` 일 때만. `integration` 의 `mtr` 은 서버를 소스에서 빌드하므로 취소가 없으면 push 마다 1시간 이상짜리 빌드가 누적된다. main·develop push 와 태그 런은 브랜치의 게이트이므로 취소하지 않는다. `load` 는 baseline 측정을 병렬 dispatch 하므로, `release` 는 발행 중단을 막기 위해 그룹을 두지 않는다.
+- **필수 체크가 있는 워크플로에 `paths` 를 걸지 않는다.** 보고되지 않는 필수 체크는 머지를 영구히 막는다. 비싼 잡을 필터링하려면 별도 워크플로로 분리한다 — `mtr.yml` 이 `integration.yml` 에서 분리된 이유다 (실측 49~63분이고, 문서만 바꾼 PR 에서도 돌고 있었다).
+- PR 게이트 워크플로(`lint`·`unit`·`build`·`integration`·`e2e`·`mtr`)에는 `concurrency` 그룹을 둔다: `group: ${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress` 는 `pull_request` 일 때만. `mtr` 은 서버를 소스에서 빌드하므로 취소가 없으면 push 마다 1시간 이상짜리 빌드가 누적된다. main·develop push 와 태그 런은 브랜치의 게이트이므로 취소하지 않는다. `load` 는 baseline 측정을 병렬 dispatch 하므로, `release` 는 발행 중단을 막기 위해 그룹을 두지 않는다.
 - 비밀은 GitHub Secrets 만. 워크플로 파일에 토큰·키 금지. keyring 파일은 잡 안에서 생성하고 잡 종료 시 사라진다.
 - 릴리스 아티팩트: `component_gcm-<ver>-mysql<major>-<arch>.tar.gz` + `SHA256SUMS` + SBOM(`syft`). 태그는 SemVer, 서버 major 별 호환표를 README 에.
 - 셸 스크립트: `#!/usr/bin/env bash`, `set -euo pipefail`, `shellcheck` 통과. 인자 없이 실행 시 usage 출력.

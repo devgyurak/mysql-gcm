@@ -58,7 +58,9 @@ load suite structurally cannot:
   derivation, envelope parsing, buffer handling or the server. Each of those has its own case here.
 * **Sizes the fixture never produces.** The load rows are Korean names, so every load number is
   from the small end. 4 KiB and 64 KiB are measured only here.
-* **Cost.** Seconds, with no server, so it can run per pull request if it ever needs to.
+* **Cost.** Seconds, with no server. It still runs on the merge rather than on every pull request —
+  a ratio on each PR is four minutes and a number nobody reads — but the option is there if a
+  change ever makes per-PR measurement worth it.
 
 Run it with `scripts/bench.sh --gate`. Keep the default measurement budget when gating: at
 `GCM_BENCH_MIN_TIME=0.05s` the same machine that produced 1.02 produced 1.11, which is the gate

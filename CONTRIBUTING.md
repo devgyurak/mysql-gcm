@@ -46,8 +46,11 @@ Two jobs are deliberately **not** required:
 - `adapter` runs only when a PR touches `src/**` or `tests/adapter/**`, like `mtr`, because a PR
   that changes neither cannot change its result. It is minutes rather than an hour — the comparable
   `smoke` jobs, which build the image, build the component and run a server, measured 2m52s to
-  3m27s — so it is worth adding to the required list once it has reported on `develop` at least
-  once. Note that the build image is not cached between CI runs by anything today.
+  3m27s — but being fast does **not** make it a candidate for the required list: a path-filtered
+  workflow does not report on a PR that misses the filter, and a required check that does not report
+  blocks the merge button indefinitely. Running once on `develop` does not help, because the filter
+  is evaluated per pull request. Note also that nothing caches the build image between CI runs
+  today.
 - `bench` does not run on pull requests at all. It runs on the merge — a push to `develop` or
   `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
   minutes and a number nobody reads, and the regressions it catches are rare enough that minutes

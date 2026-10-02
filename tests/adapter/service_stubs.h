@@ -74,6 +74,10 @@ std::vector<std::string> details_for(const std::string &method);
 /* The `extra` of the first call to a method, or "" when it was never called. */
 std::string extra_for(const std::string &method);
 
+/* Every call as "method:detail", in order. Asserting on this is how an ordering decision gets
+   pinned — a case that only checks *which* calls happened cannot see two of them swapped. */
+std::vector<std::string> call_sequence();
+
 /* What the stubs believe is registered right now, from the calls they saw. Modelling the
    state rather than only the call log is what lets a case assert that a function is *gone*
    instead of assuming it: `udf_unregister` returning failure with `was_present` false means

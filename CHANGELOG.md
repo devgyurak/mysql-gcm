@@ -37,7 +37,19 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   claimed in a comment to drive the `!register_first(i)` branch and did not — there is a case for it
   now.
 
-  Two structural fixes came out of that: the stubs model registration *state* rather than only
+  A second review round found two more, both of the same shape — a conditional pinned on one path
+  and not on the mirror one. Dropping the resource check on the `sysvar_register`-fails path passed,
+  because the only case covering that path had every unregister succeed; and moving deinit's
+  variable-unregister block to the front passed, because the cases checked *which* calls happened
+  and not their order. Both are caught now, the second by asserting the whole call sequence.
+
+  That round also caught a false statement I had put in `docs/design.md` A9: it claimed the deinit
+  ordering was already pinned, which I had taken from the previous review's list of
+  "mutations the suite catches" without running it myself. It did not catch it. The testing rule now
+  says to verify mutations rather than believe a claim that one is covered, because that is the
+  second time a comment in this project asserted coverage it did not have.
+
+  Two structural fixes came out of the first round: the stubs model registration *state* rather than only
   logging calls, so a case can assert a function is gone instead of assuming it and `TearDown` can
   check rather than hope; and there are three handle probes instead of one, each through the
   narrowest public entry point that touches its handle — `derive_det_nonce` for the MAC, because

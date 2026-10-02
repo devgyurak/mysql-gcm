@@ -241,6 +241,14 @@ std::string extra_for(const std::string &method) {
   return "";
 }
 
+std::vector<std::string> call_sequence() {
+  std::vector<std::string> out;
+  for (const Call &call : g_calls) {
+    out.push_back(call.method + ":" + call.detail);
+  }
+  return out;
+}
+
 const std::set<std::string> &registered_udfs() { return g_registered_udfs; }
 
 bool sysvar_is_registered() { return g_sysvar_registered; }

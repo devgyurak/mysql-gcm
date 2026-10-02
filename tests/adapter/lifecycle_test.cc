@@ -291,6 +291,57 @@ TEST_F(Lifecycle, GivenReRegistrationAlsoFails_WhenDeinit_ThenTheUnloadIsStillRe
   EXPECT_TRUE(algorithms_live());
 }
 
+TEST_F(Lifecycle, GivenTheSysvarFailsAndAnUnregisterIsRefused_WhenInit_ThenTheAlgorithmsAreKept) {
+  // Given: every function registers, the variable does not, and rolling the functions back is
+  //        refused because one is in use
+  fail(FailureRule{"register_variable", kStrict, 1, true});
+  fail(FailureRule{"udf_unregister", "gcm_encrypt_det", 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: gcm_encrypt_det is still callable, so the algorithms it needs must survive. Without
+  //       this case the conditional on that path could be dropped entirely and nothing noticed.
+  ASSERT_EQ(status, 1);
+  EXPECT_EQ(registered_udfs(), std::set<std::string>{"gcm_encrypt_det"});
+  EXPECT_TRUE(algorithms_live());
+}
+
+TEST_F(Lifecycle, GivenAFunctionStillInUse_WhenDeinit_ThenTheVariableIsStillRegistered) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::reset();
+  fail(FailureRule{"udf_unregister", "gcm_encrypt_det", 1, true});
+
+  // When
+  const int status = component_deinit();
+
+  // Then: the functions are handled before the variable, so a refusal happens while gcm.strict
+  //       is still there. Unregistering it first would leave a loaded component with no
+  //       variable — a half-working install that only a restart repairs (design A9).
+  ASSERT_EQ(status, 1);
+  EXPECT_TRUE(sysvar_is_registered());
+  EXPECT_TRUE(details_for("unregister_variable").empty());
+}
+
+TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::reset();
+
+  // When
+  const int status = component_deinit();
+
+  // Then: the whole sequence, not just its contents. Checking only which calls happened cannot
+  //       see the variable moved to the front, which is exactly the mutation that slipped past
+  //       an earlier version of this file.
+  ASSERT_EQ(status, 0);
+  EXPECT_EQ(
+      gcm_adapter::call_sequence(),
+      std::vector<std::string>({"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
+                                "udf_unregister:gcm_decrypt", "unregister_variable:gcm.strict"}));
+}
+
 TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreReleased) {
   // Given
   ASSERT_EQ(component_init(), 0);

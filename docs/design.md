@@ -38,9 +38,11 @@
 > - **deinit 은 init 의 거울이 아니다.** init 은 변수를 마지막에 등록하지만 deinit 도 변수를
 >   마지막에 해제한다 (LIFO 가 아니다). 의도적이다: deinit 은 함수가 사용 중이면 **거부하고
 >   되돌려야** 하는데, 변수를 먼저 해제해 두면 거부 시점에 변수가 없는 상태로 component 가 남는다.
->   함수부터 처리하면 거부가 변수에 손대기 전에 일어난다. 이 순서도 고정돼 있다 — deinit 에서
->   변수를 먼저 해제하도록 바꾸면 `GivenTheSysvarCannotBeUnregistered_WhenDeinit_…` 가 실패한다.
->   "대칭이 아니니 맞추자" 는 수정을 하지 않는다.
+>   함수부터 처리하면 거부가 변수에 손대기 전에 일어난다. "대칭이 아니니 맞추자" 는 수정을 하지 않는다.
+>   이 순서는 `GivenAFunctionStillInUse_WhenDeinit_ThenTheVariableIsStillRegistered` 와
+>   `GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast` 가 고정한다. 후자는 호출
+>   **순서 전체**를 단언한다 — 어떤 호출이 있었는지만 보는 단언은 두 개가 뒤바뀐 것을 보지 못하고,
+>   실제로 그 변이가 이 파일의 이전 판을 통과했다.
 > - 등록 순서와 롤백 분기는 `tests/adapter/lifecycle_test.cc` 가 스텁 서비스로 고정한다.
 >   변이 테스트로 확인한 것: 순서 되돌리기, 조건 없는 자원 해제, `strict_enabled()` 를 fail-open
 >   으로 바꾸기, 잠금 없는 `g_strict` 직접 읽기로 되돌리기, `mac_deinit()`·CBC 해제 제거,

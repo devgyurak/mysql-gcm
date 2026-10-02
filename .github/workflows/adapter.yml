@@ -19,9 +19,13 @@ name: adapter
 # tests. Publishing the image to GHCR would cut it further and is a pre-existing gap, not one
 # this introduces.
 #
-# Not on the required-checks list in the change that introduces it: a required check that has
-# never reported blocks the merge button. Add it after it has run on `develop` once, the same
-# sequencing `bench` used.
+# Deliberately **not** a required check, and not a candidate for becoming one while it is
+# path-filtered. A required check that does not report blocks the merge button indefinitely, and a
+# filtered workflow does not report on a pull request that misses the filter — a documentation-only
+# PR, for instance. Having run once on `develop` does not change that; the filter is evaluated per
+# pull request. This is the constraint stack-ci-docker states, and `mtr` and `compose` sit outside
+# the required list for the same reason. Making it required would mean giving it a job that always
+# reports, which is a different design and not obviously worth it.
 on:
   pull_request:
     paths: &adapter_paths

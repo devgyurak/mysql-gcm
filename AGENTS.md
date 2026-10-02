@@ -66,7 +66,8 @@ scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.
 docker/                        build.Dockerfile (configure 된 서버 소스 트리) + build-component.sh + versions.json
 docs/perf.md                   부하 측정 누적 — 설계 §1.2 의 추정치를 실측으로 대체한다
 CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 메모와 함께
-.github/workflows/             CI (lint · unit · build matrix · integration · e2e · load(nightly) · release)
+.github/workflows/             CI (lint · unit · build matrix · integration(스모크) · mtr(경로 필터)
+                               · e2e · load(nightly) · bench(머지) · release(tag))
 ```
 
 ## 4. 빌드 · 검증 명령 (스킬이 상세를 가진다)

@@ -34,6 +34,23 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   with a 1.025x run-to-run spread, so it fails on a ~7% structural regression where the load gate
   cannot see anything under ~20%.
 
+### Changed
+- `mtr` moved out of `integration.yml` into its own `mtr.yml`, so it can be path-filtered. It runs on a
+  pull request that touches `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to
+  `develop` or `main`. Measured runs take **49 to 63 minutes** — it compiles MySQL from source, because
+  MTR needs a built `mysqld` and not the configured tree `build.yml` caches — and a documentation-only
+  PR was spending one of them to validate a change that cannot affect it.
+
+  It could not simply be filtered in place: `smoke (8.0|8.4|9)` live in the same workflow and **are**
+  required checks, so a `paths` filter there would stop them reporting on an unrelated PR and leave the
+  merge button blocked forever. The split is what makes the filter safe, and the rule now says so, as a
+  general constraint rather than a note about this one job.
+
+  Unlike `bench`, this is not moved to merge-only. MTR is the only gate that runs the component inside
+  the server's own harness, which fails a test on an unexpected line in the error log — the reason
+  `gcm_replication.test` has to call `mtr.add_suppression`. A crash during shutdown or a component that
+  pollutes the log appears there and nowhere else, and for a change under `src/` that is worth the hour.
+
 ### Documented
 - The READMEs, `CONTRIBUTING.md` and `AGENTS.md` had not caught up with the benchmark layer: the test
   tables, the layout trees and the script inventories all predate it. They list it now, and say that

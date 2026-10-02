@@ -10,7 +10,7 @@ paths:
 ```
         e2e / load        느림, nightly·릴리스 게이트. 실서버 SQL+복제
        bench (gbench)     코어 마이크로벤치. develop·main 머지 + nightly. 서버 없음
-     integration / MTR    실서버 SQL 시나리오. PR 게이트
+     integration / MTR    실서버 SQL 시나리오. 스모크는 PR 필수, MTR 은 코어 변경 PR
    unit (gtest)  서버 독립 코어 + 벡터. 초 단위. PR 게이트, 커밋 전 로컬
 ```
 
@@ -60,6 +60,7 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - **절대 삭제 금지**: `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` → 1. 대소문자 `LIKE '%kim%'`(utf8mb4_general_ci). 조인 동등성 `gcm_encrypt_det(a,@k) = gcm_encrypt_det(a,@k)`.
 - NULL 전파, 인자 개수 오류, 키 길이 오류, `gcm.strict` ON/OFF 각각의 태그 실패, `SET SESSION gcm.strict` 세션 스코프, GLOBAL 변경이 기존 세션에 영향 없음.
 - `SHOW STATUS LIKE 'Created_tmp_disk_tables'` 를 전후로 찍어 `gcm_decrypt` 의 디스크 temp 여부를 기록 (design §5.3).
+- MTR 은 `mtr.yml` 에서 `src/**`·`mysql-test/**`·`spec/**`·빌드 도구를 건드리는 PR 과 머지에만 돈다 (실측 49~63분). 서버 자체 하니스만 잡는 것이 있다 — 에러 로그에 예상치 못한 줄이 있으면 실패한다. 스모크(`verify.sh` 3 major)는 모든 PR 의 필수 체크로 남는다.
 - MTR: `.result` 는 `--record` 로 만들고 diff 를 눈으로 확인한 뒤 커밋. 테스트는 `INSTALL/UNINSTALL COMPONENT` 로 자기 뒷정리, 전역 sysvar 는 `SET GLOBAL ... = DEFAULT`.
 
 ## 벤치마크 (`tests/bench`)

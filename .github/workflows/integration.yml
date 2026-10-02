@@ -1,11 +1,13 @@
 name: integration
 on: { pull_request: {}, push: { branches: [main, develop] } }
 permissions: { contents: read }
-# A new push supersedes the run before it. Without this every push to a PR started
-# another `mtr` job, which builds MySQL from source for an hour or more, while the
-# superseded ones kept going: four pushes meant four concurrent server builds competing
-# for runners, and the check never settled in a useful order. Only pull_request runs are
-# cancelled — a push to main or develop must finish, because it is the gate on that branch.
+# A new push supersedes the run before it, so three superseded server-image pulls do not keep
+# running. Only pull_request runs are cancelled — a push to main or develop must finish, because it
+# is the gate on that branch.
+#
+# Deliberately *not* path-filtered: `smoke (8.0|8.4|9)` are required checks, and a filter would stop
+# them reporting on an unrelated PR, which leaves the merge button blocked forever. The MTR job that
+# used to live here is in mtr.yml, where it can be filtered because it is not required.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -38,19 +40,3 @@ jobs:
             build/${{ matrix.mysql }}/*.actual
             build/${{ matrix.mysql }}/components.txt
             build/${{ matrix.mysql }}/server.log
-
-  # MTR needs a *built* mysqld, not just a configured tree, so scripts/mtr.sh compiles
-  # the server inside the build container and keeps it there. That is expensive on a
-  # cold runner: point GCM_MTR_CONTAINER at a cached container, or publish a
-  # server-built image to GHCR the way the build job caches the configured tree
-  # (ci-release skill). The .result files are committed, so this is a real gate.
-  mtr:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: scripts/build-in-docker.sh 8.4
-      - run: scripts/mtr.sh 8.4
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with: { name: mtr-logs, path: "build/8.4/mtr/" }

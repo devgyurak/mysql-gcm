@@ -47,9 +47,11 @@ Two jobs are deliberately **not** required:
   `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
   minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
   after the merge is soon enough. It therefore cannot be a required check.
-- `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
-  every push to `develop` and `main`, and a failure there is as blocking in practice as a required
-  check — it just is not allowed to hold the merge button hostage for an hour.
+- `mtr` builds the server from source: 49 to 63 minutes measured. It runs on a PR that touches
+  `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to `develop` or `main`,
+  from its own `mtr.yml` — a documentation-only PR cannot change its outcome, so it does not run one.
+  A failure there is as blocking in practice as a required check; it just is not allowed to hold the
+  merge button hostage for an hour.
 
 Branches also do not have to be up to date before merging: for a repository this size the alternative
 is rebasing and re-running a six-entry build matrix for every merge that lands ahead of yours.

@@ -56,6 +56,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   benchmark, a stray `--benchmark_filter` — exited 0 with no ratios to check. Verified: a results file
   reduced to one nonce measurement returned 0 before, and now reports 12 violations. This is the mirror
   of the missing-ceiling check written beside it, which makes missing it the more annoying.
+- Re-running an already-released tag would have failed in `package`. `anchore/sbom-action` defaults
+  `upload-release-assets` to true, and on a tag push it looks up a release for that tag and attaches
+  the SBOM if one exists. A first run finds nothing, because `publish` has not created the release yet
+  — but a re-run finds it and tries to upload with the `contents: read` that job now has, after
+  everything else has already succeeded. Both of the action's uploads are off now; the SBOM reaches the
+  release through `dist/*` like every other file.
 - `release.yml` could publish a GitHub Release after `manifest` failed. `package` created the Release
   and depended on `image` but not on `manifest`, so a failure while joining the per-architecture tags
   into the multi-arch tag — the one the README tells people to pull — still shipped six tarballs. That

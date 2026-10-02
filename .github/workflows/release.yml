@@ -243,8 +243,21 @@ jobs:
             find dist -type f >&2
             exit 1
           }
+      # Both uploads off. `upload-release-assets` defaults to true and, on a tag push, the
+      # action looks up a release for that tag and attaches the SBOM to it if one exists
+      # (SyftGithubAction.ts: isRefPush -> findRelease -> uploadReleaseAsset). On a first
+      # run that finds nothing, because `publish` has not created the release yet — but a
+      # re-run of an already-released tag would find it and try to upload with the
+      # `contents: read` this job now has, failing after everything else succeeded. The SBOM
+      # reaches the release through dist/* like every other file, so the action only needs
+      # to write the file. `upload-artifact` is off for the same reason: `publish` downloads
+      # one artifact by name, and a second copy of the SBOM beside it is noise.
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        with: { path: ., output-file: dist/sbom.spdx.json }
+        with:
+          path: .
+          output-file: dist/sbom.spdx.json
+          upload-release-assets: false
+          upload-artifact: false
       # After the SBOM, so the checksums cover it too. SHA256SUMS is the only signed file,
       # and it is only worth signing if it covers everything a consumer downloads.
       - name: Checksum everything in the release

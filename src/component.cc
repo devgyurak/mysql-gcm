@@ -71,21 +71,33 @@ const UdfSpec kUdfs[] = {
 
 constexpr size_t kUdfCount = sizeof(kUdfs) / sizeof(kUdfs[0]);
 
-void unregister_first(size_t count) {
+/* Returns true when every one of the first `count` functions is gone.
+   The return value matters: see the rollback in gcm_component_init. */
+bool unregister_first(size_t count) {
+  bool all_gone = true;
   for (size_t i = 0; i < count; ++i) {
     int was_present = 0;
-    mysql_service_udf_registration->udf_unregister(kUdfs[i].name, &was_present);
+    if (mysql_service_udf_registration->udf_unregister(kUdfs[i].name, &was_present) &&
+        was_present) {
+      all_gone = false;
+    }
   }
+  return all_gone;
 }
 
 /* Re-registers the first `count` functions. Used to undo a partial deinit: if the
    component stays loaded, every function it advertises has to be callable. */
-void register_first(size_t count) {
+/* Returns true when every one of the first `count` functions is registered again. */
+bool register_first(size_t count) {
+  bool all_back = true;
   for (size_t i = 0; i < count; ++i) {
     const UdfSpec &udf = kUdfs[i];
-    mysql_service_udf_registration->udf_register(udf.name, udf.return_type, udf.func, udf.init,
-                                                 udf.deinit);
+    if (mysql_service_udf_registration->udf_register(udf.name, udf.return_type, udf.func, udf.init,
+                                                     udf.deinit)) {
+      all_back = false;
+    }
   }
+  return all_back;
 }
 
 mysql_service_status_t gcm_component_init() {
@@ -103,10 +115,42 @@ mysql_service_status_t gcm_component_init() {
     const UdfSpec &udf = kUdfs[i];
     if (mysql_service_udf_registration->udf_register(udf.name, udf.return_type, udf.func, udf.init,
                                                      udf.deinit)) {
-      /* Never report success with only some functions registered. */
-      unregister_first(i);
-      gcm::sysvar_unregister();
-      gcm::crypto_deinit();
+      /* Never report success with only some functions registered. Both results are
+         checked: this path used to discard them and free the algorithms regardless.
+
+         What is actually at stake is not the EVP handles. When init returns 1 the
+         loader rolls back and its scope guard calls the scheme's unload, which
+         dlclose()s the library — and dlopen is given RTLD_NODELETE only in ASan/LSan
+         builds (components/libminchassis/dynamic_loader_scheme_file.cc, verified in
+         the 8.4.11 tree). So anything still registered points into an unmapped
+         segment: a function that refused to unregister will take its caller down
+         whatever we do with the cipher handles, and a sysvar that refused to
+         unregister leaves the dictionary holding `&g_strict` in unmapped memory,
+         which any session can touch with SELECT @@global.gcm.strict. That second one
+         is the more reachable half, and it is why unregistering the variable is
+         checked here now rather than fired and forgotten.
+
+         Neither can be repaired from inside a component: there is no way to ask the
+         loader to keep the library mapped. Releasing the algorithms only when both
+         unregisters succeeded is therefore about not adding a second fault to a
+         broken install, and about matching gcm_component_deinit — where the same
+         reasoning does hold, because a refused UNINSTALL leaves the component loaded
+         and the library mapped.
+
+         Reaching any of it needs udf_register to fail on a later function while an
+         earlier one is in use, or unregister_variable to fail. udf_register fails on
+         a duplicate name or an allocation failure, and unregister_variable fails on
+         allocation too, so the two are correlated under memory pressure rather than
+         independent. Not reproduced; it came out of review as a question.
+
+         Untested, deliberately and tracked: issue #7. Forcing either failure means
+         substituting the component services, and this file cannot be linked by
+         tests/unit — it includes server headers, which the architecture rule keeps out
+         of that build — so it needs a target that does not exist yet. The same issue
+         carries the dlclose limitation above, which no amount of code here can fix. */
+      const bool udfs_gone = unregister_first(i);
+      const bool sysvar_gone = !gcm::sysvar_unregister();
+      if (udfs_gone && sysvar_gone) gcm::crypto_deinit();
       return 1;
     }
   }
@@ -123,7 +167,14 @@ mysql_service_status_t gcm_component_deinit() {
          component stays loaded, which means the functions unregistered before
          this one must come back: leaving them gone would turn a refused
          UNINSTALL into a half-working component that only a restart repairs. */
-      register_first(i);
+      if (!register_first(i)) {
+        /* Worse than a refused unload: some functions did not come back, so the
+           component is loaded and incomplete until a restart. udf_register fails on a
+           duplicate name or an allocation failure, and this component requires no
+           logging service, so the UNINSTALL error the caller already sees is the only
+           signal there is to give. Nothing further is recoverable from here. */
+      }
+      /* Refused either way — the resources stay and a retry can succeed. */
       return 1;
     }
   }

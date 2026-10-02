@@ -16,8 +16,10 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   It now reads through `component_sys_variable_register::get_variable()`, which takes the same mutex
   on the way to `sys_var::value_ptr` — where the server itself asserts ownership of it. That service
   method has existed since **8.0.11** and sits on a service the component already requires, so the fix
-  costs no new dependency. `strict_enabled()` runs once per `UDF_INIT`, per statement rather than per
-  row (architecture rule §5), so acquiring a server mutex there is not on the hot path.
+  costs no new dependency. `strict_enabled()` runs once per `UDF_INIT` — per statement rather than
+  per row (architecture rule §5). That is a structural claim, not a measurement: the bench suite covers
+  the server-independent core only, so nothing times this mutex acquisition, and a prepared statement
+  or a stored routine pays it per execution.
 
   The two version branches stay separate rather than being unified on this one call: `get_variable()`
   returns the **GLOBAL** value on every version including 9.x, so using it there would silently ignore

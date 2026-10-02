@@ -60,6 +60,43 @@ def given_a_tampered_envelope_when_strict_is_back_on_then_decrypt_errors(ctx: Co
     assert code == ER_UDF_ERROR, f"expected ER_UDF_ERROR, got {code}"
 
 
+def given_strict_turned_off_by_another_session_when_decrypting_then_this_one_follows(
+    ctx: Context,
+) -> None:
+    """The value is written by one session and read by another.
+
+    This is the contract the 8.0/8.4 read path has to keep. `strict_enabled()` used to
+    load the registration's storage byte directly, with no synchronisation against the
+    server's write under LOCK_global_system_variables; it goes through
+    component_sys_variable_register::get_variable() now, which takes that same mutex.
+
+    What this case pins is the *observable* contract — a GLOBAL change made elsewhere is
+    seen by the next statement here. It cannot prove a data race is gone; no test can,
+    and a sanitizer build is the tool for that. It would catch the read regressing to a
+    cached or default value, which is the way a well-meaning change to that function
+    would most likely break it.
+    """
+    # Given: a tampered envelope, and strict turned off from a *different* session
+    tampered = _tampered_envelope(ctx)
+    execute(ctx.primary, "SET GLOBAL gcm.strict = OFF")
+    try:
+        # When: the other session decrypts it
+        is_null = row(
+            ctx.primary2,
+            "SELECT gcm_decrypt(UNHEX(%s), UNHEX(%s)) IS NULL",
+            (tampered, ctx.key_hex),
+        )[0]
+
+        # Then
+        assert int(str(is_null)) == 1, "a GLOBAL change from another session must be observed here"
+    finally:
+        # try/finally because this is GLOBAL: a failed assertion here would otherwise
+        # leave strict off for every scenario that runs after it on the same server, and
+        # the next failure would be in a file that did nothing wrong (testing rule: a
+        # global sysvar is restored by the case that changed it).
+        execute(ctx.primary, "SET GLOBAL gcm.strict = DEFAULT")
+
+
 def _tampered_envelope(ctx: Context) -> str:
     """A valid envelope with its last tag byte flipped, as hex."""
     envelope = str(
@@ -71,4 +108,5 @@ def _tampered_envelope(ctx: Context) -> str:
 def run(ctx: Context) -> None:
     given_strict_is_global_only_when_set_session_is_attempted_then_the_server_rejects_it(ctx)
     given_a_tampered_envelope_when_strict_is_off_globally_then_decrypt_returns_null(ctx)
+    given_strict_turned_off_by_another_session_when_decrypting_then_this_one_follows(ctx)
     given_a_tampered_envelope_when_strict_is_back_on_then_decrypt_errors(ctx)

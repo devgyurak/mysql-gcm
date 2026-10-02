@@ -31,12 +31,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ### Fixed before it shipped
 - The first version of the metric measured the runner rather than the code. One reference — a bare
-  seal — served all three encrypt cases, and three runs on identical CI runners spread `seal_det` by
-  **2.69x** (worst 9.673, best 3.590 on the same inputs) while the absolute HMAC numbers held to
-  1.15x. Dividing an HMAC-dominated measurement by an AES-only reference computes that CPU's
-  SHA-to-AES throughput ratio, and across GitHub's fleet that varies by nearly 3x. Each gated case now
-  divides by a straight-line implementation of *the same algorithm*, which collapsed the spread from
-  2.69x to 1.025x and is what made a gate possible at all.
+  seal — served all three encrypt cases, and three runs behind the same `ubuntu-24.04` label put a
+  bare 64 KiB seal at 4,565 / 6,541 / 17,058 ns while `seal_det`'s ratio tracked that inversely at
+  9.673 / 6.803 / 3.590. The fleet varies by **3.7x** on AES-GCM throughput; the absolute HMAC numbers
+  over the same runs held to 1.15x. So the quotient was reporting how that CPU's SHA throughput
+  compares to its AES throughput, not anything about this code. Each gated case now divides by a
+  straight-line implementation of *the same algorithm*, which collapsed the spread to 1.025x and is
+  what made a gate possible at all. Stated as a limit rather than glossed: all four runs with the new
+  references landed on the slow end of the fleet, so the cross-architecture check — arm64, absolute
+  times 2.2x apart, ratios within 0.965–1.029 — is what currently stands in for observing the metric
+  across that 3.7x spread.
 
 ### Measured
 - The **decrypt path adds nothing measurable** — `open` against an equivalent bare EVP decrypt is

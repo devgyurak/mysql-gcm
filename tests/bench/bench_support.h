@@ -17,8 +17,11 @@
  *     seal_det     (reference omits two HMACs)                              2.69x
  *
  * Dividing an HMAC-dominated measurement by an AES-only reference does not divide the machine
- * out; it measures how that CPU's SHA throughput compares to its AES throughput, and across
- * GitHub's runner fleet that varies by nearly 3x. So `reference_seal_det` derives the nonce
+ * out; it measures how that CPU's SHA throughput compares to its AES throughput. Putting the
+ * runner's own speed beside the ratio it produced shows it directly — a bare 64 KiB seal cost
+ * 4,565 / 6,541 / 17,058 ns across those three runs, a 3.7x fleet spread, and `seal_det`'s ratio
+ * tracked it inversely at 9.673 / 6.803 / 3.590 while the absolute HMAC numbers held to 1.15x.
+ * So `reference_seal_det` derives the nonce
  * exactly as spec/envelope.md §3 specifies and then seals, and `reference_seal_random` draws a
  * nonce from RAND_bytes and then seals. The ratio against those measures what it was always
  * meant to: the structural overhead this project adds over a straight-line implementation of

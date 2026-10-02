@@ -81,9 +81,10 @@ error mapping, buffer handling, `OPENSSL_cleanse` — costs nothing measurable.
 | `seal_det` | 1.009 / 1.011 / 1.012 | 1.013 / 1.019 / 1.013 | 1.009 / 1.010 / 1.003 | 1.003 / 1.003 / 0.999 |
 
 An arm64 macOS laptop running the same suite in the container measures 0.965–1.020 across the twelve,
-so the gate holds on both architectures. That is the point of a work-matched reference: the ratio is
-a property of this code, not of the machine. Only the un-gated "against a plain seal" numbers below
-move with hardware.
+with absolute times about 2.2x faster than the runner (`open` at 64 KiB: 7,857 ns against 17,070 ns).
+Different instruction sets, a 2.2x speed difference, and the ratio moves by 2%. That is the point of a
+work-matched reference: it is a property of this code rather than of the machine. Only the un-gated
+"against a plain seal" numbers below move with hardware.
 
 All twelve land between **0.986 and 1.029**, with a run-to-run spread of **1.025x**. The gate is
 therefore 1.10 — 7% above the worst observation and about double the observed variance — which makes
@@ -91,10 +92,25 @@ this the finest-grained gate in the project: it fails on a ~7% structural regres
 gate cannot see anything under ~20%.
 
 That any of this is gateable is a property of the references, and it was not true of the first
-version. Dividing all three encrypt cases by a bare seal spread `seal_det` by **2.69x** across
-identical runners (worst 9.673, best 3.590 for the same inputs) while the absolute HMAC numbers held
-to 1.15x — because that quotient is the runner's SHA-to-AES throughput ratio, not a property of this
-code. Matching each reference to its case's work mix collapsed the spread from 2.69x to 1.025x.
+version, which divided all three encrypt cases by a bare seal. The clearest way to see why is to put
+the runner's own speed next to the ratio it produced — three runs, same workflow, same
+`ubuntu-24.04` label:
+
+| Bare 64 KiB seal on that runner | 4,565 ns | 6,541 ns | 17,058 ns |
+|---|---|---|---|
+| `seal_det` / bare seal, 64 KiB | 9.673 | 6.803 | 3.590 |
+
+The runner fleet varies by **3.7x** on AES-GCM throughput, and the old ratio tracked it inversely and
+almost exactly. The absolute HMAC numbers over those same runs held to 1.15x, so nothing about the
+measured code was moving: the quotient was reporting how that CPU's SHA throughput compares to its
+AES throughput. Matching each reference to its case's work mix collapsed the spread to 1.025x.
+
+One limit worth stating rather than glossing: all four runs with the new references landed on the
+slower end of the fleet (implied bare seal 17,065–18,937 ns), so the work-matched metric has not yet
+been *observed* across that 3.7x spread. The arm64 cross-check below is what currently stands in for
+it — different instruction sets, absolute times 2.2x apart, ratios within 0.965–1.029 — and a run
+that lands on a fast runner will either confirm it or be the most interesting bench failure this
+project has had.
 
 ### What determinism costs
 

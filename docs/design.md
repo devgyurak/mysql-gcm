@@ -1,5 +1,51 @@
 # MySQL GCM 암복호화 함수 (component) — 설계와 절차
 
+> ## 개정 A9 (2026-10-02, 확정) — 설치 실패 후 남는 등록과 등록 순서
+>
+> `INSTALL COMPONENT` 중 `gcm_component_init()` 이 1 을 반환하면, 로더는 롤백하면서
+> scope guard 로 scheme 의 `unload` 를 호출하고 그것이 **`dlclose()`** 를 수행한다.
+> `dlopen` 에 `RTLD_NODELETE` 가 붙는 것은 **ASan/LSan 빌드뿐**이다
+> (`components/libminchassis/dynamic_loader_scheme_file.cc`, 8.4.11 트리에서 확인).
+>
+> 따라서 롤백에서 해제가 거부된 등록은 **언매핑된 세그먼트**를 가리킨다.
+>
+> - 해제가 거부된 UDF: `udf_unregister` 는 사용 중인 함수를 **원래 이름 그대로** `udf_hash` 에
+>   남긴다 (`sql_udf.cc`). 따라서 이미 resolve 한 세션뿐 아니라 **새 세션이 그 이름을 호출해도**
+>   언매핑된 코드로 뛴다. 다만 이름을 알고 호출해야 한다.
+> - 해제가 거부된 sysvar: 딕셔너리가 `&g_strict` 를 언매핑 메모리에 두고 있고, **열거만으로**
+>   닿는다 — `SHOW VARIABLES`, `performance_schema.global_variables`. 이름을 지목할 필요가 없다.
+>
+> 즉 차이는 "이미 resolve 했는가" 가 아니라 **지목 대 열거**다. 변수 쪽이 훨씬 도달하기 쉽다.
+>
+> 결정:
+>
+> - **component API 로는 고칠 수 없다.** 로더에게 "라이브러리를 매핑된 채 두라" 고 요청하는
+>   서비스가 없고, `init` 에서 언로드를 거부할 방법도 없다. 코드로 해결했다고 쓰지 않는다.
+> - **등록 순서로 노출을 줄인다.** `gcm.strict` 는 UDF 세 개가 모두 등록된 **뒤에** 등록한다.
+>   그러면 실제로 일어날 수 있는 실패(= `udf_register` 가 중간에 실패)의 롤백 시점에는 변수가
+>   아직 존재하지 않으므로, 위의 두 번째 경우가 **구조적으로 불가능**해진다. 남는 노출은
+>   `sysvar_register()` 자체가 실패하는 경우이고 그때는 UDF 만 되돌린다.
+> - 그 대가는 함수가 존재하고 변수가 아직 없는 **짧은 창**이다. 그 창에 들어온 호출은
+>   등록되지 않은 변수를 읽어 서비스가 실패하고 `strict_enabled()` 가 `true` 를 돌려준다 —
+>   strict **ON**, 즉 fail-closed 방향이다. 창은 `INSTALL COMPONENT` 내부에 있다.
+> - 해제가 거부되었을 때 **암호 핸들을 해제하지 않는다.** 이것이 위의 크래시를 막지는 못한다.
+>   망가진 설치에 두 번째 결함을 더하지 않는 것, 그리고 `gcm_component_deinit` 과 같은 입장을
+>   취하는 것이 목적이다. deinit 에서는 거부된 `UNINSTALL` 이 component 를 로드된 채 두므로
+>   같은 추론이 **실제로** 성립한다.
+> - **ASan 빌드는 이 결론을 반대로 보이게 한다.** `RTLD_NODELETE` 가 정확히 그때만 붙기
+>   때문이다. 이 사안을 샌타이저로 "확인" 하면 틀린 답을 얻는다. `tests/adapter` 의
+>   샌타이저가 기본 OFF 인 이유다.
+> - **deinit 은 init 의 거울이 아니다.** init 은 변수를 마지막에 등록하지만 deinit 도 변수를
+>   마지막에 해제한다 (LIFO 가 아니다). 의도적이다: deinit 은 함수가 사용 중이면 **거부하고
+>   되돌려야** 하는데, 변수를 먼저 해제해 두면 거부 시점에 변수가 없는 상태로 component 가 남는다.
+>   함수부터 처리하면 거부가 변수에 손대기 전에 일어난다. 이 순서도 고정돼 있다 — deinit 에서
+>   변수를 먼저 해제하도록 바꾸면 `GivenTheSysvarCannotBeUnregistered_WhenDeinit_…` 가 실패한다.
+>   "대칭이 아니니 맞추자" 는 수정을 하지 않는다.
+> - 등록 순서와 롤백 분기는 `tests/adapter/lifecycle_test.cc` 가 스텁 서비스로 고정한다.
+>   변이 테스트로 확인한 것: 순서 되돌리기, 조건 없는 자원 해제, `strict_enabled()` 를 fail-open
+>   으로 바꾸기, 잠금 없는 `g_strict` 직접 읽기로 되돌리기, `mac_deinit()`·CBC 해제 제거,
+>   deinit 의 `was_present` 가드 제거 — 일곱 가지 모두 스위트가 실패한다.
+
 > ## 개정 A8 — 키·nonce 운영 책임과 보안 보장의 범위
 >
 > component 는 키를 SQL 인자로 받고 nonce 생성·인증 검증을 수행하지만,

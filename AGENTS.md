@@ -56,8 +56,10 @@ mysql-test/suite/gcm/          MTR .test/.result (서버 소스 트리 빌드에
 tests/e2e/                     compose: mysql(ROW) + replica + Python SQL runner → LIKE / 복제 / dual-read
 tests/load/                    부하: 10k/100k/300k 행 decrypt+LIKE, AES_DECRYPT 대비 회귀 게이트
 tests/bench/                   코어 마이크로벤치 (Google Benchmark) — 맨 EVP 대비 비율. 서버 없음
+tests/adapter/                 component 설치·해제 경로 — 스텁 서비스로 실패 주입. 빌드 이미지 안에서
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
   bench.sh                    코어 마이크로벤치 빌드·실행·비율 게이트
+  adapter-tests.sh            component 설치·해제 경로를 스텁 서비스로 검증 (빌드 이미지 재사용)
   unit-in-docker.sh           단위 테스트를 CI 와 같은 GCC·ubuntu 에서 실행 (호스트 clang 이 통과시키는 것을 잡는다)
   smoke-image.sh              릴리스 서버 이미지를 기동·쿼리 (component 설치·major·한글 LIKE·strict)
   check-action-pins.py        워크플로의 모든 액션이 SHA 로 핀됐는지 검사
@@ -66,7 +68,7 @@ scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.
 docker/                        build.Dockerfile (configure 된 서버 소스 트리) + build-component.sh + versions.json
 docs/perf.md                   부하 측정 누적 — 설계 §1.2 의 추정치를 실측으로 대체한다
 CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 메모와 함께
-.github/workflows/             CI (lint · unit · build matrix · integration(스모크) · mtr(경로 필터)
+.github/workflows/             CI (lint · unit · build matrix · integration(스모크) · mtr·adapter(경로 필터)
                                · e2e · load(nightly) · bench(머지) · release(tag))
 ```
 
@@ -82,6 +84,7 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |
 | 부하 | `python tests/load/run.py --rows 300000 --baseline aes` | `e2e-load-tests` |
 | 마이크로벤치 | `scripts/bench.sh [--gate]` | `.agents/rules/testing.md` |
+| 어댑터(설치·해제) | `scripts/adapter-tests.sh 8.4` | `.agents/rules/testing.md` |
 | 벡터 재현성 | `python scripts/gen-vectors.py --check` (`scripts/requirements.txt` 설치 후) | `unit-tests` |
 | 아키텍처 경계 | `python3 scripts/check-architecture.py` | `.agents/rules/architecture.md` |
 

@@ -5,6 +5,73 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Added
+- `tests/adapter` — the component's install and uninstall paths, driven against stub services. This
+  closes the gap issue #7 opened: `unit` covers the server-independent core, `smoke` and `mtr` cover
+  SQL behaviour against a real server, and **nothing covered registration order, rollback, or what
+  happens to the fetched algorithms when a rollback is refused** — the code where two defects
+  escaped and were caught by review rather than by a test.
+
+  PR #6 deferred this on the grounds that the target could not exist, because `component.cc`
+  includes server headers and `tests/unit` excludes them. That was wrong. Every source in `src/`
+  compiles standalone with two include paths from a configured MySQL tree, so the suite runs inside
+  the build image — `scripts/adapter-tests.sh <major>` — reusing the cached tree the component build
+  already needs.
+
+  No seam was added to shipped code, which `architecture.md` §6 forbids and
+  `scripts/check-architecture.py` enforces. `REQUIRES_SERVICE_PLACEHOLDER` expands to an ordinary
+  pointer, so the test points those at stub structs; `gcm_component_init`/`deinit` are reached the
+  way the loader reaches them, through `mysql_component_t`; and whether the algorithms are live is
+  read through `gcm::encrypt_random` rather than a new accessor.
+
+  Seventeen cases over all three majors, because `GCM_HAS_SESSION_SYSVAR` compiles different code
+  and needs a different stub set.
+
+  **Crypto review found five ways the first version of this suite could not detect what it claimed
+  to protect**, which is the most useful thing a review can find in a test-adding change. All are
+  fixed and each is pinned by a mutation that now fails: `strict_enabled()` made to fail *open*
+  instead of closed — the property the whole reordering rests on; reverting the locked read to a
+  direct `g_strict` load, which the stub's constant answer made invisible; dropping `mac_deinit()`
+  or the CBC free from `crypto_deinit()`, which a probe built only on `encrypt_random` could not
+  see because `seal` checks one handle; and removing deinit's `&& was_present` guard. The suite also
+  claimed in a comment to drive the `!register_first(i)` branch and did not — there is a case for it
+  now.
+
+  Two structural fixes came out of that: the stubs model registration *state* rather than only
+  logging calls, so a case can assert a function is gone instead of assuming it and `TearDown` can
+  check rather than hope; and there are three handle probes instead of one, each through the
+  narrowest public entry point that touches its handle — `derive_det_nonce` for the MAC, because
+  `encrypt_det` derives *then* seals and so reports the cipher handle's state, not the MAC's.
+
+### Changed
+- **`gcm.strict` is registered after the three functions, not before** (`docs/design.md` amendment
+  A9). Registered first, a `udf_register` failure rolled back with the variable still in the server's
+  dictionary pointing at `&g_strict` — in memory the loader is about to unmap — and **any** session
+  could touch it with `SELECT @@global.gcm.strict`. A dangling function needs a session that had
+  already resolved its name; a dangling variable needs nobody. Registering last makes that case
+  structurally impossible on the failure path that can actually happen.
+
+  The cost is a window inside `INSTALL COMPONENT` where the functions exist and the variable does
+  not. A call landing in it reads an unregistered variable, the service fails, and `strict_enabled()`
+  returns true — strict **ON**, the fail-closed direction. One of the new tests pins the ordering so
+  it cannot be undone quietly.
+
+### Documented
+- `docs/design.md` amendment **A9**: on a failed install the loader `dlclose()`s the library, and
+  `RTLD_NODELETE` is set only in ASan/LSan builds, so any registration that survived a refused
+  rollback points into an unmapped segment. This cannot be fixed from inside a component — there is
+  no service that asks the loader to keep the library mapped — so the amendment records what the
+  reordering buys, what it does not, and that **an ASan build makes the wrong conclusion look
+  right**, which is why the adapter suite keeps sanitizers off.
+
+  A9 also records two things reviewers asked about. The reachability asymmetry is **naming versus
+  enumeration**, not "already resolved": `udf_unregister` leaves a refused function in `udf_hash`
+  under its real name, so a *new* session calling it also jumps into the unmapped segment — a
+  variable is worse because `SHOW VARIABLES` reaches it without anyone naming it. And `deinit` is
+  deliberately **not** the mirror of `init`: both touch the variable last, because deinit has to be
+  able to refuse and put things back, and unregistering the variable first would leave a refused
+  uninstall with no variable. That ordering is pinned too.
+
 ### Fixed
 - **`gcm.strict` was read without synchronisation on MySQL 8.0 and 8.4.** `strict_enabled()` loaded
   `g_strict` — the byte handed to `register_variable` as the variable's storage — directly, while the

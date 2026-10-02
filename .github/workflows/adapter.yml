@@ -1,0 +1,57 @@
+name: adapter
+# The component's install and uninstall paths, driven against stub services (tests/adapter).
+#
+# This is the layer the project was missing. `unit` covers the server-independent core, `smoke`
+# and `mtr` cover SQL behaviour against a real server, and nothing covered registration order,
+# rollback, or what happens to the fetched algorithms when a rollback is refused — the code where
+# two defects escaped and were caught by review rather than by a test.
+#
+# A matrix over all three majors, not one: `component.cc` and `sysvar.cc` compile different code
+# per version behind `GCM_HAS_SESSION_SYSVAR`, and the set of services the stubs have to provide
+# changes with it.
+#
+# It runs in the build image because these sources include server headers, so it needs a
+# configured MySQL tree. Nothing caches that image between runs — build-in-docker.sh is
+# `docker image inspect || docker build`, and no workflow pushes it to a registry — so every run
+# builds it. That is the same path `smoke` and `mtr` take, and it is measured rather than assumed:
+# the `smoke` jobs, which do image build plus component build plus a server round trip, took
+# 2m52s to 3m27s on 2026-10-02. This job is that minus the server and plus a few seconds of
+# tests. Publishing the image to GHCR would cut it further and is a pre-existing gap, not one
+# this introduces.
+#
+# Not on the required-checks list in the change that introduces it: a required check that has
+# never reported blocks the merge button. Add it after it has run on `develop` once, the same
+# sequencing `bench` used.
+on:
+  pull_request:
+    paths: &adapter_paths
+      - "src/**"
+      - "tests/adapter/**"
+      - "scripts/adapter-tests.sh"
+      - "scripts/build-in-docker.sh"
+      - "docker/**"
+      - ".github/workflows/adapter.yml"
+  push:
+    branches: [main, develop]
+    paths: *adapter_paths
+permissions: { contents: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main and
+# develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  lifecycle:
+    strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # adapter-tests.sh deliberately refuses to build the image, the same split mtr.sh uses:
+      # building it is expensive and build-in-docker.sh owns it.
+      - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
+      - run: scripts/adapter-tests.sh "${{ matrix.mysql }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: "adapter-${{ matrix.mysql }}"
+          path: "build/adapter-${{ matrix.mysql }}/Testing/"

@@ -74,6 +74,20 @@ TEST_F(Lifecycle, GivenEveryServiceSucceeds_WhenInit_ThenAllUdfsThenTheSysvarAre
   EXPECT_TRUE(algorithms_live());
 }
 
+TEST_F(Lifecycle, GivenEveryServiceSucceeds_WhenInit_ThenTheSysvarIsRegisteredAfterTheUdfs) {
+  // Given: no failures injected
+
+  // When
+  const int status = component_init();
+
+  // Then: the variable comes last, so a udf_register failure rolls back with nothing in the
+  //       system variable dictionary to leave behind (design A9)
+  ASSERT_EQ(status, 0);
+  const std::vector<gcm_adapter::Call> &calls = gcm_adapter::calls();
+  ASSERT_FALSE(calls.empty());
+  EXPECT_EQ(calls.back().method, "register_variable");
+}
+
 TEST_F(Lifecycle, GivenTheSecondUdfFailsToRegister_WhenInit_ThenTheFirstIsUnregistered) {
   // Given
   fail(FailureRule{"udf_register", "gcm_encrypt_det", 1, true});
@@ -84,7 +98,9 @@ TEST_F(Lifecycle, GivenTheSecondUdfFailsToRegister_WhenInit_ThenTheFirstIsUnregi
   // Then
   EXPECT_EQ(status, 1);
   EXPECT_EQ(details_for("udf_unregister"), std::vector<std::string>{"gcm_encrypt"});
+  EXPECT_TRUE(details_for("register_variable").empty());
   EXPECT_TRUE(registered_udfs().empty());
+  EXPECT_FALSE(sysvar_is_registered());
 }
 
 TEST_F(Lifecycle, GivenAUdfFailsAndRollbackSucceeds_WhenInit_ThenTheAlgorithmsAreReleased) {
@@ -125,6 +141,19 @@ TEST_F(Lifecycle, GivenAnUnregisterThatReportsNotPresent_WhenInit_ThenTheAlgorit
 
   // Then
   ASSERT_EQ(status, 1);
+  EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheSysvarFailsToRegister_WhenInit_ThenEveryUdfIsUnregistered) {
+  // Given
+  fail(FailureRule{"register_variable", kStrict, 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then
+  EXPECT_EQ(status, 1);
+  EXPECT_EQ(details_for("udf_unregister"), kAllUdfs);
   EXPECT_TRUE(algorithms_released());
 }
 
@@ -259,6 +288,22 @@ TEST_F(Lifecycle, GivenReRegistrationAlsoFails_WhenDeinit_ThenTheUnloadIsStillRe
   //       There is no logging service here, so this state has no signal beyond the refusal.
   EXPECT_EQ(status, 1);
   EXPECT_EQ(registered_udfs(), std::set<std::string>({"gcm_encrypt_det", "gcm_decrypt"}));
+  EXPECT_TRUE(algorithms_live());
+}
+
+TEST_F(Lifecycle, GivenTheSysvarFailsAndAnUnregisterIsRefused_WhenInit_ThenTheAlgorithmsAreKept) {
+  // Given: every function registers, the variable does not, and rolling the functions back is
+  //        refused because one is in use
+  fail(FailureRule{"register_variable", kStrict, 1, true});
+  fail(FailureRule{"udf_unregister", "gcm_encrypt_det", 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: gcm_encrypt_det is still callable, so the algorithms it needs must survive. Without
+  //       this case the conditional on that path could be dropped entirely and nothing noticed.
+  ASSERT_EQ(status, 1);
+  EXPECT_EQ(registered_udfs(), std::set<std::string>{"gcm_encrypt_det"});
   EXPECT_TRUE(algorithms_live());
 }
 

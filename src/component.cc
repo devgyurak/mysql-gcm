@@ -101,52 +101,58 @@ bool register_first(size_t count) {
 }
 
 mysql_service_status_t gcm_component_init() {
-  /* EVP_CIPHER_fetch / EVP_MAC_fetch happen once here, and first. A failure must stop the
-     install: a loaded component whose algorithms are missing would fail every call instead
-     (crypto-safety rule). Fetching before anything is registered also means no function is
-     ever callable while the handles are still null. */
+  /* EVP_CIPHER_fetch / EVP_MAC_fetch happen once here. A failure must stop the
+     install: a loaded component whose algorithms are missing would fail every
+     call instead (crypto-safety rule). */
   if (gcm::crypto_init() != 0) return 1;
+
+  if (gcm::sysvar_register()) {
+    gcm::crypto_deinit();
+    return 1;
+  }
 
   for (size_t i = 0; i < kUdfCount; ++i) {
     const UdfSpec &udf = kUdfs[i];
     if (mysql_service_udf_registration->udf_register(udf.name, udf.return_type, udf.func, udf.init,
                                                      udf.deinit)) {
-      /* Never report success with only some functions registered.
-         There is no system variable to undo at this point — see the comment on the
-         registration below — so the only question is whether the functions are gone.
+      /* Never report success with only some functions registered. Both results are
+         checked: this path used to discard them and free the algorithms regardless.
 
-         Release the algorithms only if they are. A function that refused to unregister is
-         still callable, and freeing the cipher handles underneath it would add a second
-         fault to a failed install. Leaking them until the server restarts is the lesser
-         outcome, which is the position gcm_component_deinit takes as well.
+         What is actually at stake is not the EVP handles. When init returns 1 the
+         loader rolls back and its scope guard calls the scheme's unload, which
+         dlclose()s the library — and dlopen is given RTLD_NODELETE only in ASan/LSan
+         builds (components/libminchassis/dynamic_loader_scheme_file.cc, verified in
+         the 8.4.11 tree). So anything still registered points into an unmapped
+         segment: a function that refused to unregister will take its caller down
+         whatever we do with the cipher handles, and a sysvar that refused to
+         unregister leaves the dictionary holding `&g_strict` in unmapped memory,
+         which any session can touch with SELECT @@global.gcm.strict. That second one
+         is the more reachable half, and it is why unregistering the variable is
+         checked here now rather than fired and forgotten.
 
-         Note what this cannot fix, and what design A9 records: when init returns 1 the
-         loader rolls back and dlclose()s the library, so a registration that survived here
-         points into an unmapped segment either way. Keeping the handles does not prevent
-         that crash; it only avoids causing a second, different one. */
-      if (unregister_first(i)) gcm::crypto_deinit();
+         Neither can be repaired from inside a component: there is no way to ask the
+         loader to keep the library mapped. Releasing the algorithms only when both
+         unregisters succeeded is therefore about not adding a second fault to a
+         broken install, and about matching gcm_component_deinit — where the same
+         reasoning does hold, because a refused UNINSTALL leaves the component loaded
+         and the library mapped.
+
+         Reaching any of it needs udf_register to fail on a later function while an
+         earlier one is in use, or unregister_variable to fail. udf_register fails on
+         a duplicate name or an allocation failure, and unregister_variable fails on
+         allocation too, so the two are correlated under memory pressure rather than
+         independent. Not reproduced; it came out of review as a question.
+
+         Untested, deliberately and tracked: issue #7. Forcing either failure means
+         substituting the component services, and this file cannot be linked by
+         tests/unit — it includes server headers, which the architecture rule keeps out
+         of that build — so it needs a target that does not exist yet. The same issue
+         carries the dlclose limitation above, which no amount of code here can fix. */
+      const bool udfs_gone = unregister_first(i);
+      const bool sysvar_gone = !gcm::sysvar_unregister();
+      if (udfs_gone && sysvar_gone) gcm::crypto_deinit();
       return 1;
     }
-  }
-
-  /* The system variable is registered last, after every function, and that ordering is the
-     point rather than an accident (design A9). Registered first, a udf_register failure would
-     roll back with `gcm.strict` still in the server's variable dictionary pointing at
-     &g_strict — in memory the loader is about to unmap. The asymmetry that matters is
-     reachability: a variable is reachable by *enumeration*, so SHOW VARIABLES or
-     performance_schema.global_variables touches it without anyone naming it, while a function
-     has to be named to be resolved. (A new session naming it is enough — udf_unregister leaves
-     a refused entry in udf_hash under its real name — so the function case is not as narrow as
-     "a session that already resolved it", which is what an earlier draft of this said.)
-     Registering last removes the variable exposure from the failure path that can happen.
-
-     The cost is a window between the functions existing and the variable existing. A call
-     landing in it reads an unregistered variable, the service fails, and strict_enabled()
-     returns true — strict ON, which is the fail-closed direction and the safe one. The
-     window is inside INSTALL COMPONENT. */
-  if (gcm::sysvar_register()) {
-    if (unregister_first(kUdfCount)) gcm::crypto_deinit();
-    return 1;
   }
   return 0;
 }
@@ -166,9 +172,7 @@ mysql_service_status_t gcm_component_deinit() {
            component is loaded and incomplete until a restart. udf_register fails on a
            duplicate name or an allocation failure, and this component requires no
            logging service, so the UNINSTALL error the caller already sees is the only
-           signal there is to give. Nothing further is recoverable from here.
-           GivenReRegistrationAlsoFails_WhenDeinit_ThenTheUnloadIsStillRefused in
-           tests/adapter/lifecycle_test.cc drives exactly this branch. */
+           signal there is to give. Nothing further is recoverable from here. */
       }
       /* Refused either way — the resources stay and a retry can succeed. */
       return 1;

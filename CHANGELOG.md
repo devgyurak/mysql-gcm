@@ -34,6 +34,40 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   with a 1.025x run-to-run spread, so it fails on a ~7% structural regression where the load gate
   cannot see anything under ~20%.
 
+### Fixed
+- **The documented workaround for the 8.x argument defect did not work.** `docs/ops-constraints.md`
+  item 10, `docs/design.md` amendment A7 and both READMEs offered "a derived table" as a way to
+  materialise a computed value before passing it to `gcm_encrypt*`. With the default
+  `derived_merge=on` the optimizer merges the derived table's expression back into the outer query,
+  so the argument is computed per row after all — the documentation was recommending a route straight
+  into the defect it was warning about, and the result is silently sealing the wrong bytes.
+
+  Measured on 8.4.11 with three rows: `FROM (SELECT CONCAT(nm, id) AS v FROM t) d` round-trips
+  `1, 0, 0`; the same query with `/*+ NO_MERGE(d) */` or `optimizer_switch='derived_merge=off'`
+  gives `1, 1, 1`, as does a real `CREATE TEMPORARY TABLE ... AS SELECT`. 8.0.46 and 9.4.0 do not
+  reproduce this shape. The guidance is now "write it into a real table", with the two forced
+  materialisation forms described as what they are: optimizer discretion that happens to work today.
+
+  `tests/integration/91_server_udf_arg_defect.sql` scenario 4 pins all three forms per major, so the
+  claim is a recorded measurement rather than a sentence. No existing expectation changed — scenario 3
+  always used a real temporary table — and the suite passes on 8.0, 8.4 and 9.
+- `tests/bench/gate.py` passed when measurements were **missing**. It checked only the rows present in
+  the results file, so a run with every gated case absent — a build that produced nothing, a renamed
+  benchmark, a stray `--benchmark_filter` — exited 0 with no ratios to check. Verified: a results file
+  reduced to one nonce measurement returned 0 before, and now reports 12 violations. This is the mirror
+  of the missing-ceiling check written beside it, which makes missing it the more annoying.
+- `release.yml` could publish a GitHub Release after `manifest` failed. `package` created the Release
+  and depended on `image` but not on `manifest`, so a failure while joining the per-architecture tags
+  into the multi-arch tag — the one the README tells people to pull — still shipped six tarballs. That
+  is the partial release SECURITY.md promises never happens, and the earlier fix for it stopped one job
+  short. Publishing is now its own `publish` job behind `needs: [guard, manifest, package]`.
+
+  Adding `manifest` to `package`'s `needs` would not have worked: `manifest` is conditional on
+  publishing, and a skipped dependency skips the dependent, so every dry run would have stopped before
+  packaging. `package` now always uploads the signed distribution as an artifact — on a dry run that
+  artifact is the deliverable, and on a release it is what `publish` downloads, which is what lets
+  publishing wait for `manifest` without rebuilding or re-signing anything.
+
 ### Changed
 - `mtr` moved out of `integration.yml` into its own `mtr.yml`, so it can be path-filtered. It runs on a
   pull request that touches `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to

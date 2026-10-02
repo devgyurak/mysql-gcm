@@ -111,6 +111,17 @@ def gate(rows: list[dict[str, Any]], baseline_path: str) -> list[str]:
         return []
 
     violations: list[str] = []
+    measured = {f"{row['case']}/{row['size']}" for row in rows}
+
+    # A ceiling with no measurement is a violation, not a pass. Checking only the rows that
+    # arrived made the gate vacuous in the other direction: a results file with every gated
+    # case removed — a build that silently produced nothing, a renamed benchmark, a filter
+    # left on the command line — exited 0 with no ratios to check. This is the mirror of the
+    # missing-ceiling case below, and it was missed when that one was written.
+    for key in sorted(ceilings):
+        if key not in measured:
+            violations.append(f"{key}: in {baseline_path} but not measured in this run")
+
     for row in rows:
         key = f"{row['case']}/{row['size']}"
         ceiling = ceilings.get(key)

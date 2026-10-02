@@ -204,17 +204,16 @@ jobs:
           done
           docker buildx imagetools inspect "${repo}:${VERSION}-mysql${major}"
 
+  # Builds, checksums and signs the distribution. It does **not** publish it — `publish`
+  # below does, and only after `manifest` has succeeded.
+  #
   # needs `image`, not just `build`: a .so that fails scripts/smoke-image.sh is a broken
-  # .so, and the tarball would carry the same bytes. Gating the Release on the whole image
-  # matrix is also what makes the release atomic in the sense SECURITY.md promises — if any
-  # part of it fails, nothing appears under a name the documentation tells anyone to use.
-  # The cost is that a Docker Hub outage fails the release rather than degrading it, which
-  # is the intended trade: re-running the tag is cheap, un-publishing is not.
+  # .so, and the tarball would carry the same bytes.
   package:
     needs: [guard, build, image]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write   # the GitHub Release
+      contents: read
       id-token: write   # cosign keyless signing
     env:
       VERSION: ${{ needs.guard.outputs.version }}
@@ -281,13 +280,42 @@ jobs:
             --certificate-identity-regexp "${identity}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             dist/SHA256SUMS
-      # A dry run keeps the same artifacts as a build artifact instead of a Release, so the
-      # packaging, the checksums and the signature are all inspectable before a tag exists.
+      # Always uploaded, for two readers. On a dry run this artifact *is* the deliverable, so
+      # the packaging, the checksums and the signature are inspectable before a tag exists. On
+      # a release it is what `publish` downloads, which is what lets publishing wait for
+      # `manifest` without rebuilding or re-signing anything.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: needs.guard.outputs.publish != 'true'
-        with: { name: "release-dry-run-${{ needs.guard.outputs.version }}", path: dist/* }
+        with: { name: "release-dist-${{ needs.guard.outputs.version }}", path: dist/* }
+
+  # The only job that publishes anything to GitHub, and the only one that needs `manifest`.
+  #
+  # Splitting this out is what makes the release atomic in the sense SECURITY.md promises.
+  # While publishing lived in `package`, a `manifest` failure after the per-architecture tags
+  # had been pushed left no multi-arch tag — the one the README tells people to pull — and a
+  # complete GitHub Release anyway. Adding `manifest` to `package`'s own `needs` would not
+  # have worked: `manifest` is conditional, and a skipped dependency skips the dependent, so
+  # every dry run would have stopped before packaging.
+  #
+  # The cost of this shape is that a Docker Hub outage fails the release rather than degrading
+  # it. That is the intended trade: re-running a tag is cheap, un-publishing is not.
+  publish:
+    needs: [guard, manifest, package]
+    if: needs.guard.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # the GitHub Release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: "release-dist-${{ needs.guard.outputs.version }}"
+          path: dist
+      - name: Show what is about to be published
+        run: |
+          set -euo pipefail
+          ls -l dist
+          cat dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        if: needs.guard.outputs.publish == 'true'
         with:
           files: dist/*
           generate_release_notes: true

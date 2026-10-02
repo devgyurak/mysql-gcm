@@ -17,3 +17,16 @@
 3	1	1	1
 # Then: all 1 on every major — a column, a literal or a variable is always
 #       safe, and that is what an application with bound parameters sends (above)
+# Scenario 4 — Given: the same computed expression wrapped in a derived table
+# When: it is read merged, with NO_MERGE, and with derived_merge=off
+1	1
+2	0
+3	0
+1	1
+2	1
+3	1
+1	1
+2	1
+3	1
+# Then: on 8.4 the merged form corrupts rows 2 and 3 while both forced-materialisation
+#       forms are correct — so a derived table is not a workaround (above)

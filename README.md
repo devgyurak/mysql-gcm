@@ -82,8 +82,10 @@ Full text and rationale: `docs/ops-constraints.md` and `docs/design.md` §6 with
     function a stale view of some computed string arguments from the second row of a statement on, so
     `gcm_encrypt_det(CONCAT(name, id), @k)` can silently seal the wrong bytes. A column, a literal, a
     user variable or a bound parameter is always safe — that is what a driver sends. If you must
-    compute in SQL, materialise the value first; `CAST` alone is not enough. Details and the
-    per-version measurements: `docs/design.md` amendment A7.
+    compute in SQL, write the value into a **real table** first and call the function on the stored
+    column: a *derived* table is merged back into the outer query by default and does not help.
+    `CAST` alone is not enough either. Details and the per-version measurements:
+    `docs/design.md` amendment A7.
 11. **Define a per-key usage budget and rotation plan before deployment.** Account for encryption
     across all servers, columns and applications sharing a key. Have the limits reviewed for the
     nonce mode, message sizes and acceptable risk; this project has not established a universal

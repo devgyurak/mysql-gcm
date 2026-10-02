@@ -43,6 +43,10 @@ Two jobs are deliberately **not** required:
 - `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
   waiting for a check that never reports. Add the label when the change touches replication,
   sharding, dual-read or the runner itself.
+- `bench` does not run on pull requests at all. It runs on the merge — a push to `develop` or
+  `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
+  minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
+  after the merge is soon enough. It therefore cannot be a required check.
 - `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
   every push to `develop` and `main`, and a failure there is as blocking in practice as a required
   check — it just is not allowed to hold the merge button hostage for an hour.
@@ -75,6 +79,7 @@ The pyramid, and what each layer is for:
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | load | p95 against the `AES_DECRYPT` baseline | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| bench | the core against a same-work reference, no server | `scripts/bench.sh --gate` |
 
 Rules that reviewers will hold you to (`.agents/rules/testing.md`):
 

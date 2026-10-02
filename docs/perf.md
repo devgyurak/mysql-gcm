@@ -44,6 +44,116 @@ The nightly `load` workflow enforces both with `--gate` and uploads the JSON as 
 either number needs a PR that states the hardware, the server version and why the regression is
 acceptable, and updates this file in the same change.
 
+## Core micro-benchmarks
+
+`tests/bench` measures `gcm.cc`, `nonce.cc` and `envelope.cc` in process, with no server and no
+SQL, and divides each case by a bare-OpenSSL equivalent measured in the same run
+(`tests/bench/bench_support.h`). It is not a substitute for the load suite; it answers what the
+load suite structurally cannot:
+
+* **Resolution.** The load ratio's run-to-run spread is 1.19x, which is why its gate sits at 1.10
+  and why a regression under roughly 20% is invisible to it. In process against a work-matched
+  reference the spread is 1.025x, so the gate here — also 1.10 — catches a ~7% regression.
+* **Attribution.** When the load ratio moves, nothing says whether it was sealing, opening, nonce
+  derivation, envelope parsing, buffer handling or the server. Each of those has its own case here.
+* **Sizes the fixture never produces.** The load rows are Korean names, so every load number is
+  from the small end. 4 KiB and 64 KiB are measured only here.
+* **Cost.** Seconds, with no server, so it can run per pull request if it ever needs to.
+
+Run it with `scripts/bench.sh --gate`. Keep the default measurement budget when gating: at
+`GCM_BENCH_MIN_TIME=0.05s` the same machine that produced 1.02 produced 1.11, which is the gate
+failing on the budget rather than on the code. The reference
+environment is `ubuntu-24.04` with GCC and the distribution's OpenSSL 3, which is what
+`bench.yml` runs on; on any other host the script reproduces that in a container, because a ratio
+compared against a baseline recorded elsewhere means nothing.
+
+### Reference baseline
+
+`ubuntu-24.04` GitHub-hosted runner, GCC, the distribution's OpenSSL 3, `RelWithDebInfo`, three
+consecutive `bench` workflow runs. **Every gated ratio is the case divided by a straight-line
+implementation of the same algorithm**, so ~1.0 means this project's structure — envelope bytes,
+error mapping, buffer handling, `OPENSSL_cleanse` — costs nothing measurable.
+
+| Case | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open` | 1.016 / 1.007 / 1.019 | 1.025 / 1.018 / 1.029 | 1.007 / 1.008 / 1.012 | 1.006 / 1.000 / 1.002 |
+| `seal_random` | 0.996 / 1.011 / 0.996 | 1.002 / 0.986 / 1.011 | 1.014 / 1.006 / 1.008 | 1.012 / 1.005 / 1.006 |
+| `seal_det` | 1.009 / 1.011 / 1.012 | 1.013 / 1.019 / 1.013 | 1.009 / 1.010 / 1.003 | 1.003 / 1.003 / 0.999 |
+
+An arm64 macOS laptop running the same suite in the container measures 0.965–1.020 across the twelve,
+with absolute times about 2.2x faster than the runner (`open` at 64 KiB: 7,857 ns against 17,070 ns).
+Different instruction sets, a 2.2x speed difference, and the ratio moves by 2%. That is the point of a
+work-matched reference: it is a property of this code rather than of the machine. Only the un-gated
+"against a plain seal" numbers below move with hardware.
+
+All twelve land between **0.986 and 1.029**, with a run-to-run spread of **1.025x**. The gate is
+therefore 1.10 — 7% above the worst observation and about double the observed variance — which makes
+this the finest-grained gate in the project: it fails on a ~7% structural regression where the load
+gate cannot see anything under ~20%.
+
+That any of this is gateable is a property of the references, and it was not true of the first
+version, which divided all three encrypt cases by a bare seal. The clearest way to see why is to put
+the runner's own speed next to the ratio it produced — three runs, same workflow, same
+`ubuntu-24.04` label:
+
+| Bare 64 KiB seal on that runner | 4,565 ns | 6,541 ns | 17,058 ns |
+|---|---|---|---|
+| `seal_det` / bare seal, 64 KiB | 9.673 | 6.803 | 3.590 |
+
+The runner fleet varies by **3.7x** on AES-GCM throughput, and the old ratio tracked it inversely and
+almost exactly. The absolute HMAC numbers over those same runs held to 1.15x, so nothing about the
+measured code was moving: the quotient was reporting how that CPU's SHA throughput compares to its
+AES throughput. Matching each reference to its case's work mix collapsed the spread to 1.025x.
+
+One limit worth stating rather than glossing: all four runs with the new references landed on the
+slower end of the fleet (implied bare seal 17,065–18,937 ns), so the work-matched metric has not yet
+been *observed* across that 3.7x spread. The arm64 cross-check below is what currently stands in for
+it — different instruction sets, absolute times 2.2x apart, ratios within 0.965–1.029 — and a run
+that lands on a fast runner will either confirm it or be the most interesting bench failure this
+project has had.
+
+### What determinism costs
+
+Reported, never gated: each encrypt variant against a **plain** seal. This is the number to read when
+choosing between `gcm_encrypt` and `gcm_encrypt_det`, and it is exactly the number that moves with the
+machine, which is why it cannot be a threshold.
+
+| Against a plain seal | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `gcm_encrypt` | 2.74–3.17 | 2.56–3.00 | 1.64–1.78 | 1.07–1.08 |
+| `gcm_encrypt_det` | 4.87–4.90 | 4.65–4.83 | 3.96–4.04 | 3.56–3.60 |
+
+* **`gcm_encrypt` pays a constant ~450 ns for `RAND_bytes(12)`** — a factor of ~3 on a 16-byte value,
+  ~7% at 64 KiB. The price of a fresh nonce, not overhead to remove.
+* **`gcm_encrypt_det` costs roughly 3.5–5x a plain seal, and the cost is HMAC rather than the
+  cipher.** Two HMAC-SHA256 passes (`spec/envelope.md` §3) dominate at every size measured here.
+  Nothing in this project's documentation said the deterministic variant was several times the cost
+  before these benchmarks ran; it is worth knowing before putting it on a write-heavy column.
+* **The ratio's direction with size depends on the CPU.** On these runs it falls from 4.9 to 3.6, and
+  on a different `ubuntu-24.04` runner with faster AES it *rose* from 5.6 to 9.7 — AES-GCM has
+  hardware acceleration nearly everywhere while SHA-256 often does not, so the balance between them
+  varies by machine. Treat "several times a plain seal" as the durable statement and re-measure on
+  the hardware you care about.
+
+`envelope/parse` is ~2.2–3.1 ns and equal across v1, v2 and v3, which is the invariant that case
+exists to hold: parsing reads a version byte and computes offsets, and must never begin scanning the
+body. It is recorded rather than ratio-gated — there is no OpenSSL operation to divide it by, and an
+absolute ceiling of a few nanoseconds on a shared runner would be a coin toss, not a gate.
+
+### An optimisation this found, and why it is not taken here
+
+`derive_nonce_key` — `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` — measures 830–1120 ns on the
+reference runner and depends on **nothing but the key**, yet `encrypt_det` recomputes it on every
+call: roughly half of deterministic nonce derivation at small sizes, and around 40% of `seal_det`.
+Caching it per `UDF_INIT` is a real saving on the deterministic encrypt path.
+
+It is deliberately not done. The key arrives as a per-row SQL argument, so a cache must also hold a
+copy of the key to know whether it is still valid — and keeping derived key material plus a key copy
+alive across rows is precisely what `crypto-safety.md` pushes against. That is a design decision with
+a security dimension, so per `AGENTS.md` §9 it belongs in `docs/design.md` as an amendment before it
+belongs in `src/`. Recording the measurement is the useful half; this is where the argument would
+start.
+
 ## Results
 
 ### Developer-machine run (indicative only — NOT the baseline, and a previous harness)

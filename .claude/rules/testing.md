@@ -9,6 +9,7 @@ paths:
 
 ```
         e2e / load        느림, nightly·릴리스 게이트. 실서버 SQL+복제
+       bench (gbench)     코어 마이크로벤치. develop·main 머지 + nightly. 서버 없음
      integration / MTR    실서버 SQL 시나리오. PR 게이트
    unit (gtest)  서버 독립 코어 + 벡터. 초 단위. PR 게이트, 커밋 전 로컬
 ```
@@ -60,6 +61,21 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - NULL 전파, 인자 개수 오류, 키 길이 오류, `gcm.strict` ON/OFF 각각의 태그 실패, `SET SESSION gcm.strict` 세션 스코프, GLOBAL 변경이 기존 세션에 영향 없음.
 - `SHOW STATUS LIKE 'Created_tmp_disk_tables'` 를 전후로 찍어 `gcm_decrypt` 의 디스크 temp 여부를 기록 (design §5.3).
 - MTR: `.result` 는 `--record` 로 만들고 diff 를 눈으로 확인한 뒤 커밋. 테스트는 `INSTALL/UNINSTALL COMPONENT` 로 자기 뒷정리, 전역 sysvar 는 `SET GLOBAL ... = DEFAULT`.
+
+## 벤치마크 (`tests/bench`)
+- 대상: `gcm.cc` `nonce.cc` `envelope.cc`. 서버·SQL 없이 in-process 측정. **부하 테스트의 대체가 아니다** —
+  `load` 는 SQL 경로 전체를 보되 분산이 커서 20% 미만 회귀를 못 잡고, 어디가 느려졌는지도 알려주지 않는다.
+- 측정 단위는 **비율**이다: 같은 프로세스에서 맨 OpenSSL EVP 호출(`ref/*`)을 함께 재고 그것으로 나눈다.
+  절대 ns 는 공용 러너에서 비교 불가능하므로 게이트에 쓰지 않는다 (`load` 가 `AES_DECRYPT` 로 하는 것과 같은 방식).
+  기준이 없는 케이스(nonce 유도, 봉투 파싱)는 기록만 하고 비율 게이트를 걸지 않는다.
+- 크기는 16B / 256B / 4KiB / 64KiB. 작은 쪽은 호출당 고정 비용(EVP 컨텍스트·key schedule·HMAC), 큰 쪽은
+  처리량이 지배한다. `load` 픽스처는 한국 이름뿐이라 작은 쪽만 측정된다.
+- **모든 케이스는 연산 성공을 확인해야 한다.** 실패 경로는 빨리 반환하므로, 검사가 없으면 "아무것도 안 하는 코드"를
+  훌륭한 수치로 측정한다. 기준(`ref/*`) 쪽도 같다 — 기준이 조용히 실패하면 모든 비율이 회귀로 보인다.
+- 샌타이저를 끈 `RelWithDebInfo` 로 빌드한다(`tests/unit` 과 별도 CMake). ASan 이 켜진 수치는 배포물과 무관하다.
+- GWT 이름 규칙은 적용하지 않는다: 단언이 아니라 측정이다. 대신 위의 성공 확인이 그 자리를 대신한다.
+- **PR 이 아니라 머지에서 돈다**: `main`·`develop` push 중 `src/**`·`tests/bench/**` 를 건드리는 것, 그리고 nightly. PR 마다 재는 수치는 아무도 읽지 않고 4분을 쓴다. 대신 회귀가 develop 에 먼저 들어올 수 있다는 비용을 받아들인다 — `main` 은 develop 머지로만 전진하고 양쪽에서 돌기 때문에 태그 전에는 드러난다. **필수 체크 목록에는 넣지 않는다** (PR 에서 보고되지 않는 필수 체크는 머지를 영구히 막는다). 기준치는 `tests/bench/baseline.json`,
+  측정은 `docs/perf.md` 에 누적한다.
 
 ## E2E (`tests/e2e`)
 - compose: mysql(ROW binlog) + replica + Python runner. 시나리오: SQL 암호화 저장 → 서버 decrypt LIKE / SQL 암복호화 왕복 / v1(CBC) dual-read / replica 동일 값 / AAD 불일치 거부.

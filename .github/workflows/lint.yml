@@ -18,6 +18,7 @@ jobs:
       # would otherwise be split into two arguments and silently skipped.
       - run: |
           git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+                         'tests/bench/*.cc' 'tests/bench/*.h' \
             | xargs -0 clang-format-18 --dry-run --Werror
   python:
     runs-on: ubuntu-24.04

@@ -1,0 +1,68 @@
+name: bench
+# Core micro-benchmarks. Separate from `load` because they answer a different question: `load`
+# measures the SQL path end to end and can only resolve regressions of roughly 20% or more (its
+# run-to-run ratio spread is 1.19x at one session); this measures gcm.cc / nonce.cc / envelope.cc
+# in process against a bare-OpenSSL reference, where the machine divides out and the resolution
+# is far finer. It also covers plaintext sizes the load fixture never produces — its rows are
+# Korean names, so nothing else here ever benchmarks a 64 KiB value.
+#
+# Gated at 1.10 on every case — the finest-grained gate in the project.
+#
+# It runs on the *merge*, not on the pull request. A benchmark on every PR is a number nobody
+# reads and four minutes nobody asked for, and the regressions it catches — a fetch that stopped
+# being cached, a buffer reallocated per row, one more copy of the plaintext — are rare enough
+# that catching them minutes after a merge to develop is soon enough. What that costs is honest
+# to state: such a change can land on develop before anything measures it. It cannot reach main
+# unnoticed, because main advances only by merging develop and this runs on both.
+on:
+  schedule: [{ cron: "0 19 * * *" }]   # 04:00 KST nightly, an hour after `load`
+  workflow_dispatch:
+    inputs:
+      min_time:
+        description: "Per-case measurement budget, e.g. 0.5s"
+        default: "0.5s"
+  # Path-filtered so it runs only when there is something to measure. A merge that touches none of
+  # these has nothing to compare, and the job not running is the correct outcome rather than a gap.
+  push:
+    branches: [main, develop]
+    paths:
+      - "src/**"
+      - "tests/bench/**"
+      - "scripts/bench.sh"
+      - ".github/workflows/bench.yml"
+permissions: { contents: read }
+# Serialised per branch and never cancelled: every run here is a push to main or develop, a
+# nightly, or a deliberate dispatch, and each of those is a measurement someone may want to read
+# rather than a preview of one. Two at once on the same branch would also contend for the runner
+# and measure each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    env:
+      # The runner is the reference environment, so the benchmark builds on it directly. The
+      # container path in scripts/bench.sh exists for developers whose host is not ubuntu-24.04.
+      GCM_BENCH_LOCAL: "1"
+      GCM_BENCH_MIN_TIME: ${{ inputs.min_time || '0.5s' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential cmake libssl-dev
+          cmake --version
+          openssl version
+      - name: Build and run
+        run: scripts/bench.sh --gate
+      # Uploaded whether or not the gate passed: a failing run is the one whose numbers someone
+      # needs to look at.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: "bench-result-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: |
+            build/bench/results.json
+            build/bench/ratios.json

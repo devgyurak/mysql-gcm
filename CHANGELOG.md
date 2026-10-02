@@ -5,7 +5,72 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
-_Nothing yet._
+### Added
+- `tests/bench` — micro-benchmarks for `gcm.cc`, `nonce.cc` and `envelope.cc`, run by
+  `scripts/bench.sh` and by `bench.yml` on a merge to `develop` or `main` that touches the core, plus
+  nightly. Deliberately **not** on pull requests: a benchmark on every PR is four minutes and a number
+  nobody reads, and the regressions it catches are rare enough that minutes after the merge is soon
+  enough. The cost is stated rather than hidden — such a change can land on `develop` before anything
+  measures it, though it cannot reach `main` unnoticed, since `main` advances only by merging
+  `develop` and the workflow runs on both. Built with sanitizers
+  off at the optimisation level the component ships with, which is why it cannot live in
+  `tests/unit`.
+
+  The metric is a **ratio against a bare-OpenSSL equivalent measured in the same process**, the same
+  trick `tests/load/run.py` uses against `AES_DECRYPT` one layer down: absolute nanoseconds from a
+  shared runner are not comparable between runs, a ratio divides the machine out. The load suite can
+  only resolve regressions of roughly 20% or more, cannot say *which* part got slower, and never
+  measures a plaintext larger than a Korean name; this closes all three gaps in seconds and without
+  a server.
+
+  Every case asserts the operation succeeded, including the reference. An error path returns fast, so
+  a benchmark without that check happily reports excellent numbers for code that does nothing — and a
+  silently failing reference would make every ratio above it look like a regression.
+
+
+  The gate is **1.10 on every case**, and that one number is the whole claim: this project's structure
+  — envelope bytes, error mapping, buffer handling, `OPENSSL_cleanse` — must cost under 10% on top of
+  the cryptography it performs. Three reference runs measured all twelve cases between 0.986 and 1.029
+  with a 1.025x run-to-run spread, so it fails on a ~7% structural regression where the load gate
+  cannot see anything under ~20%.
+
+### Fixed before it shipped
+- The first version of the metric measured the runner rather than the code. One reference — a bare
+  seal — served all three encrypt cases, and three runs behind the same `ubuntu-24.04` label put a
+  bare 64 KiB seal at 4,565 / 6,541 / 17,058 ns while `seal_det`'s ratio tracked that inversely at
+  9.673 / 6.803 / 3.590. The fleet varies by **3.7x** on AES-GCM throughput; the absolute HMAC numbers
+  over the same runs held to 1.15x. So the quotient was reporting how that CPU's SHA throughput
+  compares to its AES throughput, not anything about this code. Each gated case now divides by a
+  straight-line implementation of *the same algorithm*, which collapsed the spread to 1.025x and is
+  what made a gate possible at all. Stated as a limit rather than glossed: all four runs with the new
+  references landed on the slow end of the fleet, so the cross-architecture check — arm64, absolute
+  times 2.2x apart, ratios within 0.965–1.029 — is what currently stands in for observing the metric
+  across that 3.7x spread.
+
+### Measured
+- The **decrypt path adds nothing measurable** — `open` against an equivalent bare EVP decrypt is
+  1.000–1.029 across three runs at every size. That is the path every row of a `LIKE` query takes.
+- `gcm_encrypt` and `gcm_encrypt_det` likewise add nothing over a straight-line implementation of what
+  they do: 0.986–1.019. There is no hidden per-call work — no fetch that stopped being cached, no
+  buffer reallocated per row, no extra copy.
+- **`gcm_encrypt_det` costs roughly 3.5–5x a *plain* seal, and the cost is HMAC rather than the
+  cipher.** Two HMAC-SHA256 passes (`spec/envelope.md` §3) dominate at every measured size. Nothing in
+  the documentation said the deterministic variant was several times the cost; `docs/perf.md` does now,
+  which matters for anyone putting it on a write-heavy column.
+- **The direction of that ratio with size depends on the CPU.** It fell 4.9 → 3.6 on the reference
+  runs and *rose* 5.6 → 9.7 on a different `ubuntu-24.04` runner with faster AES: AES-GCM is
+  hardware-accelerated nearly everywhere and SHA-256 often is not, so the balance is a property of the
+  machine. "Several times a plain seal" is the durable statement.
+- `gcm_encrypt`'s constant ~450 ns is `RAND_bytes(12)` — the price of a fresh nonce, ~3x on a 16-byte
+  value and ~7% at 64 KiB.
+- `envelope/parse` is ~2.2–3.1 ns and equal across v1, v2 and v3 — the invariant that case exists to
+  hold, since parsing must never begin scanning the body.
+- `derive_nonce_key` (830–1120 ns) depends on nothing but the key, yet `encrypt_det` recomputes it
+  every call: around 40% of `seal_det` at small sizes. Caching it per `UDF_INIT` is a real saving and
+  deliberately **not** taken here — the key is a per-row argument, so a cache must also hold a copy of
+  the key, and keeping derived key material alive across rows is a `crypto-safety.md` question that
+  belongs in `docs/design.md` before it belongs in `src/`. The measurement and the argument are in
+  `docs/perf.md`.
 
 ## 0.1.0 — 2026-09-29
 

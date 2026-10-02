@@ -5,6 +5,52 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Added
+- `tests/adapter` — the component's install and uninstall paths, driven against stub services. The
+  layer the project was missing: `unit` covers the server-independent core, `smoke` and `mtr` cover SQL
+  behaviour against a real server, and **nothing covered registration order, rollback, or what happens
+  to the fetched algorithms when a rollback is refused** — the code where two defects escaped and were
+  caught by review rather than by a test.
+
+  Issue #7 deferred this on the grounds that the target could not exist, because `component.cc`
+  includes server headers and `tests/unit` excludes them. That was wrong. Every source in `src/`
+  compiles standalone with two include paths from a configured MySQL tree, so the suite runs inside the
+  build image — `scripts/adapter-tests.sh <major>` — reusing the tree the component build already
+  needs.
+
+  No seam was added to shipped code, which `architecture.md` §6 forbids and
+  `scripts/check-architecture.py` enforces. `REQUIRES_SERVICE_PLACEHOLDER` expands to an ordinary
+  pointer, so the test points those at stub structs; `gcm_component_init`/`deinit` are reached the way
+  the loader reaches them, through `mysql_component_t`; and whether the algorithms are live is read
+  through the core's public API rather than a new accessor.
+
+  Seventeen cases over all three majors, because `GCM_HAS_SESSION_SYSVAR` compiles different code and
+  needs a different stub set.
+
+  **Two review rounds found seven ways the first version could not detect what it claimed to
+  protect**, which is the most useful thing a review can find in a change that adds tests. Each is
+  fixed and each now has a mutation that fails: `strict_enabled()` made to fail *open* instead of
+  closed; reverting the locked read to a direct `g_strict` load, invisible while the stub answered with
+  a constant; dropping `mac_deinit()` or the CBC free from `crypto_deinit()`, which a probe built only
+  on `encrypt_random` could not see because `seal` checks one handle; removing deinit's
+  `&& was_present` guard; and moving deinit's variable-unregister block to the front, which the cases
+  could not see because they checked *which* calls happened and not their order.
+
+  Three structural consequences rather than patches. The stubs model registration **state**, so a case
+  asserts a function is gone instead of assuming it and `TearDown` checks rather than hopes. There are
+  three handle probes instead of one, each through the narrowest public entry point that touches its
+  handle — `derive_det_nonce` for the MAC, because `encrypt_det` derives and *then* seals and so
+  reports the cipher handle's state. And ordering is asserted on the **whole call sequence**, because
+  nothing weaker can see two calls swapped.
+
+  Comments in this project have now twice claimed coverage that did not exist — the `!register_first`
+  branch, and a `docs/design.md` statement I took from a review's list of caught mutations without
+  running it. The testing rule says to verify mutations directly and not to believe such a claim.
+
+  `adapter` is deliberately **not** a required check and is not a candidate while it is path-filtered:
+  a filtered workflow does not report on a pull request that misses the filter, and a required check
+  that does not report blocks the merge button indefinitely.
+
 ### Fixed
 - **`gcm.strict` was read without synchronisation on MySQL 8.0 and 8.4.** `strict_enabled()` loaded
   `g_strict` — the byte handed to `register_variable` as the variable's storage — directly, while the

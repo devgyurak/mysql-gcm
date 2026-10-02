@@ -10,6 +10,7 @@ paths:
 ```
         e2e / load        느림, nightly·릴리스 게이트. 실서버 SQL+복제
        bench (gbench)     코어 마이크로벤치. develop·main 머지 + nightly. 서버 없음
+      adapter (gtest)     component 설치·해제 경로. 스텁 서비스, 서버 없음
      integration / MTR    실서버 SQL 시나리오. 스모크는 PR 필수, MTR 은 코어 변경 PR
    unit (gtest)  서버 독립 코어 + 벡터. 초 단위. PR 게이트, 커밋 전 로컬
 ```
@@ -54,6 +55,25 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - 대상: `gcm.cc` `envelope.cc` `nonce.cc` 의 서버 독립 코어. 서버 없이 실행하며 `architecture.md` 의 의존 경계를 유지한다. strict 에 따른 SQL 에러/NULL 변환은 통합 테스트에서 검증한다.
 - 필수 케이스: NIST CAVP GCM KAT / 빈 평문 / AAD 유무 / 태그 1비트 변조 / nonce 1비트 변조 / 잘린 봉투(길이 0,1,12,28) / 알 수 없는 version / 키 길이 0,16,31,33 / 결정적 동일 입력→동일 출력 / 결정적 상이 입력→상이 nonce / nonce_key 유도 벡터 / 키 소거 후 버퍼 0.
 - 결정적 nonce 충돌 경계: 무작위 평문에서 nonce 중복 0 (PR CI 10만, nightly 100만).
+
+## 어댑터 (`tests/adapter`)
+- 대상: `component.cc` `sysvar.cc` `udf_*.cc` — 즉 `tests/unit` 이 가져갈 수 없는 파일들. 서버 헤더를
+  포함하므로 **빌드 이미지 안에서** 돈다 (`scripts/adapter-tests.sh <major>`). 서버는 띄우지 않는다.
+- 서비스는 스텁이고 **호출마다 실패를 주입할 수 있다**. `REQUIRES_SERVICE_PLACEHOLDER` 가 평범한
+  포인터이므로 테스트가 그것을 스텁 구조체로 가리키게 한다 — `src/` 에 테스트 진입점을 넣지 않는다
+  (architecture §6, `check-architecture.py` 가 강제).
+- 암호 핸들이 살아 있는지는 **`gcm::encrypt_random` 으로** 읽는다. 전용 접근자를 만들지 않는다.
+- 세 major 전부에서 돈다: `GCM_HAS_SESSION_SYSVAR` 로 컴파일되는 코드와 필요한 스텁 집합이 다르다.
+- 샌타이저 기본 **OFF**: 제어 흐름 테스트이고, ASan 은 로더가 `RTLD_NODELETE` 를 붙이는 유일한
+  구성이라 개정 A9 의 주제를 그 위에서 보면 틀린 결론이 나온다.
+- 덮는 것: 등록 순서(init 은 변수를 함수 뒤, deinit 도 변수를 마지막에), 롤백, 해제 거부 시 자원 유지,
+  deinit 의 재등록.
+- **순서를 고정하려면 호출 순서 전체를 단언한다.** "어떤 호출이 있었는지" 만 보는 단언은 두 호출이
+  뒤바뀐 것을 보지 못한다 — 실제로 deinit 의 변수-마지막 순서를 바꾸는 변이가 그렇게 통과했다.
+- **공허하지 않음은 변이로 확인하고, 통과한다는 남의 주장을 믿지 않는다.** 리뷰가 "이 변이는 잡힌다"
+  고 말한 것을 검증 없이 문서에 적었다가 틀린 것으로 드러난 적이 있다. 변이는 직접 돌린다.
+- 경로 필터가 걸려 있으므로 **필수 체크로 만들지 않는다**: 필터에 걸리지 않는 PR 에서는 보고되지 않고,
+  보고되지 않는 필수 체크는 머지를 영구히 막는다 (`stack-ci-docker.md`).
 
 ## 통합 (`tests/integration`, `mysql-test/suite/gcm`)
 - 실서버(docker, MySQL 8.0/8.4/9.x)에 component 설치 후 SQL 시나리오. 기대 출력 diff.

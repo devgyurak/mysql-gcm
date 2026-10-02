@@ -43,6 +43,14 @@ Two jobs are deliberately **not** required:
 - `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
   waiting for a check that never reports. Add the label when the change touches replication,
   sharding, dual-read or the runner itself.
+- `adapter` runs only when a PR touches `src/**` or `tests/adapter/**`, like `mtr`, because a PR
+  that changes neither cannot change its result. It is minutes rather than an hour — the comparable
+  `smoke` jobs, which build the image, build the component and run a server, measured 2m52s to
+  3m27s — but being fast does **not** make it a candidate for the required list: a path-filtered
+  workflow does not report on a PR that misses the filter, and a required check that does not report
+  blocks the merge button indefinitely. Running once on `develop` does not help, because the filter
+  is evaluated per pull request. Note also that nothing caches the build image between CI runs
+  today.
 - `bench` does not run on pull requests at all. It runs on the merge — a push to `develop` or
   `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
   minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
@@ -81,6 +89,7 @@ The pyramid, and what each layer is for:
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | load | p95 against the `AES_DECRYPT` baseline | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| adapter | the component's install and uninstall paths against stub services, no server | `scripts/adapter-tests.sh 8.4` |
 | bench | the core against a same-work reference, no server | `scripts/bench.sh --gate` |
 
 Rules that reviewers will hold you to (`.agents/rules/testing.md`):
@@ -120,7 +129,8 @@ python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
 python3 scripts/check-action-pins.py             # no workflow uses a mutable action tag
 git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
-    'tests/bench/*.cc' 'tests/bench/*.h' | xargs -0 clang-format --dry-run --Werror
+    'tests/bench/*.cc' 'tests/bench/*.h' 'tests/adapter/*.cc' 'tests/adapter/*.h' \
+    | xargs -0 clang-format --dry-run --Werror
 ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/ \
     tests/bench/gate.py
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh

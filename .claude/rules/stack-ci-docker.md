@@ -8,7 +8,7 @@ paths:
 <!-- Generated from .agents/rules/stack-ci-docker.md by scripts/agents-sync.py — edit the source. -->
 # CI · Docker · 스크립트 관례
 
-- GitHub Actions. 워크플로 분리: `lint.yml`, `unit.yml`, `build.yml`(매트릭스), `integration.yml`, `e2e.yml`, `load.yml`(nightly/dispatch), `bench.yml`(nightly/`bench` 라벨), `release.yml`(tag). 하나의 거대한 파일 금지.
+- GitHub Actions. 워크플로 분리: `lint.yml`, `unit.yml`, `build.yml`(매트릭스), `integration.yml`, `e2e.yml`, `load.yml`(nightly/dispatch), `bench.yml`(develop·main 머지 + nightly), `release.yml`(tag). 하나의 거대한 파일 금지.
 - 액션은 SHA 로 핀 (`actions/checkout@<sha> # v4`). 태그 참조 금지 (공급망). `scripts/check-action-pins.py` 가 강제하며 `lint.yml` 의 `workflows` 잡에서 돈다. 핀 갱신: `gh api repos/<owner>/<action>/commits/<tag> -q .sha`. 워크플로 자체는 같은 잡에서 digest 로 핀된 actionlint 이미지로 검사한다.
 - 빌드 매트릭스 축: MySQL `8.0.x / 8.4.x / 9.x`(정확한 패치 버전은 `docker/versions.json` 한 곳) × `amd64 / arm64`. OpenSSL 은 각 서버 이미지의 시스템 것.
 - MySQL 소스 트리 configure/build 는 비싸다. 빌드 이미지(`docker/build.Dockerfile`)를 GHCR 에 푸시하고 `versions.json` 해시로 캐시. 소스 변경 없으면 재빌드하지 않는다.

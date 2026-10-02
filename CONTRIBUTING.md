@@ -43,8 +43,10 @@ Two jobs are deliberately **not** required:
 - `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
   waiting for a check that never reports. Add the label when the change touches replication,
   sharding, dual-read or the runner itself.
-- `bench` runs only when a PR touches `src/**` or `tests/bench/**`. A PR that changes neither has
-  nothing to measure, so requiring it would leave those PRs waiting on a check that never reports.
+- `bench` does not run on pull requests at all. It runs on the merge — a push to `develop` or
+  `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
+  minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
+  after the merge is soon enough. It therefore cannot be a required check.
 - `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
   every push to `develop` and `main`, and a failure there is as blocking in practice as a required
   check — it just is not allowed to hold the merge button hostage for an hour.

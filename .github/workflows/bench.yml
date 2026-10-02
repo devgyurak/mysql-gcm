@@ -6,9 +6,14 @@ name: bench
 # is far finer. It also covers plaintext sizes the load fixture never produces — its rows are
 # Korean names, so nothing else here ever benchmarks a 64 KiB value.
 #
-# Gated at 1.10 on every case — the finest-grained gate in the project. Not on the branch
-# protection's required list, because it only runs when the core or the benchmarks change and a
-# required check that never reports blocks the merge button forever.
+# Gated at 1.10 on every case — the finest-grained gate in the project.
+#
+# It runs on the *merge*, not on the pull request. A benchmark on every PR is a number nobody
+# reads and four minutes nobody asked for, and the regressions it catches — a fetch that stopped
+# being cached, a buffer reallocated per row, one more copy of the plaintext — are rare enough
+# that catching them minutes after a merge to develop is soon enough. What that costs is honest
+# to state: such a change can land on develop before anything measures it. It cannot reach main
+# unnoticed, because main advances only by merging develop and this runs on both.
 on:
   schedule: [{ cron: "0 19 * * *" }]   # 04:00 KST nightly, an hour after `load`
   workflow_dispatch:
@@ -16,23 +21,23 @@ on:
       min_time:
         description: "Per-case measurement budget, e.g. 0.5s"
         default: "0.5s"
-  # Path-filtered rather than labelled: it runs exactly when there is something to measure, with
-  # no one having to remember a label. A PR that touches none of these has nothing to compare, so
-  # the job not running is the correct outcome rather than a gap. `labeled` is kept as a type so a
-  # re-run can be forced by toggling any label on a PR that does match.
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
+  # Path-filtered so it runs only when there is something to measure. A merge that touches none of
+  # these has nothing to compare, and the job not running is the correct outcome rather than a gap.
+  push:
+    branches: [main, develop]
     paths:
       - "src/**"
       - "tests/bench/**"
       - "scripts/bench.sh"
       - ".github/workflows/bench.yml"
 permissions: { contents: read }
-# A new push supersedes the run before it; see integration.yml for why. Pushes to main and
-# develop are never cancelled — they are the gate on the branch, not a preview of it.
+# Serialised per branch and never cancelled: every run here is a push to main or develop, a
+# nightly, or a deliberate dispatch, and each of those is a measurement someone may want to read
+# rather than a preview of one. Two at once on the same branch would also contend for the runner
+# and measure each other.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 jobs:
   bench:
     runs-on: ubuntu-24.04

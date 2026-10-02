@@ -7,7 +7,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ### Added
 - `tests/bench` — micro-benchmarks for `gcm.cc`, `nonce.cc` and `envelope.cc`, run by
-  `scripts/bench.sh` and by `bench.yml` nightly or on a PR labelled `bench`. Built with sanitizers
+  `scripts/bench.sh` and by `bench.yml` on a merge to `develop` or `main` that touches the core, plus
+  nightly. Deliberately **not** on pull requests: a benchmark on every PR is four minutes and a number
+  nobody reads, and the regressions it catches are rare enough that minutes after the merge is soon
+  enough. The cost is stated rather than hidden — such a change can land on `develop` before anything
+  measures it, though it cannot reach `main` unnoticed, since `main` advances only by merging
+  `develop` and the workflow runs on both. Built with sanitizers
   off at the optimisation level the component ships with, which is why it cannot live in
   `tests/unit`.
 

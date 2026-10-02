@@ -8,7 +8,7 @@ paths:
 
 ```
         e2e / load        느림, nightly·릴리스 게이트. 실서버 SQL+복제
-       bench (gbench)     코어 마이크로벤치. nightly + 라벨. 서버 없음
+       bench (gbench)     코어 마이크로벤치. develop·main 머지 + nightly. 서버 없음
      integration / MTR    실서버 SQL 시나리오. PR 게이트
    unit (gtest)  서버 독립 코어 + 벡터. 초 단위. PR 게이트, 커밋 전 로컬
 ```
@@ -73,7 +73,7 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   훌륭한 수치로 측정한다. 기준(`ref/*`) 쪽도 같다 — 기준이 조용히 실패하면 모든 비율이 회귀로 보인다.
 - 샌타이저를 끈 `RelWithDebInfo` 로 빌드한다(`tests/unit` 과 별도 CMake). ASan 이 켜진 수치는 배포물과 무관하다.
 - GWT 이름 규칙은 적용하지 않는다: 단언이 아니라 측정이다. 대신 위의 성공 확인이 그 자리를 대신한다.
-- nightly + `src/**`·`tests/bench/**` 를 건드리는 PR 에서 자동 실행. 잴 것이 없는 PR 에서 돌지 않는 것이 정상이므로 **필수 체크 목록에 넣지 않는다** (보고되지 않는 필수 체크는 머지를 영구히 막는다). 기준치는 `tests/bench/baseline.json`,
+- **PR 이 아니라 머지에서 돈다**: `main`·`develop` push 중 `src/**`·`tests/bench/**` 를 건드리는 것, 그리고 nightly. PR 마다 재는 수치는 아무도 읽지 않고 4분을 쓴다. 대신 회귀가 develop 에 먼저 들어올 수 있다는 비용을 받아들인다 — `main` 은 develop 머지로만 전진하고 양쪽에서 돌기 때문에 태그 전에는 드러난다. **필수 체크 목록에는 넣지 않는다** (PR 에서 보고되지 않는 필수 체크는 머지를 영구히 막는다). 기준치는 `tests/bench/baseline.json`,
   측정은 `docs/perf.md` 에 누적한다.
 
 ## E2E (`tests/e2e`)

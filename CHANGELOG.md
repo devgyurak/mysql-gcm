@@ -34,6 +34,28 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   with a 1.025x run-to-run spread, so it fails on a ~7% structural regression where the load gate
   cannot see anything under ~20%.
 
+### Documented
+- The READMEs, `CONTRIBUTING.md` and `AGENTS.md` had not caught up with the benchmark layer: the test
+  tables, the layout trees and the script inventories all predate it. They list it now, and say that
+  it runs on the merge rather than on a pull request so nobody looks for it in their checks.
+- `CONTRIBUTING.md`'s clang-format command was broken twice over. It used
+  `$(git ls-files ...)`, which zsh does not word-split — a contributor on the default macOS shell
+  got `No such file or directory` — and which in bash would split a path containing a space into two
+  arguments and silently skip both. It is now `git ls-files -z | xargs -0`, the form `lint.yml`
+  actually runs, and it covers `tests/bench` as CI does. Verified by running the documented pipeline
+  over all 24 files rather than trusting it.
+- `docs/ops-constraints.md` item 6 and both README constraint lists now say that `gcm_encrypt_det`
+  costs **3.5–5x a plain seal** and that decryption costs the same for either variant. The constraint
+  previously covered only what determinism leaks, which left the cost to be discovered in production
+  by whoever put it on a write-heavy column.
+- `docs/design.md` records what the benchmarks answered — no measurable overhead on the decrypt path,
+  under 10% structural cost on all three encrypt paths — and opens one question rather than burying
+  it: `derive_nonce_key` is recomputed per call although it depends only on the key, and caching it
+  requires keeping a copy of the key alive across rows, which is a `crypto-safety.md` decision and
+  not a performance tweak.
+- The pull request template asks whether `scripts/bench.sh --gate` was run, since the benchmark gate
+  is no longer on the PR.
+
 ### Fixed before it shipped
 - The first version of the metric measured the runner rather than the code. One reference — a bare
   seal — served all three encrypt cases, and three runs behind the same `ubuntu-24.04` label put a

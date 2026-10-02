@@ -19,6 +19,8 @@
 - [ ] Integration/MTR case added; `.result` / `.expected` diffs explained below
 - [ ] `spec/test-vectors.json` updated if envelope/nonce changed; C++ vector tests updated and generator `--check` passes
 - [ ] Korean partial-match case (`LIKE '%길%'`) still present
+- [ ] Touches `src/**`? `scripts/bench.sh --gate` run locally — the benchmark gate runs on the
+      merge to `develop`, not on this PR, so this is where a structural regression gets caught early
 
 ## Compatibility & docs
 - [ ] Function surface / sysvar / envelope unchanged, or `docs/design.md` + `spec/` + server tests updated here

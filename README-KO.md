@@ -58,7 +58,8 @@
 5. **옵티마이저는 함수 내부를 알지 못합니다.** `WHERE gcm_decrypt(col, @k) LIKE '%김%'`는
    후보 행을 스캔합니다. 다른 조건으로 먼저 후보를 줄여야 합니다.
 6. **`gcm_encrypt_det`는 평문의 동등성을 노출합니다.** 조인 키, UNIQUE 제약, 정확일치 검색을
-   위한 기능입니다. 자유 텍스트에는 사용하지 마세요.
+   위한 기능입니다. 자유 텍스트에는 사용하지 마세요. 또한 평범한 봉인의 **3.5~5배** 비용이 듭니다 —
+   암호가 아니라 nonce 를 위한 HMAC 2회 때문입니다. 복호화 비용은 두 변형이 같습니다 (`docs/perf.md`).
 7. **결정적 암호화에서는 키 하나에 AAD 규칙 하나를 적용합니다.** `gcm_encrypt_det`는 평문만으로
    nonce를 유도하므로 같은 키·평문에 서로 다른 AAD를 사용하면 `(키, nonce)` 쌍이 재사용되고,
    두 결과를 관측한 공격자가 해당 nonce의 태그를 위조할 수 있습니다. 같은 키를 사용하는 모든
@@ -227,8 +228,10 @@ SELECT id FROM patients WHERE gcm_decrypt(name_enc, @k) LIKE '%길%';   -- 서�
 | **MTR** — 7 테스트 | 서버 자체 하니스에서의 같은 표면 + ROW 복제와 SBR 불일치 | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 시나리오 | primary + replica + 독립 샤드, SQL 만으로 | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | **부하** | `AES_DECRYPT` 대비 p95 와 회귀 게이트 | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| **벤치** — 게이트 12 케이스 | 코어를 같은 알고리즘의 직선적 구현과 비교. 부하 게이트가 20% 도 못 보는 자리에서 ~7% 구조적 회귀에 실패한다 | `scripts/bench.sh --gate` |
 
-최신 실측값과 게이트 기준은 `docs/perf.md` 에 있습니다.
+최신 실측값과 두 게이트 기준은 `docs/perf.md` 에 있습니다. **벤치**는 PR 이 아니라 코어를 건드리는
+`develop`·`main` 머지에서 돕니다.
 
 ## 저장소 구조
 
@@ -238,9 +241,12 @@ src/            component: component.cc, udf_*.cc, sysvar.cc + 서버 독립 코
 spec/           envelope.md(기준 문서) + test-vectors.json(NIST CAVP + 프로젝트 벡터)
 docs/           design.md(근거·개정 A1~A8) · ops-constraints.md · perf.md
 tests/          unit(GoogleTest) · integration(SQL + expected) · e2e(compose) · load
+                bench(Google Benchmark, 샌타이저 끔 — `docs/perf.md`)
 mysql-test/     MTR 스위트 gcm/
-docker/         MySQL 메이저별 빌드 이미지 + versions.json
-scripts/        build-in-docker.sh · dev-up.sh · verify.sh · mtr.sh · gen-vectors.py
+docker/         MySQL 메이저별 빌드 이미지 + versions.json + 배포용 서버 이미지
+scripts/        build-in-docker.sh · dev-up.sh · verify.sh · mtr.sh · bench.sh
+                unit-in-docker.sh(CI 와 같은 GCC) · smoke-image.sh(릴리스 이미지 검증)
+                gen-vectors.py · check-architecture.py · check-action-pins.py
 ```
 
 ## 애플리케이션 연결과 개발 도구

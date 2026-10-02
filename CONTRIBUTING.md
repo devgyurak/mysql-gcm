@@ -117,13 +117,21 @@ Performance work must not remove a check. If a change alters per-row cost, show 
 python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
 python3 scripts/check-action-pins.py             # no workflow uses a mutable action tag
-clang-format --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*')
-ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/
+git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+    'tests/bench/*.cc' 'tests/bench/*.h' | xargs -0 clang-format --dry-run --Werror
+ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/ \
+    tests/bench/gate.py
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
 python scripts/gen-vectors.py --check
 ```
 
 CI runs all of these. Nothing here needs network access except the Docker builds.
+
+Two more exist and are not pre-push checks, because both need Docker and neither is fast:
+`scripts/unit-in-docker.sh` runs the unit suite under GCC the way CI does — worth it before touching
+`tests/unit`, since the host toolchain here is clang and GCC rejects things clang accepts — and
+`scripts/bench.sh --gate` measures the core. The benchmark runs in CI on the merge rather than on the
+pull request, so running it locally is how you find out before pushing.
 
 ## Cutting a release
 

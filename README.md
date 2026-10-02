@@ -59,7 +59,9 @@ Full text and rationale: `docs/ops-constraints.md` and `docs/design.md` §6 with
 5. **The functions are opaque to the optimizer.** `WHERE gcm_decrypt(col, @k) LIKE '%김%'` scans the
    candidate set; selectivity has to come from other predicates.
 6. **`gcm_encrypt_det` reveals equality of plaintexts.** It exists for join keys, UNIQUE constraints
-   and exact-match lookups. Never use it for free text.
+   and exact-match lookups. Never use it for free text. It also costs **3.5–5x a plain seal** — two
+   HMAC passes for the nonce, not the cipher — while decryption costs the same either way
+   (`docs/perf.md`).
 7. **One AAD convention per key.** `gcm_encrypt_det` derives its nonce from the plaintext alone, so
    the same plaintext under one key with two different AADs reuses a (key, nonce) pair and lets an
    observer of both values forge tags for that nonce. All deterministic calls using that key must
@@ -235,8 +237,10 @@ Every layer runs against a real server except the unit suite, which links libcry
 | **MTR** — 7 tests | the same surface inside the server's own harness, plus ROW replication and the SBR divergence | `scripts/mtr.sh 8.4` |
 | **E2E** — 7 scenarios | primary + replica + an independent shard, over SQL only | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | **load** | p95 against the `AES_DECRYPT` baseline, with a regression gate | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| **bench** — 12 gated cases | the core against a straight-line implementation of the same algorithm, so a ~7% structural regression fails where the load gate cannot see 20% | `scripts/bench.sh --gate` |
 
-Latest measurements and the gate: `docs/perf.md`.
+Latest measurements and both gates: `docs/perf.md`. `bench` runs on a merge to `develop` or `main`
+that touches the core, not on pull requests.
 
 ## Layout
 
@@ -246,9 +250,12 @@ src/            component: component.cc, udf_*.cc, sysvar.cc + the server-indepe
 spec/           envelope.md (normative) + test-vectors.json (NIST CAVP + project vectors)
 docs/           design.md (rationale, amendments A1–A8) · ops-constraints.md · perf.md
 tests/          unit (GoogleTest) · integration (SQL + expected) · e2e (compose) · load
+                bench (Google Benchmark, sanitizers off — see docs/perf.md)
 mysql-test/     MTR suite gcm/
-docker/         build image per MySQL major + versions.json
-scripts/        build-in-docker.sh · dev-up.sh · verify.sh · mtr.sh · gen-vectors.py
+docker/         build image per MySQL major + versions.json + the published server image
+scripts/        build-in-docker.sh · dev-up.sh · verify.sh · mtr.sh · bench.sh
+                unit-in-docker.sh (GCC, as CI builds it) · smoke-image.sh (release images)
+                gen-vectors.py · check-architecture.py · check-action-pins.py
 ```
 
 ## Application access and development tools

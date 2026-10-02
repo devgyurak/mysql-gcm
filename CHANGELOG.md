@@ -5,6 +5,68 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Fixed
+- **`gcm.strict` was read without synchronisation on MySQL 8.0 and 8.4.** `strict_enabled()` loaded
+  `g_strict` — the byte handed to `register_variable` as the variable's storage — directly, while the
+  server assigns into it from `update_func_bool()` holding `LOCK_global_system_variables`. That is a
+  C++ data race, and the comment that defended it argued from practice ("one aligned byte cannot
+  tear") rather than from the memory model, which is not the standard's position and not what a
+  sanitizer build reports.
+
+  It now reads through `component_sys_variable_register::get_variable()`, which takes the same mutex
+  on the way to `sys_var::value_ptr` — where the server itself asserts ownership of it. That service
+  method has existed since **8.0.11** and sits on a service the component already requires, so the fix
+  costs no new dependency. `strict_enabled()` runs once per `UDF_INIT`, per statement rather than per
+  row (architecture rule §5), so acquiring a server mutex there is not on the hot path.
+
+  The two version branches stay separate rather than being unified on this one call: `get_variable()`
+  returns the **GLOBAL** value on every version including 9.x, so using it there would silently ignore
+  `SET SESSION gcm.strict` on the one major where session scope exists. 9.x keeps
+  `mysql_system_variable_reader`.
+
+  `g_strict` is now write-only from this component's side — it exists because `register_variable`
+  needs somewhere to put the value. It stays a plain `bool` because it has to: the server performs a
+  non-atomic store through that pointer, so declaring it `std::atomic<bool>` would not have removed
+  the race, only hidden the evidence.
+
+  Both read paths now share one `reads_as_off()` helper, so the fail-closed rule — anything that is
+  not an explicit `"OFF"` leaves strict **on** — is decided in one place rather than twice.
+
+  `tests/e2e/scenarios/strict_scope_global.py` gains a case where one session turns strict off and a
+  *second session on the same server* decrypts. That pins the observable contract; it cannot prove a
+  race is gone, and the scenario's docstring says so, but it would catch the read regressing to a
+  cached or default value.
+- **The component's init rollback freed cipher handles it might not have owned.** On a failed
+  `udf_register`, `unregister_first()` discarded every `udf_unregister` result and `gcm_component_init`
+  then called `crypto_deinit()` unconditionally — so a function that refused to unregister stayed
+  callable while the `EVP_CIPHER` and `EVP_MAC` handles it uses were freed underneath it.
+  `unregister_first()` reports whether everything is gone now, and the handles are released only when
+  it is, which is the position `gcm_component_deinit` already took. Leaking them until restart is the
+  lesser outcome.
+
+  Reaching this needs `udf_register` to fail on a later function *and* an earlier one to be in use,
+  which during `INSTALL COMPONENT` means a session that resolved a name registered moments earlier in
+  the same init. Narrow enough that it has not been reproduced — it came out of review as a question,
+  not a defect — and cheap enough that the asymmetry was not worth keeping.
+
+  Review of this change found that the init rollback still discarded `sysvar_unregister()`'s result —
+  the more reachable half of the same defect. A variable left in the dictionary points `&g_strict` into
+  memory the loader has already `dlclose()`d, and **any** session reaches it with
+  `SELECT @@global.gcm.strict`, where a dangling UDF needs a session that had resolved the name. Both
+  results are checked now, and `register_first()` reports failure too, so the asymmetry review started
+  from is closed in both directions.
+
+  The same review showed the rationale first written here was wrong, by reading the loader. On a failed
+  `INSTALL COMPONENT` the rollback unloads the library, and `dlopen` is given `RTLD_NODELETE` only in
+  ASan/LSan builds (verified in the 8.4.11 tree) — so anything still registered points into an unmapped
+  segment and its caller dies regardless of what happened to the cipher handles. Keeping them is about
+  not adding a second fault to a broken install, not about preventing a crash, and the comment says
+  that now. `gcm_component_deinit` is where the original reasoning does hold, because a refused
+  `UNINSTALL` leaves the library mapped. An ASan build would have made the wrong claim look correct.
+
+  `reads_as_off()` matches `len == 3` rather than a prefix: `>= 3` would have read a future `"OFFLINE"`
+  or `"OFF (deprecated)"` as off, which is the one direction the helper exists to get right.
+
 ### Added
 - `tests/bench` — micro-benchmarks for `gcm.cc`, `nonce.cc` and `envelope.cc`, run by
   `scripts/bench.sh` and by `bench.yml` on a merge to `develop` or `main` that touches the core, plus

@@ -19,11 +19,9 @@
 `gcm_encrypt`, `gcm_encrypt_det` and `gcm_decrypt` are registered as a MySQL **component** (not a
 legacy UDF plugin). The decrypted value is charset-tagged `utf8mb4`, so MySQL's own collation drives
 `LIKE '%길%'` **inside the server** — keeping partial-match search on encrypted columns, which is the
-reason this project exists. On CI hardware, **300,000 rows are scanned, decrypted and matched in
-255 ms p95** on one session — and GCM lands **below 0.95x** of the `AES_DECRYPT` baseline at every
-measured point, so the authenticated cipher is not the cost here; the row scan is, and both variants
-pay it. `docs/design.md` §1.2 estimates ~1.1 s for pulling just 100,000 candidate rows into the
-application and decrypting them there. `docs/perf.md` has the three runs behind those numbers.
+reason this project exists. It is **not slower than the `AES_DECRYPT` builtin** at any measured
+point — the authenticated cipher is not the cost here; the row scan is, and both variants pay it.
+See [Performance](#performance).
 
 > **Status: ready to tag 0.1.0.** Builds in-tree against MySQL 8.0, 8.4 and 9.x and passes the unit
 > and integration suites on all three majors in CI, plus MTR, E2E and load on 8.4. The envelope format is frozen
@@ -227,6 +225,55 @@ Normative byte layout, failure codes and test vectors: **`spec/envelope.md`**.
 └─────────┴───────────────────┴─────────────────────────────────────────┘
   a migration prefixes an existing AES_ENCRYPT value — no re-encryption (constraint 8)
 ```
+
+## Performance
+
+Measured on a GitHub-hosted `ubuntu-24.04` runner against MySQL 8.4.11, 2026-10-02, over 300,000 rows
+of which 29,918 match `'%김%'`. **The ratios travel to other hardware; the milliseconds do not** — a
+GitHub runner is not your server, so re-measure absolute numbers where you plan to deploy.
+
+### Server-side decrypt and partial match
+
+The question this component exists to answer: is filtering an encrypted column inside the server fast
+enough to use?
+
+| Rows | Sessions | `gcm_decrypt(col) LIKE` p95 | `AES_DECRYPT(col) LIKE` p95 | ratio |
+|---:|---:|---:|---:|---:|
+| 300,000 | 1 | 255 ms | 269 ms | **0.95** |
+| 300,000 | 8 | 1,073 ms | 1,154 ms | **0.93** |
+| 300,000 | 32 | 4,172 ms | 4,555 ms | **0.92** |
+
+The **slowest** of three consecutive runs, with each pair taken from that same run rather than
+assembled from the best of each. `docs/design.md` §1.2 estimated ~1.1 s just to pull 100,000 candidate
+rows into the application and decrypt them there; the same filter runs server-side in 255 ms.
+
+`Created_tmp_disk_tables` did not move in any run at any session count — the question
+`docs/design.md` §5.3 raised about plaintext reaching disk-based temporary tables. That is an
+observation about this workload, not a guarantee: a query that adds a sort or a large grouping can
+still spill.
+
+### What the deterministic variant costs
+
+`gcm_encrypt_det` is for join keys, `UNIQUE` constraints and exact-match lookups (constraint 6). It is
+also several times more expensive to **write**, and the cost is the HMAC its nonce needs, not the
+cipher — worth knowing before putting it on a write-heavy column.
+
+| Plaintext | `gcm_encrypt` | `gcm_encrypt_det` |
+|---:|---:|---:|
+| 16 B | 2.7–3.2x | 4.9x |
+| 256 B | 2.6–3.0x | 4.7–4.8x |
+| 4 KiB | 1.6–1.8x | 4.0x |
+| 64 KiB | 1.07x | 3.6x |
+
+Relative to a plain AES-256-GCM seal, range over three runs. `gcm_encrypt`'s share is a constant
+~450 ns for `RAND_bytes(12)` — the price of a fresh nonce, dominant on a short value and invisible on a
+long one. `gcm_encrypt_det` pays two HMAC-SHA256 passes instead (`spec/envelope.md` §3), which do not
+amortise the same way. **Whether that ratio rises or falls with size depends on the CPU**: these runs
+fall from 4.9 to 3.6, and a runner with faster AES went the other way, 5.6 to 9.7. Decryption costs the
+same for either variant.
+
+Both gates, the three runs behind every number, and the micro-benchmark results are in
+[`docs/perf.md`](docs/perf.md).
 
 ## Tests
 

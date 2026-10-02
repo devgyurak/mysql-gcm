@@ -36,6 +36,14 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   must be able to refuse and put things back, and unregistering the variable first would leave a
   refused uninstall with no variable.
 
+- **A `## Performance` section in both READMEs**, replacing the scattering of figures across the lead
+  paragraphs. Two tables: server-side `gcm_decrypt(col) LIKE` p95 against the `AES_DECRYPT` baseline at
+  1, 8 and 32 sessions, and what `gcm_encrypt_det` costs over `gcm_encrypt` at four plaintext sizes.
+  Every number comes from the three `load` and three `bench` runs already recorded in `docs/perf.md`;
+  nothing was re-measured for this. Each decrypt pair is taken from the **same** run — the slowest of
+  the three — rather than assembled from the best of each, and the section says outright that the
+  ratios travel to other hardware while the milliseconds do not.
+
 ### Added
 - `tests/adapter` — the component's install and uninstall paths, driven against stub services. The
   layer the project was missing: `unit` covers the server-independent core, `smoke` and `mtr` cover SQL
@@ -55,8 +63,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   the loader reaches them, through `mysql_component_t`; and whether the algorithms are live is read
   through the core's public API rather than a new accessor.
 
-  Seventeen cases over all three majors, because `GCM_HAS_SESSION_SYSVAR` compiles different code and
-  needs a different stub set.
+  Nineteen cases on 8.0 and 8.4, twenty on 9.x — the extra one asserts that the strict read asks for
+  SESSION scope, which only exists where `GCM_HAS_SESSION_SYSVAR` compiles it. The suite runs on all
+  three majors because that macro selects different code and needs a different stub set.
 
   **Two review rounds found seven ways the first version could not detect what it claimed to
   protect**, which is the most useful thing a review can find in a change that adds tests. Each is

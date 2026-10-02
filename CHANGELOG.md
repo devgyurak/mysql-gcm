@@ -5,6 +5,37 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Changed
+- **`gcm.strict` is registered after the three functions, not before** (`docs/design.md` amendment
+  A9). Registered first, a `udf_register` failure rolled back with the variable still in the server's
+  dictionary pointing at `&g_strict` — in memory the loader is about to unmap, since `dlopen` gets
+  `RTLD_NODELETE` only in ASan/LSan builds. The asymmetry that matters is **naming versus
+  enumeration**: `udf_unregister` leaves a refused function in `udf_hash` under its real name, so a
+  *new* session calling it also jumps into the unmapped segment, but a variable is reachable by
+  `SHOW VARIABLES` without anyone naming it. Registering last makes that case structurally impossible
+  on the failure path that can actually happen.
+
+  The cost is a window inside `INSTALL COMPONENT` where the functions exist and the variable does not.
+  A call landing there **fails closed** — verified from the server source in all three majors rather
+  than assumed: the access returns an empty optional for an unregistered variable, `value_or(true)`
+  makes it a failure, and `strict_enabled()` turns that into strict **ON**.
+  `Suppress_not_found_error::YES` means it does not even push a spurious error into that session.
+
+  Three of `tests/adapter`'s cases exist only for this change, and two more assertions strengthen a
+  fourth: reverting the ordering fails them. The `sysvar_register`-fails path has its own case where a
+  rollback unregister is also refused, so the resource-retention conditional on that path cannot be
+  deleted unnoticed either.
+
+### Documented
+- `docs/design.md` amendment **A9**: on a failed install the loader `dlclose()`s the library, so any
+  registration that survived a refused rollback points into an unmapped segment. This cannot be fixed
+  from inside a component — no service asks the loader to keep the library mapped — so the amendment
+  records what the reordering buys, what it does not, and that **an ASan build makes the wrong
+  conclusion look right**, which is why the adapter suite keeps sanitizers off. It also records that
+  `deinit` is deliberately **not** the mirror of `init`: both touch the variable last, because deinit
+  must be able to refuse and put things back, and unregistering the variable first would leave a
+  refused uninstall with no variable.
+
 ### Added
 - `tests/adapter` — the component's install and uninstall paths, driven against stub services. The
   layer the project was missing: `unit` covers the server-independent core, `smoke` and `mtr` cover SQL

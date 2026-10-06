@@ -1,5 +1,5 @@
 ---
-description: "테스트 규칙 — GWT 와 피라미드"
+description: "Testing rules — GWT and the pyramid"
 globs: "tests/**, mysql-test/**, spec/test-vectors.json"
 alwaysApply: false
 ---

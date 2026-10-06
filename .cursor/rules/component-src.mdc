@@ -1,5 +1,5 @@
 ---
-description: "component 소스 규칙"
+description: "Component source rules"
 globs: "src/**, CMakeLists.txt"
 alwaysApply: false
 ---

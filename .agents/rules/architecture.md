@@ -9,61 +9,89 @@ paths:
   - "scripts/check-architecture.py"
   - ".github/**"
 ---
-# 아키텍처 — 책임·의존 방향·자원 수명
+# Architecture — responsibilities, dependency direction, resource lifetimes
 
-설계 근거는 `docs/design.md` 개정 A6. MySQL API 사용법은 `component-src.md`,
-암호 안전은 `crypto-safety.md`, 테스트 작성법은 `testing.md` 를 따른다.
+The rationale is `docs/design.md` amendment A6. For MySQL API usage follow `component-src.md`, for
+crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 
-## 1. 모듈 책임과 의존 방향
+## 1. Module responsibilities and dependency direction
 
-| 모듈 | 책임 | 허용하는 프로젝트 의존 |
+| Module | Responsibility | Project dependencies allowed |
 |---|---|---|
-| `component.cc` | 서비스 선언, UDF 등록·해제, 초기화·종료 조정 | UDF 진입점, `sysvar`, 코어 초기화·종료 |
-| `udf_*.cc`, `udf_glue.h` | SQL 인자·NULL·charset·결과 버퍼·오류 변환 | `gcm`, `sysvar`, 공통 바이트·오류 타입 |
-| `sysvar.{h,cc}` | 서버 설정 등록·조회, 버전별 서비스 차이 | MySQL 서비스 |
-| `gcm.{h,cc}` | 암복호화 구성, 인증 결과, 암호 자원 초기화·종료 | `envelope`, `nonce`, OpenSSL |
-| `nonce.{h,cc}` | 도메인 분리·nonce 유도 | 공통 바이트·오류 타입, OpenSSL |
-| `envelope.{h,cc}` | 버전·길이·오프셋·필드 파싱, 공통 타입 | C++ 표준 라이브러리 |
+| `component.cc` | Service declarations, UDF registration and unregistration, coordinating init and deinit | The UDF entry points, `sysvar`, core init/deinit |
+| `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, the shared byte and error types |
+| `sysvar.{h,cc}` | Registering and reading server configuration, per-version service differences | MySQL services |
+| `gcm.{h,cc}` | The encryption and decryption construction, the authentication result, crypto resource init/deinit | `envelope`, `nonce`, OpenSSL |
+| `nonce.{h,cc}` | Domain separation and nonce derivation | The shared byte and error types, OpenSSL |
+| `envelope.{h,cc}` | Version, length, offset and field parsing; the shared types | The C++ standard library |
 
-- 코어(`gcm`, `envelope`, `nonce`)는 서버에 독립적이어야 한다. MySQL 헤더·서비스·버전 매크로·UDF 타입·sysvar 에 대한 직접/간접 의존과 어댑터로의 역참조를 금지한다.
-- `envelope` 는 OpenSSL 에도 의존하지 않는다. 봉투 바이트 해석을 UDF 에 복제하지 않는다.
-- 난수와 OpenSSL 상태를 사용하는 코어 전체를 순수 함수라고 부르지 않는다. 서버 없이 빌드·테스트할 수 있다는 것이 경계다.
-- 파일을 추가하면 책임과 허용 의존을 먼저 정한다. 새 알고리즘/저장소를 가정한 범용 backend·factory 계층은 실제 요구와 설계 개정 없이 추가하지 않는다.
+- The core (`gcm`, `envelope`, `nonce`) must stay independent of the server. No direct or indirect
+  dependency on MySQL headers, services, version macros, UDF types or sysvars, and no reference back
+  into an adapter.
+- `envelope` does not depend on OpenSSL either. Do not duplicate envelope byte interpretation into a
+  UDF.
+- Do not call the whole core "pure functions" — it uses randomness and OpenSSL state. The boundary is
+  that it builds and tests without a server.
+- When you add a file, decide its responsibility and its allowed dependencies first. Do not add a
+  general backend or factory layer for a hypothetical future algorithm or store without a real
+  requirement and a design amendment.
 
-## 2. 바이트 형식과 SQL 의미론
+## 2. Byte formats and SQL semantics
 
-- 코어는 바이트와 `Error` 를 주고받는다. SQL NULL, charset, 서버 오류 메시지, `gcm.strict` 는 코어 인자로 전달하지 않는다.
-- 인증 실패 시 코어가 출력 소거 후 `bad_tag` 를 반환한다. UDF 계층에서만 strict 에 따라 에러/NULL 을 선택한다. 키 길이·봉투 오류는 strict 로 숨기지 않는다.
-- SQL 인자 검증과 별개로 코어도 자신의 키 길이·봉투 전제조건을 검증한다. 테스트 직접 호출이 UDF 검증에 의존해서는 안 된다.
-- 공개 SQL 함수·봉투 변경은 `docs/design.md` → `spec/` → 구현·테스트 순으로 반영한다. 내부 테스트 함수가 공개 API 확장의 근거가 되지 않는다.
+- The core exchanges bytes and an `Error`. SQL NULL, charset, server error messages and `gcm.strict`
+  are not passed into the core.
+- On an authentication failure the core cleanses the output and returns `bad_tag`. Only the UDF layer
+  chooses error-or-NULL according to strict. A key length or envelope error is never hidden by strict.
+- Independently of the SQL argument validation, the core validates its own key-length and envelope
+  preconditions. A direct call from a test must not depend on the UDF's validation.
+- A change to the public SQL functions or the envelope flows `docs/design.md` → `spec/` →
+  implementation and tests, in that order. An internal test function is never grounds for extending the
+  public API.
 
-## 3. 소유권과 수명
+## 3. Ownership and lifetimes
 
-| 수명 | 자원과 책임 |
+| Lifetime | Resource and responsibility |
 |---|---|
-| component | fetch 된 알고리즘 핸들, sysvar 저장소, 등록 상태. init 에서 준비하고 안전한 deinit 에서 해제 |
-| `UDF_INIT` | 해당 UDF 인스턴스의 결과 버퍼·strict 스냅샷. init/deinit 으로 관리하며 세션 전체와 동일시하지 않음 |
-| 연산 | EVP 연산 컨텍스트·유도 키·임시 비밀값. 연산 종료 및 오류 경로에서 정리 |
+| component | The fetched algorithm handles, the sysvar storage, the registration state. Prepared in init and released in a safe deinit |
+| `UDF_INIT` | That UDF instance's result buffer and strict snapshot. Managed by init/deinit and not equated with a whole session |
+| operation | The EVP operation context, derived keys, transient secrets. Cleaned up when the operation ends and on every error path |
 
-- 입력 바이트는 호출자가 소유한 버퍼를 빌린다. 소유 범위를 넘어 포인터를 보관하지 않는다. 복사한 비밀값의 소거 책임은 복사본 소유자에게 있다.
-- 키·평문·행별 결과·연산 컨텍스트를 전역으로 공유하지 않는다. component 전역 상태에는 명시된 수명·동기화 책임이 있어야 한다.
-- 새 자원에는 획득·해제 위치와 실패 정리 책임을 함께 정의한다. 초기화 실패는 부분 등록을 롤백한다.
-- 해제 실패로 component 가 남으면 사용 중인 자원을 유지한다. 재시도 시 중복 해제가 없도록 성공한 해제 상태를 추적한다.
+- Input bytes are borrowed from a buffer the caller owns. Do not retain a pointer beyond that
+  ownership. Cleansing a copied secret is the responsibility of whoever made the copy.
+- Do not share keys, plaintext, per-row results or operation contexts in globals. Any component-level
+  global state must have a stated lifetime and a stated synchronisation responsibility.
+- For each new resource, define where it is acquired, where it is released, and who cleans up on
+  failure. A failed initialisation rolls back partial registrations.
+- If the component survives because a release failed, keep the resources that are in use. Track which
+  releases succeeded so that a retry does not double-free.
 
-## 4. 서버 호환성 경계
+## 4. The server compatibility boundary
 
-- `MYSQL_VERSION_ID` 와 서비스 유무 분기는 서버 어댑터에만 둔다. 새 서비스에는 최소 지원 버전과 미지원 버전의 동작을 설계 문서에 기록한다.
-- 개정 A5 의 strict 스코프·조회 실패 정책을 따른다. 버전 차이 때문에 인증 정책이나 봉투 바이트를 변경하지 않는다.
+- `MYSQL_VERSION_ID` checks and branches on service availability live only in the server adapters. For
+  a new service, record the minimum supported version and the behaviour on versions without it in the
+  design document.
+- Follow amendment A5 for the strict scope and the read-failure policy. A version difference never
+  changes the authentication policy or the envelope bytes.
 
-## 5. 행 처리 비용
+## 5. Per-row cost
 
-- 알고리즘 fetch 는 component init, strict 조회는 UDF init 에서 한다. 행별 콜백에서 설정 조회·fetch·파일/네트워크 접근을 반복하지 않는다.
-- 결과 버퍼는 UDF 인스턴스가 재사용한다. 크기 계산에는 상한·덧셈 오버플로·OpenSSL 정수 인자 범위를 검사하고, 실패를 SQL 오류로 변환한다.
-- 최적화로 인증 검증·키 길이 검증·비밀값 소거를 생략하지 않는다. 행 처리 비용의 변화는 부하 테스트로 확인한다.
+- Fetch algorithms in component init and read strict in UDF init. Do not read configuration, fetch, or
+  touch a file or the network repeatedly in a per-row callback.
+- The result buffer is reused by the UDF instance. Size arithmetic checks the upper bound, addition
+  overflow and the range of OpenSSL's integer arguments, and translates a failure into a SQL error.
+- No optimisation omits authentication, the key length check or the cleansing of secrets. A change in
+  per-row cost is confirmed with the load tests.
 
-## 6. 테스트 경계와 검증
+## 6. Test boundaries and verification
 
-- `encrypt_with_nonce` 는 내부 벡터 테스트 진입점이다. 서버 어댑터에서 참조하거나 SQL 에 등록하지 않는다. 새 테스트 진입점에도 같은 제약을 적용한다.
-- 환경변수·디버그 옵션으로 암호화를 건너뛰거나 평문을 성공 결과로 반환하는 실험 코드를 배포 소스에 두지 않는다. 실험은 별도 비배포 대상에서 수행한다.
-- `python3 scripts/check-architecture.py`: 코어의 명시적 include 의존과 알려진 테스트 진입점의 어댑터 참조를 검사한다. 허용 헤더 추가 시 이 규칙과 검사 목록을 함께 검토한다.
-- `unit.yml` 의 서버 없는 코어 빌드·테스트를 유지한다. 정적 검사는 C++ 전체 의미 분석이 아니므로 간접 의존·새 테스트 우회 경로·수명·행 처리 비용은 리뷰와 통합 테스트로 확인한다.
+- `encrypt_with_nonce` is an internal entry point for the vector tests. Do not reference it from a
+  server adapter and do not register it in SQL. The same constraint applies to any new test entry
+  point.
+- Do not ship experimental code that skips encryption or returns plaintext as a successful result under
+  an environment variable or a debug option. Experiments belong in a target that is not shipped.
+- `python3 scripts/check-architecture.py` checks the core's explicit include dependencies and
+  references to known test entry points from the adapters. When you add an allowed header, review this
+  rule and the checker's list together.
+- Keep `unit.yml`'s server-free core build and test. The static check is not a full C++ semantic
+  analysis, so indirect dependencies, new test bypasses, lifetimes and per-row cost are confirmed by
+  review and by the integration tests.

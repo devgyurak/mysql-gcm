@@ -1,47 +1,55 @@
 ---
 name: dev-container
-description: 로컬 docker MySQL 개발 서버 기동, component .so 설치, Phase S 스파이크 체크리스트 실행(scripts/dev-up.sh, scripts/verify.sql). 로컬에서 함수를 실제로 돌려볼 때 사용.
+description: Starting a local docker MySQL development server, installing the component .so, and running the Phase S spike checklist (scripts/dev-up.sh, scripts/verify.sql). Use it when you want to actually run the functions locally.
 ---
 
 # dev-container
 
-## 기동 — `scripts/dev-up.sh <8.0|8.4|9>`
-스크립트가 원본이다. 여기서 되풀이하지 말고 읽는다. 중요한 점만:
+## Starting a server — `scripts/dev-up.sh <8.0|8.4|9>`
+The script is the source of truth. Read it rather than repeating it here. Only what matters:
 
-- 이미지는 `docker/versions.json` 의 digest 로 고정한다 (major → 패치 버전 + digest 한 곳).
-- `--loose_gcm.strict=ON` — `loose_` 없이는 component 설치 전 기동이 실패한다 (design §6).
-- `--general_log=OFF` 는 개발에서도 습관으로 (키·평문이 로그에 남는 운영 제약 §6).
-- `--binlog_format=ROW` 는 **9.0 에서 제거된 옵션**이므로 major 가 9 면 넣지 않는다 (넣으면 기동 실패).
-- 포트는 `0:3306`, 준비 대기는 `HEALTHCHECK` 폴링 + 타임아웃. 맨 `sleep` 로 기다리지 않는다.
+- Images are pinned by digest from `docker/versions.json` (one place mapping major → patch version +
+  digest).
+- `--loose_gcm.strict=ON` — without `loose_`, starting up before the component is installed fails
+  (design §6).
+- `--general_log=OFF` as a habit even in development (keys and plaintext in the logs, operational
+  constraint §6).
+- `--binlog_format=ROW` is an **option removed in 9.0**, so do not pass it when the major is 9 — the
+  server will not start.
+- The port is `0:3306`, and readiness is a `HEALTHCHECK` poll with a timeout. Never wait with a bare
+  `sleep`.
 
-## 설치
-`plugin_dir` 은 이미지마다 다르다 (공식 OL 기반 이미지는 `/usr/lib64/mysql/plugin/`). 하드코딩하지 말고
-서버에 물어본다 — `scripts/verify.sh` 가 그렇게 한다.
+## Installing
+`plugin_dir` differs per image (the official OL-based images use `/usr/lib64/mysql/plugin/`). Do not
+hardcode it; ask the server, which is what `scripts/verify.sh` does.
 
 ```sh
 dir=$(docker exec mysql-dev-$ver mysql -uroot -N -e 'SELECT @@plugin_dir')
 docker cp build/$ver/component_gcm.so "mysql-dev-$ver:${dir}component_gcm.so"
 docker exec -i mysql-dev-$ver mysql -uroot -e "INSTALL COMPONENT 'file://component_gcm'"
 ```
-재설치는 `UNINSTALL COMPONENT` 후 cp. 사용 중이면 UNINSTALL 이 실패한다 → 세션을 끊는다.
+To reinstall, `UNINSTALL COMPONENT` and then copy. If it is in use the UNINSTALL fails — disconnect the
+session.
 
-## Phase S 체크 — `scripts/verify.sql` (개정 A1·A5 반영)
-`scripts/verify.sql` 이 원본이다. 실행:
+## The Phase S check — `scripts/verify.sql` (reflecting amendments A1 and A5)
+`scripts/verify.sql` is the source of truth. Run it with:
 
 ```sh
 docker exec -i mysql-dev-$ver mysql -uroot --default-character-set=utf8mb4 -t --force \
   < scripts/verify.sql
 ```
 
-`--force` 가 필요하다 — 키 길이 오류처럼 **에러를 기대하는 절**이 있기 때문이다. 키는
-`spec/test-vectors.json` 의 공개 픽스처 키(`0001..1f`)를 쓴다. 임시 테이블을 만드는 절은 스키마가
-필요하므로 `CREATE DATABASE` + `USE` 를 먼저 한다.
+`--force` is required, because some sections **expect an error**, such as the wrong key length. The key
+is the public fixture key from `spec/test-vectors.json` (`0001..1f`). The sections that create a
+temporary table need a schema, so `CREATE DATABASE` and `USE` come first.
 
-결과는 `docs/design.md` §8 "확인됨/미확인" 표에 **관측값과 함께** 기록한다. 실측 완료분
-(8.0.43 · 8.4.11 · 9.4.0): `korean_like=1`, `CHARSET()=utf8mb4`, 대소문자 무시 LIKE 1,
-결정적 봉투가 `spec/envelope.md` §5.1 과 바이트 일치, `Created_tmp_disk_tables` 증가량 0,
-`INSTALL COMPONENT` 성공(= EVP fetch 성공). `gcm.strict` 는 8.0·8.4 에서 GLOBAL 전용이라
-`SET SESSION` 이 1229 로 거부된다 (개정 A5).
+Record the results in the `docs/design.md` §8 "confirmed / unconfirmed" table **together with the
+observed values**. Already measured (8.0.43 · 8.4.11 · 9.4.0): `korean_like=1`,
+`CHARSET()=utf8mb4`, case-insensitive LIKE 1, the deterministic envelope byte-matching
+`spec/envelope.md` §5.1, a `Created_tmp_disk_tables` increase of 0, and `INSTALL COMPONENT` succeeding
+(which means the EVP fetch succeeded). `gcm.strict` is GLOBAL-only on 8.0 and 8.4, so `SET SESSION` is
+rejected with 1229 (amendment A5).
 
-## 여러 버전 동시
-포트를 `0:3306` 으로 두어 충돌이 없다. `docker ps --filter name=mysql-dev-` 로 목록, `docker rm -f mysql-dev-<ver>` 로 정리.
+## Several versions at once
+With the port published as `0:3306` there is no conflict. List them with
+`docker ps --filter name=mysql-dev-` and clean up with `docker rm -f mysql-dev-<ver>`.

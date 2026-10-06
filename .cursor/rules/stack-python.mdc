@@ -1,5 +1,5 @@
 ---
-description: "Python 관례"
+description: "Python conventions"
 globs: "scripts/**/*.py, tests/e2e/**/*.py, tests/load/**/*.py, **/*.py"
 alwaysApply: false
 ---

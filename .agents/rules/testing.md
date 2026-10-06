@@ -4,24 +4,30 @@ paths:
   - "mysql-test/**"
   - "spec/test-vectors.json"
 ---
-# 테스트 규칙 — GWT 와 피라미드
+# Testing rules — GWT and the pyramid
 
 ```
-        e2e / load        느림, nightly·릴리스 게이트. 실서버 SQL+복제
-       bench (gbench)     코어 마이크로벤치. develop·main 머지 + nightly. 서버 없음
-      adapter (gtest)     component 설치·해제 경로. 스텁 서비스, 서버 없음
-     integration / MTR    실서버 SQL 시나리오. 스모크는 PR 필수, MTR 은 코어 변경 PR
-   unit (gtest)  서버 독립 코어 + 벡터. 초 단위. PR 게이트, 커밋 전 로컬
+        e2e / load        Slow. Nightly and release gate. Real server, SQL + replication
+       bench (gbench)     Core micro-benchmarks. Merges to develop/main + nightly. No server
+      adapter (gtest)     The component install/uninstall paths. Stub services, no server
+     integration / MTR    Real-server SQL scenarios. Smoke is required on every PR; MTR on core changes
+   unit (gtest)  The server-independent core plus vectors. Seconds. PR gate, and run locally before committing
 ```
 
-## GWT (Given-When-Then) — 모든 계층 필수
-- **본문**: 세 블록을 주석/echo 로 명시하고 순서를 지킨다. Then 이후에 다시 When 을 두지 않는다 (한 테스트 = 한 행동).
-- **분기·반복 금지**: 테스트 케이스 본문에는 `if`, `else`, `for`, `while` 같은 로직이나 분기를 추가하지 않는다. 조건별 기대 결과는 별도 케이스로 나누고, 여러 입력은 테스트 프레임워크의 파라미터화로 표현한다. 테스트 안에서 기대값을 계산하는 알고리즘을 재구현하지 않는다.
-- **이름**: given/when/then 이 드러나게.
+## GWT (Given-When-Then) — mandatory at every layer
+- **Body**: mark the three blocks with comments or `echo` and keep them in order. No second When after
+  the Then — one test, one action.
+- **No branching or looping**: do not add logic such as `if`, `else`, `for` or `while` to a test case
+  body. Split the expected results per condition into separate cases, and express multiple inputs with
+  the test framework's parameterisation. Do not reimplement the algorithm under test to compute an
+  expected value inside the test.
+- **Name**: make given/when/then visible.
   - gtest: `TEST(Envelope, GivenEmptyInput_WhenParsed_ThenBadEnvelope)`
-  - MTR / SQL 시나리오: 파일 상단 `--echo # Given: ...` `--echo # When: ...` `--echo # Then: ...` (`.result` 에 남아 리뷰어가 의도를 읽는다)
-- **Given** 은 상태만 만든다 (키·벡터 로드·테이블·sysvar). **When** 은 단 하나의 호출. **Then** 은 단언만. 단언 없는 테스트 금지.
-- 여러 입력은 파라미터화(`TEST_P` 등 테스트 프레임워크의 파라미터화)로 하나의 GWT 를 재사용한다. 복붙 금지.
+  - MTR / SQL scenarios: `--echo # Given: ...`, `--echo # When: ...`, `--echo # Then: ...` at the top
+    of the file. They land in the `.result`, where they tell a reviewer the intent.
+- **Given** only builds state (keys, loading vectors, tables, sysvars). **When** is a single call.
+  **Then** is assertions only. A test with no assertion is not a test.
+- Reuse one GWT across multiple inputs through parameterisation (`TEST_P` and friends). No copy-paste.
 
 ```cpp
 TEST(Envelope, GivenEmptyInput_WhenParsed_ThenBadEnvelope) {
@@ -44,67 +50,117 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 --echo # Then: hit = 1 (see .result)
 ```
 
-## 공통
-- 모든 벡터는 `spec/test-vectors.json` 한 곳. C++ 서버 테스트가 이 파일의 모든 케이스를 읽고, 내부 생성 도구는 `--check` 로 재현성을 확인한다. 값 복사 금지.
-- 실키·PHI 를 픽스처에 넣지 않는다. 벡터 키는 NIST 공개 벡터 또는 `00..1f` 패턴.
-- 비결정 함수(`gcm_encrypt`) 는 값이 아니라 **속성**(길이, version 바이트, 두 번 호출 결과 상이, 복호화 왕복) 을 검증한다.
-- flaky 허용 없음. 재시도 데코레이터 금지. 시간 의존은 mock.
+## Common
+- Every vector lives in one place, `spec/test-vectors.json`. The C++ and server tests read every case
+  from that file, and the internal generator confirms reproducibility with `--check`. Never copy a
+  value out of it.
+- No real keys and no PHI in a fixture. Vector keys are the public NIST vectors or the `00..1f`
+  pattern.
+- For a non-deterministic function (`gcm_encrypt`), verify **properties** rather than a value: the
+  length, the version byte, that two calls differ, and that decryption round-trips.
+- Flakiness is not tolerated. No retry decorators. Mock anything time-dependent.
 
-## 단위 (`tests/unit`)
-- 대상: `gcm.cc` `envelope.cc` `nonce.cc` 의 서버 독립 코어. 서버 없이 실행하며 `architecture.md` 의 의존 경계를 유지한다. strict 에 따른 SQL 에러/NULL 변환은 통합 테스트에서 검증한다.
-- 필수 케이스: NIST CAVP GCM KAT / 빈 평문 / AAD 유무 / 태그 1비트 변조 / nonce 1비트 변조 / 잘린 봉투(길이 0,1,12,28) / 알 수 없는 version / 키 길이 0,16,31,33 / 결정적 동일 입력→동일 출력 / 결정적 상이 입력→상이 nonce / nonce_key 유도 벡터 / 키 소거 후 버퍼 0.
-- 결정적 nonce 충돌 경계: 무작위 평문에서 nonce 중복 0 (PR CI 10만, nightly 100만).
+## Unit (`tests/unit`)
+- Subject: the server-independent core in `gcm.cc`, `envelope.cc` and `nonce.cc`. Runs without a server
+  and preserves the dependency boundary in `architecture.md`. The strict-dependent translation to a SQL
+  error or NULL is verified by the integration tests.
+- Required cases: NIST CAVP GCM KAT / empty plaintext / with and without AAD / a one-bit tag flip / a
+  one-bit nonce flip / truncated envelopes (lengths 0, 1, 12, 28) / an unknown version / key lengths 0,
+  16, 31, 33 / deterministic same input → same output / deterministic different input → different nonce
+  / the nonce_key derivation vector / a buffer zeroed after the key is cleansed.
+- Deterministic nonce collision bound: zero duplicate nonces over random plaintexts (100k in PR CI, 1M
+  nightly).
 
-## 어댑터 (`tests/adapter`)
-- 대상: `component.cc` `sysvar.cc` `udf_*.cc` — 즉 `tests/unit` 이 가져갈 수 없는 파일들. 서버 헤더를
-  포함하므로 **빌드 이미지 안에서** 돈다 (`scripts/adapter-tests.sh <major>`). 서버는 띄우지 않는다.
-- 서비스는 스텁이고 **호출마다 실패를 주입할 수 있다**. `REQUIRES_SERVICE_PLACEHOLDER` 가 평범한
-  포인터이므로 테스트가 그것을 스텁 구조체로 가리키게 한다 — `src/` 에 테스트 진입점을 넣지 않는다
-  (architecture §6, `check-architecture.py` 가 강제).
-- 암호 핸들이 살아 있는지는 **`gcm::encrypt_random` 으로** 읽는다. 전용 접근자를 만들지 않는다.
-- 세 major 전부에서 돈다: `GCM_HAS_SESSION_SYSVAR` 로 컴파일되는 코드와 필요한 스텁 집합이 다르다.
-- 샌타이저 기본 **OFF**: 제어 흐름 테스트이고, ASan 은 로더가 `RTLD_NODELETE` 를 붙이는 유일한
-  구성이라 개정 A9 의 주제를 그 위에서 보면 틀린 결론이 나온다.
-- 덮는 것: 등록 순서(init 은 변수를 함수 뒤, deinit 도 변수를 마지막에), 롤백, 해제 거부 시 자원 유지,
-  deinit 의 재등록.
-- **순서를 고정하려면 호출 순서 전체를 단언한다.** "어떤 호출이 있었는지" 만 보는 단언은 두 호출이
-  뒤바뀐 것을 보지 못한다 — 실제로 deinit 의 변수-마지막 순서를 바꾸는 변이가 그렇게 통과했다.
-- **공허하지 않음은 변이로 확인하고, 통과한다는 남의 주장을 믿지 않는다.** 리뷰가 "이 변이는 잡힌다"
-  고 말한 것을 검증 없이 문서에 적었다가 틀린 것으로 드러난 적이 있다. 변이는 직접 돌린다.
-- 경로 필터가 걸려 있으므로 **필수 체크로 만들지 않는다**: 필터에 걸리지 않는 PR 에서는 보고되지 않고,
-  보고되지 않는 필수 체크는 머지를 영구히 막는다 (`stack-ci-docker.md`).
+## Adapter (`tests/adapter`)
+- Subject: `component.cc`, `sysvar.cc` and `udf_*.cc` — the files `tests/unit` cannot take. They
+  include server headers, so the suite runs **inside the build image**
+  (`scripts/adapter-tests.sh <major>`). No server is started.
+- The services are stubs and **can be made to fail per call**. `REQUIRES_SERVICE_PLACEHOLDER` is an
+  ordinary pointer, so the test points it at a stub struct — no test entry point is added to `src/`
+  (architecture §6, enforced by `check-architecture.py`).
+- Whether the crypto handles are still live is read **through `gcm::encrypt_random`**. Do not add a
+  dedicated accessor.
+- It runs on all three majors: the code `GCM_HAS_SESSION_SYSVAR` compiles, and the set of stubs it
+  needs, differ.
+- Sanitizers **off** by default: these are control-flow tests, and ASan is the one configuration where
+  the loader passes `RTLD_NODELETE`, so looking at the subject of amendment A9 under it leads to the
+  wrong conclusion.
+- What it covers: registration order (init registers the variable after the functions, and deinit also
+  takes it last), rollback, keeping resources when a release is refused, and deinit's re-registration.
+- **To pin an ordering, assert the whole call sequence.** An assertion that only checks *which* calls
+  happened cannot see two of them swapped — a mutation reversing deinit's variable-last order passed
+  exactly that way.
+- **Confirm non-vacuity by mutation, and do not believe someone else's claim that a mutation is
+  caught.** A review once said a mutation was covered, that claim went into the documentation
+  unverified, and it turned out to be false. Run the mutation yourself.
+- It is path-filtered, so **do not make it a required check**: it does not report on a PR that misses
+  the filter, and a required check that does not report blocks merges forever (`stack-ci-docker.md`).
 
-## 통합 (`tests/integration`, `mysql-test/suite/gcm`)
-- 실서버(docker, MySQL 8.0/8.4/9.x)에 component 설치 후 SQL 시나리오. 기대 출력 diff.
-- **절대 삭제 금지**: `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` → 1. 대소문자 `LIKE '%kim%'`(utf8mb4_general_ci). 조인 동등성 `gcm_encrypt_det(a,@k) = gcm_encrypt_det(a,@k)`.
-- NULL 전파, 인자 개수 오류, 키 길이 오류, `gcm.strict` ON/OFF 각각의 태그 실패, `SET SESSION gcm.strict` 세션 스코프, GLOBAL 변경이 기존 세션에 영향 없음.
-- `SHOW STATUS LIKE 'Created_tmp_disk_tables'` 를 전후로 찍어 `gcm_decrypt` 의 디스크 temp 여부를 기록 (design §5.3).
-- MTR 은 `mtr.yml` 에서 `src/**`·`mysql-test/**`·`spec/**`·빌드 도구를 건드리는 PR 과 머지에만 돈다 (실측 49~63분). 서버 자체 하니스만 잡는 것이 있다 — 에러 로그에 예상치 못한 줄이 있으면 실패한다. 스모크(`verify.sh` 3 major)는 모든 PR 의 필수 체크로 남는다.
-- MTR: `.result` 는 `--record` 로 만들고 diff 를 눈으로 확인한 뒤 커밋. 테스트는 `INSTALL/UNINSTALL COMPONENT` 로 자기 뒷정리, 전역 sysvar 는 `SET GLOBAL ... = DEFAULT`.
+## Integration (`tests/integration`, `mysql-test/suite/gcm`)
+- SQL scenarios against a real server (docker, MySQL 8.0/8.4/9.x) with the component installed, diffed
+  against expected output.
+- **Never delete these**: `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` → 1. Case
+  insensitivity, `LIKE '%kim%'` (utf8mb4_general_ci). Join equality,
+  `gcm_encrypt_det(a,@k) = gcm_encrypt_det(a,@k)`.
+- NULL propagation, a wrong argument count, a wrong key length, a tag failure under each of
+  `gcm.strict` ON and OFF, `SET SESSION gcm.strict` session scope, and that changing GLOBAL does not
+  affect an existing session.
+- Print `SHOW STATUS LIKE 'Created_tmp_disk_tables'` before and after to record whether `gcm_decrypt`
+  caused a disk temporary table (design §5.3).
+- MTR runs from `mtr.yml` only on PRs and merges that touch `src/**`, `mysql-test/**`, `spec/**` or the
+  build tooling (measured at 49–63 minutes). It catches things only the server's own harness catches —
+  an unexpected line in the error log fails it. The smoke suite (`verify.sh` across three majors)
+  stays a required check on every PR.
+- MTR: produce a `.result` with `--record`, read the diff by eye, then commit it. A test cleans up
+  after itself with `INSTALL`/`UNINSTALL COMPONENT`, and resets a global sysvar with
+  `SET GLOBAL ... = DEFAULT`.
 
-## 벤치마크 (`tests/bench`)
-- 대상: `gcm.cc` `nonce.cc` `envelope.cc`. 서버·SQL 없이 in-process 측정. **부하 테스트의 대체가 아니다** —
-  `load` 는 SQL 경로 전체를 보되 분산이 커서 20% 미만 회귀를 못 잡고, 어디가 느려졌는지도 알려주지 않는다.
-- 측정 단위는 **비율**이다: 같은 프로세스에서 맨 OpenSSL EVP 호출(`ref/*`)을 함께 재고 그것으로 나눈다.
-  절대 ns 는 공용 러너에서 비교 불가능하므로 게이트에 쓰지 않는다 (`load` 가 `AES_DECRYPT` 로 하는 것과 같은 방식).
-  기준이 없는 케이스(nonce 유도, 봉투 파싱)는 기록만 하고 비율 게이트를 걸지 않는다.
-- 크기는 16B / 256B / 4KiB / 64KiB. 작은 쪽은 호출당 고정 비용(EVP 컨텍스트·key schedule·HMAC), 큰 쪽은
-  처리량이 지배한다. `load` 픽스처는 한국 이름뿐이라 작은 쪽만 측정된다.
-- **모든 케이스는 연산 성공을 확인해야 한다.** 실패 경로는 빨리 반환하므로, 검사가 없으면 "아무것도 안 하는 코드"를
-  훌륭한 수치로 측정한다. 기준(`ref/*`) 쪽도 같다 — 기준이 조용히 실패하면 모든 비율이 회귀로 보인다.
-- 샌타이저를 끈 `RelWithDebInfo` 로 빌드한다(`tests/unit` 과 별도 CMake). ASan 이 켜진 수치는 배포물과 무관하다.
-- GWT 이름 규칙은 적용하지 않는다: 단언이 아니라 측정이다. 대신 위의 성공 확인이 그 자리를 대신한다.
-- **PR 이 아니라 머지에서 돈다**: `main`·`develop` push 중 `src/**`·`tests/bench/**` 를 건드리는 것, 그리고 nightly. PR 마다 재는 수치는 아무도 읽지 않고 4분을 쓴다. 대신 회귀가 develop 에 먼저 들어올 수 있다는 비용을 받아들인다 — `main` 은 develop 머지로만 전진하고 양쪽에서 돌기 때문에 태그 전에는 드러난다. **필수 체크 목록에는 넣지 않는다** (PR 에서 보고되지 않는 필수 체크는 머지를 영구히 막는다). 기준치는 `tests/bench/baseline.json`,
-  측정은 `docs/perf.md` 에 누적한다.
+## Benchmarks (`tests/bench`)
+- Subject: `gcm.cc`, `nonce.cc`, `envelope.cc`, measured in-process without a server or SQL. **Not a
+  replacement for the load tests** — `load` exercises the whole SQL path but has enough variance to
+  miss a regression under 20%, and it cannot say what got slower.
+- The unit of measurement is a **ratio**: measure a bare OpenSSL EVP call (`ref/*`) in the same process
+  and divide by it. Absolute nanoseconds are not comparable on a shared runner and are never used as a
+  gate — the same approach `load` takes with `AES_DECRYPT`. Cases with no reference (nonce derivation,
+  envelope parsing) are recorded without a ratio gate.
+- Sizes are 16 B / 256 B / 4 KiB / 64 KiB. The small end is dominated by per-call fixed cost (the EVP
+  context, the key schedule, the HMAC) and the large end by throughput. The `load` fixture holds only
+  Korean names, so it measures the small end alone.
+- **Every case must confirm the operation succeeded.** A failure path returns early, so without that
+  check you are measuring code that does nothing and reporting an excellent number for it. The same
+  applies to the reference side — if the reference fails silently, every ratio looks like a regression.
+- Built `RelWithDebInfo` with sanitizers off (a separate CMake project from `tests/unit`). A number
+  measured under ASan has nothing to do with what ships.
+- The GWT naming rule does not apply: these are measurements, not assertions. The success check above
+  takes its place.
+- **Runs on merges, not on PRs**: pushes to `main` and `develop` that touch `src/**` or
+  `tests/bench/**`, plus nightly. A number measured on every PR is read by nobody and costs four
+  minutes. The accepted cost is that a regression can land on develop first — `main` only advances by a
+  merge from develop and the benchmark runs on both sides, so it surfaces before a tag. **Do not put it
+  in the required checks** (a required check that does not report on a PR blocks merges forever). The
+  thresholds live in `tests/bench/baseline.json` and the measurements accumulate in `docs/perf.md`.
 
 ## E2E (`tests/e2e`)
-- compose: mysql(ROW binlog) + replica + Python runner. 시나리오: SQL 암호화 저장 → 서버 decrypt LIKE / SQL 암복호화 왕복 / v1(CBC) dual-read / replica 동일 값 / AAD 불일치 거부.
-- E2E 실패는 "환경 문제"로 분류하지 않는다. 재현 불가면 로그를 첨부하고 이슈로 남긴다.
+- compose: mysql (ROW binlog) + replica + a Python runner. Scenarios: store encrypted via SQL → server
+  decrypt + LIKE / SQL encrypt-decrypt round trip / v1 (CBC) dual-read / identical value on the replica
+  / an AAD mismatch rejected.
+- An E2E failure is not classified as "an environment problem". If it cannot be reproduced, attach the
+  logs and open an issue.
 
-## 부하 (`tests/load`)
-- 측정: `gcm_decrypt(col,@k) LIKE '%김%'` p50/p95 @ 10k/100k/300k 행, 동시 세션 1/8/32, `AES_DECRYPT` 동일 쿼리 대비 비율, 서버 RSS, `Created_tmp_disk_tables` 증가량.
-- 약속(문서·README): p95 가 `AES_DECRYPT` 대비 **1.2배** 이내, 300k 행 직렬 p95 < **1.0초**.
-- 실제 게이트(`tests/load/baseline.json`): p95 비율 **1.10배**. 측정값이 0.80~0.95 라 1.2 로는 행당 비용이 두 배가 되어도 통과한다. 더 조이지 않는 이유는 신중함이 아니라 측정된 노이즈다 — CI 6회 중 최악이 0.947 이고 그 느슨한 값들은 모두 동시 세션 1 축이다(표본 40개. 세션 8·32 는 320·1280 개이고 런 간 분산이 1.06·1.04배). 절대값 1.0초 게이트는 공용 러너에서 이 코드와 무관한 실패를 만들기 때문에 약속 그대로 둔다(실측 235~266ms).
-- p95 는 nearest-rank(`ceil(0.95n)`). 표본 수를 줄이면 p95 가 최댓값에 붙어 게이트가 단일 요청 하나로 흔들린다.
-- 기준치를 **올리려면** 하드웨어·서버 버전·회귀를 받아들이는 이유를 PR 에 적고 `docs/perf.md` 를 같은 PR 에서 갱신한다.
-- nightly + `workflow_dispatch`. PR 마다 돌리지 않는다.
+## Load (`tests/load`)
+- Measured: `gcm_decrypt(col,@k) LIKE '%김%'` p50/p95 at 10k/100k/300k rows, 1/8/32 concurrent
+  sessions, the ratio against the same query with `AES_DECRYPT`, server RSS, and the increase in
+  `Created_tmp_disk_tables`.
+- The promise (in the docs and the README): p95 within **1.2x** of `AES_DECRYPT`, and serial p95 under
+  **1.0 s** at 300k rows.
+- The actual gate (`tests/load/baseline.json`): a p95 ratio of **1.10**. Measurements land at 0.80–0.95,
+  so 1.2 would pass even if the per-row cost doubled. The reason for not tightening it further is not
+  caution but measured noise — the worst of six CI runs was 0.947, and all of the loose values are on
+  the one-session axis (40 samples; 8 and 32 sessions accumulate 320 and 1280, and their run-to-run
+  spread is 1.06x and 1.04x). The absolute 1.0 s gate stays a promise rather than a gate because on a
+  shared runner it would fail for reasons unrelated to this code (measured 235–266 ms).
+- p95 is nearest-rank (`ceil(0.95n)`). Reduce the sample count and p95 collapses onto the maximum,
+  where a single request moves the gate.
+- To **raise** a threshold, state the hardware, the server version and the reason the regression is
+  accepted in the PR, and update `docs/perf.md` in the same PR.
+- Nightly plus `workflow_dispatch`. Not run per PR.

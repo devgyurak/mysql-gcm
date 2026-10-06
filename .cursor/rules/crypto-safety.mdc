@@ -1,5 +1,5 @@
 ---
-description: "암호 안전 규칙 (항상 적용) (always applied)"
+description: "Crypto safety rules (always apply) (always applied)"
 globs: ""
 alwaysApply: true
 ---

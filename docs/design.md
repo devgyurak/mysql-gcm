@@ -23,12 +23,22 @@
 >   variant. Withholding it would also be incoherent: `gcm_encrypt` at 128 bits would still be
 >   available, and a deployment that wanted determinism would be pushed to a *worse* answer, such as
 >   a hash column.
-> - **The suites share one derivation label, and that is accepted rather than fixed.** Changing the
->   label per suite would make `0x03` and `0x05` incomparable in a way nothing requires, and would
->   invalidate reproducibility for existing deterministic data if it were ever applied retroactively.
->   The zero-padding property below means key length is not separation, so the rule is stated in
->   `spec/envelope.md` §2.5 as something implementations must not rely on. No attack follows from
->   it on its own: the two AES keys differ, and GCM's catastrophic case is one nonce under one key.
+> - **The suites share one derivation label, and that is accepted rather than changed.** An earlier
+>   draft justified this by saying per-suite labels would make `0x03` and `0x05` incomparable; that is
+>   wrong and is withdrawn. They already differ from the version byte onward and never compare equal —
+>   `tests/adapter` and the MTR case both assert it — and giving only the *new* `0x05` its own label
+>   would leave every existing `0x03` envelope reproducible.
+>
+>   The actual reason is narrower. The label exists to separate the encryption key from the HMAC key,
+>   which it does for every suite, and `crypto-safety.md` requires it to be **one constant in one
+>   place**. A second label means a label-per-suite mapping in exactly the file that rule says must not
+>   grow one, bought for a separation nothing has yet shown a need for: the suites are already
+>   separated by having different keys, with the single documented exception that a short key and its
+>   zero-extension derive the same nonce key (RFC 2104 §2). That exception is not itself an attack —
+>   the two AES keys differ, and GCM's catastrophic case is one nonce under one key — and it is
+>   recorded in `spec/envelope.md` §2.5 as something implementations must not rely on. If the security
+>   review finds a need, adding a per-suite label is a change to the new suites only and costs no
+>   existing data.
 >
 > **Still open, for the security review this amendment asks for:** whether the shared label should
 > become per-suite in a future spec version, and the four `gcm.min_key_bytes` contract points — of

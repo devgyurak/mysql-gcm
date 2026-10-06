@@ -63,6 +63,10 @@ void reset();
    "gcm.min_key_bytes" -> "notanumber"). Cleared by reset(). */
 void set_sysvar_value(const std::string &name, const std::string &value);
 
+/* The value a *registration* of this variable re-applies, the way the real
+   service re-reads the startup options. Cleared by reset(). */
+void set_startup_option(const std::string &name, const std::string &value);
+
 /* Clears the modelled registration state. Separate from reset() because a case often
    wants to drop its failure rules while keeping what is installed. */
 void forget_registrations();

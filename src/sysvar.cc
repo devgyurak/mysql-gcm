@@ -166,28 +166,33 @@ bool sysvar_register(bool *fully_rolled_back) {
 
 bool sysvar_unregister() {
   /* The floor comes out first so that a refusal leaves the pair in a state a
-     retry can act on. If the floor refuses, nothing has been removed yet and the
-     component is exactly as it was. If it succeeds and strict then refuses, the
-     floor is re-registered before returning, so the component that stays loaded
-     keeps both variables and the next UNINSTALL starts from the same place this
-     one did.
+     retry can act on: nothing has been removed and the component is exactly as
+     it was.
 
      Each call is guarded by the state flag, because the server fails an
      unregister of a variable it does not have — attempting one unconditionally
      is what would turn a single refusal into a component that can never be
-     uninstalled. */
+     uninstalled.
+
+     Nothing is re-registered when the second drop refuses, and that is the whole
+     point rather than an omission. register_variable re-applies the startup
+     options: once mysqld_server_started it reads argv_cached, appends the
+     persisted variables and runs handle_options
+     (sql/server_component/component_sys_var_service.cc). So putting the floor
+     back would discard the running value and restore whatever my.cnf said —
+     and an operator who booted with loose_gcm.min_key_bytes=16 and then raised
+     it to 32 would silently get 16 back, re-allowing AES-128 writes. A failed
+     UNINSTALL must never widen a policy.
+
+     What the component is left with instead is no floor at all, which
+     min_key_bytes() reads as 32 because the read of an unregistered variable
+     fails and this one fails closed. Strictly narrower than any value an
+     operator could have set, visible in SHOW VARIABLES by its absence, and the
+     state flags make the retry remove only what is still there. Restoring the
+     running value properly would need a service that can set a component
+     variable from inside the component, which 8.0 and 8.4 do not have. */
   if (drop(kMinKeyBytes, &g_floor_registered)) return true;
-  if (drop(kStrict, &g_strict_registered)) {
-    /* Put the floor back. A component that survives a refused UNINSTALL must be
-       whole: leaving it without its floor would mean gcm.min_key_bytes silently
-       stops existing while the functions still run, and min_key_bytes() would
-       then fail closed to 32 for every statement — a configuration the operator
-       set, quietly discarded. If this re-registration also fails the component is
-       loaded and incomplete until a restart, which is the same unrecoverable
-       corner gcm_component_deinit documents for the functions. */
-    (void)register_min_key_bytes();
-    return true;
-  }
+  if (drop(kStrict, &g_strict_registered)) return true;
   return false;
 }
 

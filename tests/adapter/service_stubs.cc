@@ -53,6 +53,16 @@ std::set<std::string> g_registered_vars;
    answered 16 on a malformed value would pass unnoticed. */
 std::map<std::string, std::string> g_sysvar_values;
 
+/* The startup option a registration re-applies, by "component.name". The real
+   service does this: once mysqld_server_started, register_variable reads
+   argv_cached, appends the persisted variables and runs handle_options
+   (sql/server_component/component_sys_var_service.cc), so registering a variable
+   again restores what my.cnf said and discards the running value. Modelling it is
+   what lets a case assert that a failed UNINSTALL does not widen a policy —
+   without it the only observable is whether a re-registration happened, which is
+   a weaker thing to assert. */
+std::map<std::string, std::string> g_startup_options;
+
 /* Returns the matching rule, or nullptr. Counts only calls already recorded for this
    method+detail, so `nth` is 1-based over the sequence the component produces. */
 const FailureRule *rule_for(const std::string &method, const std::string &detail) {
@@ -120,6 +130,8 @@ DEFINE_BOOL_METHOD(stub_register_variable,
   const std::string detail = std::string(component_name) + "." + name;
   if (record_and_decide("register_variable", detail.c_str(), nullptr)) return true;
   g_registered_vars.insert(detail);
+  const auto option = g_startup_options.find(detail);
+  if (option != g_startup_options.end()) g_sysvar_values[detail] = option->second;
   return false;
 }
 
@@ -237,10 +249,15 @@ void reset() {
   g_calls.clear();
   g_rules.clear();
   g_sysvar_values.clear();
+  g_startup_options.clear();
 }
 
 void set_sysvar_value(const std::string &name, const std::string &value) {
   g_sysvar_values[name] = value;
+}
+
+void set_startup_option(const std::string &name, const std::string &value) {
+  g_startup_options[name] = value;
 }
 
 void forget_registrations() {

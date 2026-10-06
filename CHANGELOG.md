@@ -33,6 +33,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   AES keys, so it is not a nonce reuse, but no implementation may rely on key length for separation
   and the question is in the security review A10 still asks for.
 
+  Also withdrawn after review: the claim that per-suite derivation labels would make `0x03` and
+  `0x05` incomparable. They already differ from the version byte onward, and labelling only the new
+  suite would leave existing data reproducible. The real reason for one shared label is that
+  `crypto-safety.md` requires it to be a single constant, and a second one buys a separation nothing
+  has shown a need for.
+
   Found while implementing, by a test written for it: `sysvar_register` discarded the result of its
   own rollback, so a refused unregister of `gcm.strict` left a variable in the dictionary while the
   crypto handles were freed underneath it — the same shape of defect issue #7 was opened for. The
@@ -42,6 +48,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   carries the version byte per file. 1,500 KAT cases (750 AES-256 with 191 authentication failures,
   750 AES-128 with 196), plus project tamper vectors for `0x05`, which the CAVP decrypt files do not
   reach because they are all random-nonce. AES-192's CAVP files are deliberately not imported.
+
+  A second review found a **P1 on the uninstall path**: the first fix re-registered the floor when
+  `gcm.strict` then refused, and `register_variable` re-applies the startup options — once
+  `mysqld_server_started` it reads `argv_cached`, appends the persisted variables and runs
+  `handle_options`. A server booted with `loose_gcm.min_key_bytes=16` whose administrator had raised
+  it to 32 would have had 16 handed back by a *failed* UNINSTALL, re-allowing AES-128 writes. A
+  failed uninstall must never widen a policy. The re-registration is gone: the state flags already
+  made the retry work without it, and an absent floor reads as 32, which is strictly narrower than
+  anything an operator could have set. The adapter stub now models the option re-application, so the
+  test asserts the policy value rather than merely that no re-registration happened.
 
   Review found four more things, all fixed here. `sysvar_unregister` attempted both unregisters
   unconditionally, so a refused UNINSTALL that had already removed one left **every retry failing**

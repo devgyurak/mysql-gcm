@@ -404,7 +404,30 @@ TEST_F(Lifecycle, GivenTheFloorFailsAndStrictWillNotUnregister_WhenInit_ThenAlgo
 
 // --- gcm.min_key_bytes (design A10) ------------------------------------------
 
-TEST_F(Lifecycle, GivenStrictWillNotUnregister_WhenDeinit_ThenTheFloorIsPutBackAndRetryWorks) {
+TEST_F(Lifecycle, GivenANonDefaultFloorAndStrictRefuses_WhenDeinit_ThenThePolicyNeverWidens) {
+  // Given: a server booted with a lower floor than the one now in force --
+  //        loose_gcm.min_key_bytes=16 in my.cnf, raised to 32 at runtime
+  gcm_adapter::set_startup_option(kFloor, "16");
+  ASSERT_EQ(component_init(), 0);
+  ASSERT_EQ(gcm::min_key_bytes(), gcm::kKeyLen128) << "the startup option must take effect";
+  gcm_adapter::set_sysvar_value(kFloor, "32");  // SET GLOBAL gcm.min_key_bytes = 32
+  ASSERT_EQ(gcm::min_key_bytes(), gcm::kKeyLen256);
+  fail(FailureRule{"unregister_variable", kStrict, 1, true});
+
+  // When: the uninstall is refused after the floor has already come out
+  const int refused = component_deinit();
+
+  // Then: the effective policy at that moment is 32, not the 16 the startup
+  //       option would restore. register_variable re-applies argv_cached plus the
+  //       persisted variables, so re-registering the floor here would hand an
+  //       operator back a policy they had deliberately raised, and AES-128 writes
+  //       with it. An absent floor reads as 32 instead: strictly narrower.
+  EXPECT_EQ(refused, 1);
+  EXPECT_FALSE(min_key_bytes_is_registered());
+  EXPECT_EQ(gcm::min_key_bytes(), gcm::kKeyLen256);
+}
+
+TEST_F(Lifecycle, GivenStrictWillNotUnregister_WhenDeinit_ThenRetryStillCompletes) {
   // Given: an install, and a server that refuses the first unregister of gcm.strict
   ASSERT_EQ(component_init(), 0);
   gcm_adapter::reset();
@@ -415,10 +438,10 @@ TEST_F(Lifecycle, GivenStrictWillNotUnregister_WhenDeinit_ThenTheFloorIsPutBackA
   gcm_adapter::reset();  // the refusal was a one-shot rule
   const int retried = component_deinit();
 
-  // Then: the first is refused with the component whole, and the retry succeeds.
-  //       Before the floor was put back, the retry failed forever: the floor was
-  //       already gone, and unregistering a variable the server does not have is
-  //       itself a failure.
+  // Then: the first is refused and the retry succeeds. What makes the retry work
+  //       is the state flags, not a re-registration: the floor is already gone, and
+  //       unregistering a variable the server does not have is itself a failure, so
+  //       an unguarded retry would fail forever.
   EXPECT_EQ(refused, 1);
   EXPECT_EQ(retried, 0);
   EXPECT_FALSE(sysvar_is_registered());

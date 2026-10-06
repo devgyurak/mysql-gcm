@@ -37,7 +37,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   `0x05` incomparable. They already differ from the version byte onward, and labelling only the new
   suite would leave existing data reproducible. The real reason for one shared label is that
   `crypto-safety.md` requires it to be a single constant, and a second one buys a separation nothing
-  has shown a need for.
+  has shown a need for — and that the claim "costs no existing data" is scoped to existing `0x03`
+  data, because once `0x05` ships a label change breaks its deterministic reproducibility too. The
+  window in which that change is cheap is before `0x05` is in anyone's data.
 
   Found while implementing, by a test written for it: `sysvar_register` discarded the result of its
   own rollback, so a refused unregister of `gcm.strict` left a variable in the dictionary while the

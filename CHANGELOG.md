@@ -6,6 +6,24 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **The documentation and the agent instructions are English.** `AGENTS.md`, `CLAUDE.md`, the three
+  nested `AGENTS.md` files, all ten rules in `.agents/rules`, all ten skills and the four subagents
+  were Korean; they are now English, and the generated adapters follow from `agents-sync.sh`.
+  `docs/design.md` is English with the Korean original preserved as `docs/design-KO.md`, which the
+  rule marks as the translation and the English file as canonical.
+
+  Korean that is **test data** is untouched: the fixture names and `LIKE` needles in
+  `tests/integration`, `mysql-test/suite/gcm`, `tests/e2e`, `tests/load/run.py`, `scripts/verify.sql`
+  and the documents that quote them. Code comments were already English.
+
+  Four stale code samples and two stale inventories were corrected rather than translated as-is, since
+  propagating a sample that no longer matches the shipped code is worse than leaving it in Korean: the
+  `mysql-component` and `sysvar-config` skills showed `gcm.strict` registered *before* the UDFs (it is
+  after them, per A9); `sysvar-config`'s 8.0/8.4 branch showed the `g_strict` direct read fixed in #6
+  and a `len >= 3` prefix match that reads "OFFLINE" as off; `e2e-load-tests` said 20 measured runs and
+  a 1.2 gate against the real 40 runs and 1.10; the `ci-release` workflow table was missing `mtr`,
+  `adapter` and `bench`; and `AGENTS.md` §3 said Phase 2 while §6 said Phase 4.
+
 - **English is the first principle for everything committed**, stated once in
   `.agents/rules/docs.md` and referenced from `AGENTS.md` §9 and `CONTRIBUTING.md`, which each carried
   their own partial version of it. A document may carry a translation named `{document}-{LANG}.md`

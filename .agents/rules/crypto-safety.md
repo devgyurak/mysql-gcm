@@ -1,41 +1,81 @@
-# 암호 안전 규칙 (항상 적용)
+# Crypto safety rules (always apply)
 
-이 프로젝트의 전부는 "MySQL 서버 안에서 AEAD 를 안전하게 한다" 이다. 아래는 협상 대상이 아니다.
+This whole project is "make AEAD safe inside a MySQL server". Nothing below is negotiable.
 
 ## OpenSSL
-- 알고리즘은 이름으로 가져온다: `EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL)`, `EVP_MAC_fetch(NULL, "HMAC", NULL)` + digest `SHA256`.
-  `EVP_aes_256_gcm()`, `HMAC()` 같은 레거시 심볼 직접 호출 금지 — 빌드 시점 OpenSSL 에 묶이고 provider 를 우회한다.
-- fetch 결과는 component init 에서 한 번 만들어 캐시하고 deinit 에서 `EVP_CIPHER_free` / `EVP_MAC_free`. UDF 호출마다 fetch 하지 않는다.
-- 서버 프로세스가 이미 로드한 libcrypto 를 쓴다. OpenSSL 정적 링크·번들·다른 버전 dlopen 금지 (심볼 충돌로 서버가 죽는다).
-- nonce 길이 12, tag 길이 16 고정. 다른 길이를 받는 인자를 만들지 않는다.
-- 무작위 nonce 는 `RAND_bytes`. 반환값 1 아님은 에러. `rand()`·시간 기반 금지.
-- 복호화는 `EVP_CTRL_AEAD_SET_TAG` 를 `EVP_DecryptFinal_ex` **이전**에 호출하고, Final 의 반환값이 태그 검증 결과다.
-  Final 이 0 이면 출력 버퍼를 `OPENSSL_cleanse` 로 폐기한다 — 미인증 평문을 절대 반환하지 않는다.
+- Fetch algorithms by name: `EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL)`,
+  `EVP_MAC_fetch(NULL, "HMAC", NULL)` with the `SHA256` digest. Never call a legacy symbol such as
+  `EVP_aes_256_gcm()` or `HMAC()` directly — that binds to the OpenSSL present at build time and
+  bypasses providers.
+- Create the fetched handles once in component init, cache them, and release them in deinit with
+  `EVP_CIPHER_free` / `EVP_MAC_free`. Do not fetch per UDF call.
+- Use the libcrypto the server process has already loaded. No static linking, no bundling, no `dlopen`
+  of a different version — a symbol clash kills the server.
+- Nonce length is fixed at 12 and tag length at 16. Do not add an argument that accepts another length.
+- Random nonces come from `RAND_bytes`. Any return other than 1 is an error. No `rand()`, nothing
+  time-based.
+- On decryption, call `EVP_CTRL_AEAD_SET_TAG` **before** `EVP_DecryptFinal_ex`; the return value of
+  Final *is* the tag verification result. When Final returns 0, discard the output buffer with
+  `OPENSSL_cleanse` — never return unauthenticated plaintext.
 
-## 키 취급 (개정 A1: 키는 SQL 인자)
-- 키는 UDF 인자 `key` 로만 들어온다. **정확히 32 바이트**. 아니면 에러. 접기(XOR)·해시·패딩으로 길이를 맞추지 않는다 (`AES_ENCRYPT` 의 약점 미재현).
-- 키·평문은 `UDF_ARGS` 가 준 버퍼를 직접 참조하고, 복사본을 만들었다면 사용 직후 `OPENSSL_cleanse`. `std::string` 에 담지 않는다 (재할당 시 복사본이 남는다).
-- 결정적 nonce 키는 `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` 로 유도한다. 암호 키를 HMAC 키로 직접 쓰지 않는다 (도메인 분리). 레이블 문자열은 `nonce.h` 의 상수 하나.
-- 키 바이트를 저장소 파일·my.cnf·sysvar·환경변수·테스트 픽스처에 두지 않는다. 예외는 `spec/test-vectors.json` 의 공개 벡터 키뿐.
-- 키가 SQL 문에 등장해 서버 로그에 남을 수 있음은 **알려진 운영 제약**(design §6)이다. 코드로 우회하려 하지 않는다 (로그 필터링 코드 금지 — 서버 내부를 건드리는 범위 밖 작업).
+## Key handling (amendment A1: the key is a SQL argument)
+- The key arrives only as the UDF argument `key`, and is **exactly 32 bytes**. Anything else is an
+  error. Do not fold (XOR), hash or pad it to length — that weakness of `AES_ENCRYPT` is not to be
+  reproduced.
+- Reference the buffers `UDF_ARGS` provides for the key and the plaintext directly, and if you make a
+  copy, `OPENSSL_cleanse` it immediately after use. Do not put either in a `std::string`, which leaves
+  copies behind when it reallocates.
+- Derive the deterministic nonce key as `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`. Never use the
+  encryption key directly as an HMAC key (domain separation). The label string is a single constant in
+  `nonce.h`.
+- Do not put key bytes in a repository file, in my.cnf, in a sysvar, in an environment variable or in a
+  test fixture. The only exception is the public vector keys in `spec/test-vectors.json`.
+- That a key appears in a SQL statement and can therefore reach the server logs is a **known
+  operational constraint** (design §6). Do not try to work around it in code — no log-filtering code,
+  which would mean touching server internals and is out of scope.
 
-## 실패 의미론
-- 태그 불일치: `gcm.strict=ON`(기본) → 에러(`mysql_runtime_error` 서비스, 전용 메시지). OFF → NULL. 그 외 상태 없음.
-- 잘못된 봉투(길이 부족·알 수 없는 version)·잘못된 키 길이: strict 와 무관하게 항상 에러. 데이터 손상·설정 오류는 설정으로 숨기지 않는다.
-- 에러 메시지·서버 로그·assert·예외 문자열에 키·평문·nonce·태그·암호문 바이트를 넣지 않는다. 길이와 version 바이트까지만 허용.
+## Failure semantics
+- Tag mismatch: with `gcm.strict=ON` (the default) an error, raised through the `mysql_runtime_error`
+  service with a dedicated message. With OFF, NULL. There is no third state.
+- A malformed envelope (too short, unknown version) and a wrong key length are **always** errors,
+  regardless of strict. Data corruption and misconfiguration are not hidden behind a setting.
+- Never put key, plaintext, nonce, tag or ciphertext bytes in an error message, a server log, an
+  assertion or an exception string. Lengths and the version byte are as far as it goes.
 
-## 결정적 변형
-- `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`. AAD 는 nonce 계산에 넣지 않는다 (design §5.2). 바꾸려면 설계 문서 먼저.
-- 결정적 변형은 조인·UNIQUE·정확일치 용도다. 자유 텍스트에 쓰지 말라는 경고를 문서·함수 주석에 유지한다.
-- 동일 키를 쓰는 모든 결정적 호출은 서버·컬럼·애플리케이션에 관계없이 같은 AAD 바이트열(또는 항상 빈 값)을 사용한다. 다른 AAD 영역에는 다른 키를 쓴다. 암호문 JOIN 은 양쪽의 키·AAD 가 같아야 한다. 호출 간 AAD 정책을 component 가 검증한다고 설명하지 않는다.
-- 동등성·빈도·길이 노출과 nonce 충돌 가정을 함께 설명한다. 벡터 통과·샘플 충돌 테스트·충돌 확률 계산을 구성 전체의 안전성 증명으로 표현하지 않는다.
+## The deterministic variant
+- `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`. AAD is **not** an input to the nonce calculation
+  (design §5.2). Changing that means amending the design document first.
+- The deterministic variant is for joins, UNIQUE constraints and exact-match lookups. Keep the warning
+  against using it on free text in both the documentation and the function comments.
+- Every deterministic call under one key uses the same AAD bytes — or always none — regardless of
+  server, column or application. Use a different key for a different AAD domain. A join on ciphertext
+  requires both sides to share key and AAD. Do not describe the component as validating an AAD policy
+  across calls; it does not.
+- Explain the exposure of equality, frequency and length together with the nonce-collision assumption.
+  Do not present passing vectors, a sample collision test or a collision-probability calculation as a
+  proof that the whole construction is safe.
 
-## 운영 책임 (개정 A8)
-- 배포 전 동일 키의 모든 사용처를 합산할 사용량 예산·키 교체 기준을 보안 검토한다. component 에 키별 계수·자동 교체·nonce 중복 탐지가 있다고 가정하지 않는다. 임의의 수치를 보편적인 안전 한도로 문서화하지 않는다.
-- 봉투 복사/복원과 재암호화는 구분한다. 무작위 재암호화는 새 nonce, 결정적 재시도는 같은 키·평문·AAD 를 사용한다. 복구 시 누적 사용량을 되돌리지 않는다. 사용 이력이나 난수 상태의 안전성을 확인할 수 없으면 새 쓰기를 중단한다. 모든 쓰기 주체의 난수 상태를 복구·확인하고 독립적으로 안전하게 생성한 새 키로 재개한다. 키 교체만으로 중복 난수 상태가 해결되지는 않는다.
-- 키 교체 시 결정적 암호문 JOIN/UNIQUE 이관과 과거 데이터·백업용 키 보존을 계획한다. 키 관리 자체는 외부 운영 책임이며 component 의 범위를 확장하지 않는다.
-- 개발 가드 훅은 명령 차단 도구이며 운영 중 암호 호출 감시가 아니다. 자세한 운영 안내는 `docs/ops-constraints.md` 11–13항과 README 에 함께 유지한다.
+## Operational responsibility (amendment A8)
+- Before deployment, have a security review set a usage budget that sums **every** use of a given key,
+  and the criteria for rotating it. Do not assume the component counts per-key usage, rotates
+  automatically or detects a repeated nonce. Do not document an arbitrary number as a universal safe
+  limit.
+- Distinguish copying or restoring an envelope from re-encrypting. Random re-encryption takes a fresh
+  nonce; a deterministic retry uses the same key, plaintext and AAD. Recovery does not roll back
+  accumulated usage. If you cannot establish that the usage history or the RNG state is sound, stop
+  writing. Recover and verify the RNG state of every writer and resume with a new key generated
+  independently and safely. Rotating a key does not by itself resolve a duplicated RNG state.
+- When rotating a key, plan the migration of deterministic ciphertext used for joins and UNIQUE
+  constraints, and the retention of old keys for historical data and backups. Key management itself is
+  an external operational responsibility and does not extend the component's scope.
+- The development guard hook is a command blocker, not monitoring of crypto calls in production.
+  Keep the detailed operational guidance in items 11–13 of `docs/ops-constraints.md` and in the README
+  together.
 
-## 코드 리뷰에서 자동 차단(P1)되는 패턴 (C++ `src/` 범위. 내부 벡터 생성 도구의 Python `hmac.HMAC` 는 허용 라이브러리이므로 해당 없음 — 언어별 검사는 code-review 스킬 3단계)
-`EVP_aes_`, `HMAC(`, `rand(`, `srand(`, `printf.*key`, `LogErr.*(key|plain)`, `std::string key`, 하드코딩 키 리터럴,
-키 길이 != 32 를 허용하는 분기, 태그 실패를 strict 검사 없이 NULL 로 만드는 분기, `EVP_DecryptFinal_ex` 반환값 미검사.
+## Patterns blocked automatically (P1) in code review
+Scope is C++ under `src/`. The Python `hmac.HMAC` in the internal vector generator is an allowed
+library and therefore out of scope — per-language checks are step 3 of the `code-review` skill.
+
+`EVP_aes_`, `HMAC(`, `rand(`, `srand(`, `printf.*key`, `LogErr.*(key|plain)`, `std::string key`, a
+hardcoded key literal, any branch that accepts a key length other than 32, any branch that turns a tag
+failure into NULL without consulting strict, and an unchecked `EVP_DecryptFinal_ex` return value.

@@ -1,46 +1,63 @@
-# 코드 리뷰 규칙
+# Code review rules
 
-리뷰는 "이 변경이 잘못된 평문을 내거나 키를 흘리거나 서버를 죽일 수 있는가" 를 먼저 묻는다. 스타일은 마지막.
+A review asks first whether the change can return the wrong plaintext, leak a key, or kill the server.
+Style comes last.
 
-## 우선순위 (모든 코멘트는 접두 필수)
-| 접두 | 의미 | 처리 |
+## Priorities (every comment must carry a prefix)
+| Prefix | Meaning | Handling |
 |---|---|---|
-| **P1** | 머지 차단. 정확성·보안·서버 안정성·데이터 호환성 파손 | 해결 전 머지 불가. 작성자가 반박하려면 근거 + 리뷰어 동의 |
-| **P2** | 머지 전 해결 권장. 유지보수성·테스트 누락·문서 불일치 | 원칙 해결. 이월하려면 이슈 번호를 코멘트에 남긴다 |
-| **P3** | 선택. 스타일·네이밍·취향 | 작성자 재량. 응답 없이 resolve 가능 |
-| **Q** | 질문. 이해 확인 | 답변 후 필요 시 P1~P3 로 승격 |
+| **P1** | Blocks the merge. Correctness, security, server stability or data compatibility is broken | Cannot merge until resolved. To push back, the author needs evidence and the reviewer's agreement |
+| **P2** | Should be resolved before merge. Maintainability, a missing test, a document that disagrees | Resolve as a rule. To defer, leave the issue number in the comment |
+| **P3** | Optional. Style, naming, taste | The author's call. May be resolved without a reply |
+| **Q** | Question. Checking understanding | After the answer, promote to P1–P3 if warranted |
 
-- 코멘트 형식: `P1: <무엇이 왜 문제인지>. 재현: <조건>. 제안: <코드 또는 방향>`. "이거 이상함" 금지.
-- 승인 코멘트에는 리뷰어가 실제로 실행·검증한 것을 적는다 ("8.4 컨테이너에서 verify.sh 통과 확인").
+- Comment format: `P1: <what is wrong and why>. Repro: <conditions>. Suggestion: <code or direction>`.
+  "This looks off" is not a review comment.
+- An approving comment states what the reviewer actually ran and verified ("confirmed verify.sh passes
+  in the 8.4 container").
 
-## 흐름
-1. 작성자 셀프 리뷰: diff 를 처음부터 끝까지 읽고 PR 템플릿 체크리스트를 채운다. 빈 체크박스가 있으면 리뷰 요청하지 않는다.
-2. 자동 리뷰 (에이전트 `code-reviewer`, 암호 경로면 `crypto-reviewer` 추가): 사람 리뷰 **전** 사전 통과. 대체가 아니다.
-3. 사람 리뷰: 일반 PR 1인. 암호·봉투·sysvar 경로(`src/gcm.cc` `envelope.cc` `nonce.cc` `sysvar.cc`, `spec/`) 는 2인.
-4. 머지 조건: CI green + 필수 승인 + 열린 P1 0 + 이월되지 않은 P2 0.
+## Flow
+1. Author self-review: read the diff from start to finish and fill in the PR template checklist. Do
+   not request review while a box is blank.
+2. Automated review (the `code-reviewer` agent, plus `crypto-reviewer` on a crypto path): a
+   prerequisite **before** human review, not a substitute for it.
+3. Human review: one reviewer for an ordinary PR. Two for the crypto, envelope and sysvar paths
+   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `spec/`).
+4. Merge conditions: CI green + the required approvals + zero open P1 + zero P2 that has not been
+   explicitly deferred.
 
-## 리뷰어 체크리스트 (자동 리뷰어도 이 순서로 본다)
-**정확성 (P1)**
-- [ ] 봉투 오프셋·길이 계산이 `spec/envelope.md` 와 일치 (off-by-one, version 바이트)
-- [ ] 태그 실패 경로에서 출력 버퍼 폐기, strict 의미론 준수
-- [ ] 키 길이 32 검사가 호출마다 수행
-- [ ] NULL/빈 문자열/최대 길이 인자 처리
-- [ ] 결과 charset 태깅 (`gcm_decrypt`) / BLOB (`gcm_encrypt*`)
-- [ ] 세션 sysvar 를 실제로 세션 값으로 읽는가
+## Reviewer checklist (the automated reviewers work through it in this order)
+**Correctness (P1)**
+- [ ] Envelope offsets and length arithmetic match `spec/envelope.md` (off-by-one, the version byte)
+- [ ] The tag-failure path discards the output buffer and honours the strict semantics
+- [ ] The 32-byte key check runs on every call
+- [ ] NULL, empty-string and maximum-length arguments are handled
+- [ ] Result charset tagging (`gcm_decrypt`) / BLOB (`gcm_encrypt*`)
+- [ ] A session sysvar is actually read as the session value
 
-**안전 (P1)** — `crypto-safety.md` 차단 패턴 grep, 키·평문 로그 여부, 메모리 소거
+**Safety (P1)** — grep for the blocked patterns in `crypto-safety.md`, check for keys or plaintext in
+logs, check that memory is cleansed
 
-**서버 안정성 (P1)** — 동시 호출 안전, 예외 미사용, init 실패 롤백, deinit 누수 (ASan/valgrind 로그 첨부 여부)
+**Server stability (P1)** — safe under concurrent calls, no exceptions, init rolls back on failure, no
+leak in deinit (is an ASan/valgrind log attached?)
 
-**아키텍처 (P1/P2)** — `architecture.md` 의 의존 방향·SQL 정책 위치·자원 수명·버전 경계 확인. `python3 scripts/check-architecture.py` 통과, 실험용 암호 우회 없음. 간접 의존과 새 테스트 진입점은 코드로 확인한다.
+**Architecture (P1/P2)** — check the dependency direction, where SQL policy lives, resource lifetimes
+and the version boundary against `architecture.md`. `python3 scripts/check-architecture.py` passes, and
+there is no experimental crypto bypass. Confirm indirect dependencies and any new test entry point in
+the code.
 
-**테스트 (P2)** — GWT 준수, 테스트 케이스 본문에 `if`·`else`·`for`·`while` 같은 로직·분기 추가 없음, 단위·통합 동반, 벡터 파일 갱신, 한글 LIKE 케이스 존치, `.result` 변경이 의도된 것인지
+**Tests (P2)** — GWT followed; no logic or branching (`if`, `else`, `for`, `while`) added inside a test
+case body; unit and integration tests together; vector file updated; the Korean `LIKE` case still
+present; any `.result` change is intentional
 
-**호환성 (P1/P2)** — 봉투·함수 시그니처·sysvar 변경 시 서버 테스트·spec·docs 동시 변경, MySQL 버전별 서비스 가용성
+**Compatibility (P1/P2)** — a change to the envelope, a function signature or a sysvar changes the
+server tests, `spec/` and the docs in the same PR; service availability per MySQL version
 
-**문서 (P2)** — `docs/design.md` 결정과 충돌 없음, 운영 제약(§6) 영향이 README 에 반영
+**Documentation (P2)** — no conflict with a decision in `docs/design.md`; any effect on the operational
+constraints (§6) is reflected in the README
 
-**스타일 (P3)** — `stack-*.md` 관례
+**Style (P3)** — the conventions in `stack-*.md`
 
-## PR 크기
-- 순 변경 400줄 초과는 분할 요청 (`.result`·벡터 JSON 제외). 리팩터와 기능 변경을 한 PR 에 섞지 않는다.
+## PR size
+- Over 400 net lines, ask for a split (excluding `.result` files and vector JSON). Do not mix a
+  refactor and a behaviour change in one PR.

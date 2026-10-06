@@ -1,5 +1,5 @@
 ---
-description: "코드 리뷰 규칙 (always applied)"
+description: "Code review rules (always applied)"
 globs: ""
 alwaysApply: true
 ---

@@ -1,7 +1,10 @@
 # MySQL GCM encryption functions (component) — design and procedure
 
-> **Language.** This is the canonical document. `docs/design-KO.md` is its Korean translation and
-> follows it; where the two disagree, this file is right (`.agents/rules/docs.md`).
+> **Language.** English · [한국어](design-KO.md)
+>
+> This is the canonical document. [`design-KO.md`](design-KO.md) is its Korean translation and follows
+> it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
+> both documents in the same PR.
 
 > ## Amendment A9 (2026-10-02, settled) — registrations that survive a failed install, and registration order
 >
@@ -407,8 +410,10 @@ not offer partial match either.
 
 ## 2. What is being built
 
-> Superseded by amendment A1 for the key handling and by A2/A3 for the envelope. The original text is
-> kept because the amendments are written as deltas against it.
+> Superseded: amendment A1 for the key handling, A2 and A3 for the envelope. The original text is kept
+> because those amendments are written as deltas against it and are unreadable without it. **This is
+> not the current design** — `gcm_key_id()`, the function surface with no key argument, and the
+> deterministic envelope that stores no nonce are all withdrawn.
 
 ### 2.1 Function surface
 
@@ -467,7 +472,7 @@ SQL. That is how crypsi's flaw is avoided.
 
 ## 3. A prerequisite decision — the keyring backend (before the spike)
 
-> Out of scope as of amendment A1. Kept because A1 is written against it.
+> **Out of scope** as of amendment A1. Kept because A1 is written against this section.
 
 This decision determines whether the project is justified at all.
 
@@ -704,7 +709,7 @@ forward compatibility.
 | On the RHEL9 family, the compiler the server source requires is gcc-toolset-12 for 8.0/8.4 and **gcc-toolset-14 for 9.x** | the `ALTERNATIVE_PATHS` (`LINUX_RHEL9` branch) in each tag's `CMakeLists.txt`. Measured: with toolset-13, configuring 9.4.0 fails with "Could not find devtoolset compiler/linker". `rhel9_toolset` in `docker/versions.json` is the source of this value |
 | 8.0 needs an external boost (1.77); 8.4 and 9.x bundle it in `extra/boost` | each tag's `cmake/boost.cmake` |
 | **Korean partial match works through native LIKE** — `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` = 1, `CHARSET()` = `utf8mb4`, and prefix, suffix and case-insensitive `LIKE '%kim%'` are also 1 | Phase S measurements on 8.0.43, 8.4.11 and 9.4.0 (`scripts/verify.sql`, `tests/integration/20_korean_like.sql`) → **decrypt_like is unnecessary** |
-| `Created_tmp_disk_tables` increased by 0 for a `gcm_decrypt` + `ORDER BY` + `GROUP BY` combination | Phase S measurements on 8.0.43, 8.4.11 and 9.4.0 (`build/<ver>/tmp_disk.txt`). A small-scale observation, re-confirmed in the load tests |
+| `Created_tmp_disk_tables` increased by 0 for a `gcm_decrypt` + `ORDER BY` + `GROUP BY` combination | Phase S measurements on 8.0.43, 8.4.11 and 9.4.0 (`build/<ver>/tmp_disk.txt`). A small-scale observation, and still to be re-confirmed at volume. `tests/load` reports the same counter as `created_tmp_disk_tables_delta`, but around its own `gcm_decrypt(col,@k) LIKE` query rather than this ORDER BY + GROUP BY one, so it does not confirm this row |
 | `EVP_CIPHER_fetch("AES-256-GCM")` and `EVP_MAC_fetch("HMAC")` succeed on all three versions | `INSTALL COMPONENT` succeeding is itself the evidence (a failed fetch in init fails the install) |
 | The deterministic envelope matches `spec/envelope.md` §5.1 and §5.2 byte for byte | Phase S measurements on all three versions (`tests/integration/11_roundtrip_det.sql`, `40_null_and_edge.sql`) |
 | A key that is not 32 bytes is rejected on every call (0, 5, 31, 33, 64) | `tests/unit`, `tests/integration/00_install_and_signature.sql` |

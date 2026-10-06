@@ -1,8 +1,9 @@
 # MySQL GCM 암복호화 함수 (component) — 설계와 절차
 
-> **언어.** 이 문서는 [`docs/design.md`](design.md) 의 한국어 번역입니다. **영어판이 정본**이고,
-> 두 문서가 다르면 영어판이 맞습니다 (`.agents/rules/docs.md`). 설계를 바꿀 때는 두 문서를 같은 PR
-> 에서 함께 고칩니다.
+> **언어.** [English](design.md) · 한국어
+>
+> 이 문서는 [`design.md`](design.md) 의 한국어 번역입니다. **영어판이 정본**이고, 두 문서가 다르면
+> 영어판이 맞습니다 (`.agents/rules/docs.md`). 설계를 바꿀 때는 두 문서를 같은 PR 에서 함께 고칩니다.
 
 > ## 개정 A9 (2026-10-02, 확정) — 설치 실패 후 남는 등록과 등록 순서
 >
@@ -363,6 +364,10 @@ Acra 의 기능 경계가 우리 진단을 독립적으로 확인해준다 — �
 
 ## 2. 무엇을 만드는가
 
+> 키 취급은 개정 A1 이, 봉투는 A2·A3 이 대체했다. 아래 원문을 그대로 두는 이유는 그 개정들이 바로 이
+> 텍스트에 대한 델타로 쓰여 있어 원문 없이는 읽히지 않기 때문이다. **현행 설계가 아니다** — `gcm_key_id()`,
+> 키 인자 없는 함수 표면, nonce 를 저장하지 않는 결정적 봉투는 모두 폐기됐다.
+
 ### 2.1 함수 표면
 
 빌트인을 덮어쓸 수 없으므로 새 이름이어야 한다. `block_encryption_mode` 에
@@ -418,6 +423,8 @@ loose_gcm.strict       = ON
 등장하지 않는다. crypsi 의 결함을 이걸로 피한다.
 
 ## 3. 선결 결정 — keyring 백엔드 (스파이크보다 먼저)
+
+> 개정 A1 으로 **범위 밖**이 됐다. A1 이 이 절을 근거로 쓰여 있어 남겨둔다.
 
 이 결정이 프로젝트 정당성 자체를 좌우한다.
 
@@ -636,7 +643,7 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 | RHEL9 계열에서 서버 소스가 요구하는 컴파일러는 8.0/8.4 = gcc-toolset-12, **9.x = gcc-toolset-14** | 각 태그 `CMakeLists.txt` 의 `ALTERNATIVE_PATHS`(`LINUX_RHEL9` 분기). 실측: toolset-13 으로는 9.4.0 configure 가 "Could not find devtoolset compiler/linker" 로 실패한다. `docker/versions.json` 의 `rhel9_toolset` 이 이 값의 원본 |
 | 8.0 은 외부 boost(1.77) 필요, 8.4·9.x 는 `extra/boost` 로 번들 | 각 태그 `cmake/boost.cmake` |
 | **한글 부분일치가 native LIKE 로 동작한다** — `gcm_decrypt(gcm_encrypt_det('홍길동',@k),@k) LIKE '%길%'` = 1, `CHARSET()` = `utf8mb4`, 전방·후방일치와 `LIKE '%kim%'`(대소문자 무시)도 1 | Phase S 실측 8.0.43 · 8.4.11 · 9.4.0 (`scripts/verify.sql`, `tests/integration/20_korean_like.sql`) → **decrypt_like 는 불필요** |
-| `gcm_decrypt` + `ORDER BY` + `GROUP BY` 조합에서 `Created_tmp_disk_tables` 증가량 0 | Phase S 실측 8.0.43 · 8.4.11 · 9.4.0 (`build/<ver>/tmp_disk.txt`). 소규모 관측이므로 부하 테스트에서 재확인한다 |
+| `gcm_decrypt` + `ORDER BY` + `GROUP BY` 조합에서 `Created_tmp_disk_tables` 증가량 0 | Phase S 실측 8.0.43 · 8.4.11 · 9.4.0 (`build/<ver>/tmp_disk.txt`). 소규모 관측이고 대용량에서는 아직 재확인하지 않았다. `tests/load` 가 같은 카운터를 `created_tmp_disk_tables_delta` 로 보고하지만 이 ORDER BY + GROUP BY 가 아니라 자기 쿼리(`gcm_decrypt(col,@k) LIKE`) 기준이므로 이 행을 확인해주지는 않는다 |
 | `EVP_CIPHER_fetch("AES-256-GCM")` · `EVP_MAC_fetch("HMAC")` 가 세 버전 모두에서 성공 | `INSTALL COMPONENT` 성공 자체가 증거 (init 에서 fetch 실패 시 설치가 실패한다) |
 | 결정적 봉투가 `spec/envelope.md` §5.1 · §5.2 와 바이트 단위로 일치 | Phase S 실측 세 버전 (`tests/integration/11_roundtrip_det.sql`, `40_null_and_edge.sql`) |
 | 32 바이트 아닌 키는 호출마다 거부된다 (0·5·31·33·64) | `tests/unit`, `tests/integration/00_install_and_signature.sql` |

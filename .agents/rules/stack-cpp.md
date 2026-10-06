@@ -25,6 +25,8 @@ paths:
     Do not revert it; if you want to change it, do the whole reformat as its own commit.
 - The deviation is acceptable because the goal is not to contribute this code to the upstream server
   tree. Every other setting stays identical to that tree.
+- Unit-test builds enable `-fsanitize=address,undefined` by default. Do not enable sanitizers in
+  release builds.
 - Header include order: own header → C standard → C++ standard → OpenSSL → MySQL service headers. The
   allowed dependencies and the boundary around server headers follow `architecture.md`.
 - Comments say **why** only, and cite the design document section

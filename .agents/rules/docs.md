@@ -5,11 +5,51 @@ paths:
   - "README.md"
   - "README-KO.md"
 ---
-# 문서 · 스펙 규칙
+# Documentation and spec rules
 
-- `docs/design.md` 가 근거의 원본. 코드와 다르면 코드가 틀린 것이거나 문서를 먼저 개정해야 한다. §8 "확인됨/미확인" 표는 사실이 확인될 때마다 갱신한다 (근거 링크 포함).
-- README 첫 화면 순서: 한 줄 요약 → **운영 제약 (design §6 전부)** → 지원 매트릭스 → 설치 → 함수 표. 제약을 아래로 내리지 않는다.
-- `spec/envelope.md` 는 구현 언어 중립. 바이트 오프셋 표 + 실패 의미론 표 + 예시 hex. 구현자가 이 문서만 보고 만들 수 있어야 한다.
-- `spec/test-vectors.json` 스키마: `{ "version": 1, "vectors": [ { "id", "kind": "random|det|nist", "key_hex", "nonce_key_hex"?, "nonce_hex"?, "aad_hex", "plaintext_hex", "envelope_hex", "expect": "ok|bad_tag|bad_envelope" } ] }`. 필드 추가는 minor, 의미 변경은 major.
-- 문서 언어: README·spec·docs 는 영어 (오픈소스). `README-KO.md` 는 사용자가 요청한 한국어 번역이며 README 의 운영 제약·지원 버전·명령·예제가 바뀌면 같은 변경에서 함께 갱신한다. 두 README 상단의 언어 링크를 유지한다. `docs/design.md` 는 원본이 한국어이므로 유지하되 영어 요약 `docs/design.en.md` 를 Phase 1 에 추가.
-- 라이선스는 **GPLv2 로 확정**됐다 (2026-09-28, design §7). `LICENSE` 에 전문, 소스에 `SPDX-License-Identifier: GPL-2.0-only`, README 두 판에 `LICENSE` 링크. "pending legal review" 표기는 더 쓰지 않는다. 다른 라이선스로 바꾸려면 design §7 을 먼저 개정한다.
+## Language
+
+**English first.** Code, comments, commit messages, PR descriptions, documents and specs are written
+in English. This is an open-source project: someone who does not read Korean has to be able to use it,
+review it and contribute to it from the repository alone.
+
+A document **may** carry a translation for the convenience of developers who prefer another language.
+A translation is named `{document}-{LANG}.md` beside the original — `README-KO.md` — where `{LANG}` is
+the ISO 639-1 code in **uppercase**, the spelling `README-KO.md` already established. Keep the
+language links at the top of translated documents so each one points at the others.
+
+- **The English file is canonical.** Where the two disagree the English one is right and the
+  translation is what needs fixing. A translation is never a second opinion on a decision.
+- A translation changes **in the same PR as its original**. One that falls behind is a documentation
+  bug, and the lag is invisible until someone acts on the stale half.
+- Only two documents are translated, because each one doubles the cost of every change to it:
+  `README.md` (the front door) and `docs/design.md` (the rationale). Do **not** translate the agent
+  rules, the skills or `spec/`. The allowance exists for human readers; rules and skills are consumed
+  by tools, and `spec/` is normative, where two wordings of one byte layout is a defect waiting to
+  happen.
+- `docs/design.md` is still Korean as of this rule. It becomes the English canonical document with
+  `docs/design-KO.md` beside it in the translation pass that follows; until then it is the one
+  document the first paragraph does not yet describe.
+- Conversation with the user is in Korean (`AGENTS.md` §9). That is a separate matter from what gets
+  committed, and this rule does not change it.
+- **Korean in tests and fixtures is data, not prose, and is never translated**: `'홍길동'`,
+  `LIKE '%김%'`, `SURNAMES` in `tests/load/run.py`, the Korean cases in `tests/integration`,
+  `mysql-test/suite/gcm` and `tests/e2e`. Partial-match search on an encrypted Korean column is why
+  this project exists (`testing.md`). Translating those strings would delete the thing under test.
+
+## Documents
+
+- `docs/design.md` is the source of rationale. Where the code and that document disagree, either the
+  code is wrong or the document has to be amended first. The §8 "confirmed / unconfirmed" table is
+  updated whenever a fact is established, with a link to the evidence.
+- README first-screen order: one-line summary → **operational constraints (all of design §6)** →
+  support matrix → install → function table. The constraints do not get moved further down.
+- `spec/envelope.md` is implementation-language neutral: a byte-offset table, a failure-semantics
+  table, and worked hex examples. An implementer must be able to build from that document alone.
+- `spec/test-vectors.json` schema:
+  `{ "version": 1, "vectors": [ { "id", "kind": "random|det|nist", "key_hex", "nonce_key_hex"?, "nonce_hex"?, "aad_hex", "plaintext_hex", "envelope_hex", "expect": "ok|bad_tag|bad_envelope" } ] }`.
+  Adding a field is a minor change; changing the meaning of one is major.
+- The license is **settled as GPLv2** (2026-09-28, design §7): full text in `LICENSE`,
+  `SPDX-License-Identifier: GPL-2.0-only` in every source file, and a link to `LICENSE` from both
+  READMEs. The phrase "pending legal review" is no longer used anywhere. Changing the license means
+  amending design §7 first.

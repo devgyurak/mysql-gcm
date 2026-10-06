@@ -75,8 +75,12 @@ protection deliberately allows — is gated too.
   conversation to have in the PR, not a box to leave blank.
 - **Conventional commit subjects**: `feat(component):`, `fix(crypto):`, `test(mtr):`, `docs:`, `ci:`.
   One commit, one concern.
-- Prose in English for code, comments, README, `spec/` and commit messages. `docs/design.md` is
-  Korean, and `README-KO.md` mirrors `README.md` — change both in the same PR.
+- **English first**, for code, comments, documents, `spec/`, commit messages and PR descriptions. A
+  document may carry a translation named `{document}-{LANG}.md`; `README-KO.md` is the one that exists
+  today. The English file is canonical, and a change to it updates the translation **in the same PR** —
+  a translation that lags is a documentation bug. Korean strings in tests are data, not prose, and are
+  never translated. (`docs/design.md` is still Korean; it flips to English with `docs/design-KO.md`
+  beside it in the translation pass.)
 
 ## Tests are not optional
 

@@ -1,4 +1,7 @@
-<h1 align="center">mysql-gcm</h1>
+<p align="center">
+  <img src="docs/assets/banner.png" width="720"
+       alt="mysql-gcm — MySQL 용 AES-256-GCM. 서버 component 로, 평문에 대한 서버측 LIKE 를 유지합니다.">
+</p>
 
 <p align="center">
   <strong>MySQL 용 AES-256-GCM — 서버 component 로, 평문에 대한 서버측 <code>LIKE</code> 를 유지합니다.</strong>

@@ -6,6 +6,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **A banner at the top of both READMEs**, stored as `docs/assets/banner.png`. It replaces the `<h1>`
+  and the tagline line in `README.md`, since the image already carries both; `README-KO.md` keeps its
+  Korean tagline below the banner, because the banner's text is English and a Korean reader would
+  otherwise lose it. The alt text carries the tagline in each file's own language, so the page still
+  reads correctly with images off or through a screen reader.
+
+  Rendered at `width="720"` rather than full width. The source is 2560×1280, which is the 2x GitHub
+  social-preview spec, and at full column width that 2:1 ratio would push the operational constraints
+  — which `.agents/rules/docs.md` requires on the first screen — well below the fold.
+
 - **`gcm.strict` is registered after the three functions, not before** (`docs/design.md` amendment
   A9). Registered first, a `udf_register` failure rolled back with the variable still in the server's
   dictionary pointing at `&g_strict` — in memory the loader is about to unmap, since `dlopen` gets

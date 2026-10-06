@@ -46,6 +46,7 @@ AGENTS.md / CLAUDE.md          Agent instructions (this file is the source)
 .agents/rules/                 Rule sources, shared across tools
 .agents/skills/                Skill sources, shared across tools
 docs/design.md                 The design document (the source of rationale, including amendment A1)
+docs/design-KO.md              Its Korean translation. The English file above is canonical
 docs/ops-constraints.md        Operational constraints — also duplicated on the README's first screen
 spec/envelope.md               The settled envelope and failure semantics (Phase 1)
 spec/test-vectors.json         NIST CAVP GCM KAT plus the project's own vectors. The common reference for the server tests

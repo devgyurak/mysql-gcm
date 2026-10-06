@@ -14,9 +14,10 @@ in English. This is an open-source project: someone who does not read Korean has
 review it and contribute to it from the repository alone.
 
 A document **may** carry a translation for the convenience of developers who prefer another language.
-A translation is named `{document}-{LANG}.md` beside the original — `README-KO.md` — where `{LANG}` is
-the ISO 639-1 code in **uppercase**, the spelling `README-KO.md` already established. Keep the
-language links at the top of translated documents so each one points at the others.
+A translation is named `{document}-{LANG}.md` beside the original — `README-KO.md`,
+`docs/design-KO.md` — where `{LANG}` is the ISO 639-1 code in **uppercase**, the spelling
+`README-KO.md` already established. Keep the language links at the top of translated documents so each
+one points at the others.
 
 - **The English file is canonical.** Where the two disagree the English one is right and the
   translation is what needs fixing. A translation is never a second opinion on a decision.
@@ -27,9 +28,6 @@ language links at the top of translated documents so each one points at the othe
   rules, the skills or `spec/`. The allowance exists for human readers; rules and skills are consumed
   by tools, and `spec/` is normative, where two wordings of one byte layout is a defect waiting to
   happen.
-- `docs/design.md` is still Korean as of this rule. It becomes the English canonical document with
-  `docs/design-KO.md` beside it in the translation pass that follows; until then it is the one
-  document the first paragraph does not yet describe.
 - Conversation with the user is in Korean (`AGENTS.md` §9). That is a separate matter from what gets
   committed, and this rule does not change it.
 - **Korean in tests and fixtures is data, not prose, and is never translated**: `'홍길동'`,

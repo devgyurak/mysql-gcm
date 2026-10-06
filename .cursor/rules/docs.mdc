@@ -1,5 +1,5 @@
 ---
-description: "문서 · 스펙 규칙"
+description: "Documentation and spec rules"
 globs: "docs/**, spec/**, README.md, README-KO.md"
 alwaysApply: false
 ---

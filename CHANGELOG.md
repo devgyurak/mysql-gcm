@@ -62,6 +62,21 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   deleted unnoticed either.
 
 ### Documented
+- `docs/design.md` amendment **A10 (proposed)**: AES-128-GCM and AES-192-GCM alongside AES-256-GCM.
+  The suite is selected by key length and nothing else — 16/24/32 bytes — which keeps the suite a pure
+  function of the key and so adds no cross-call consistency rule of the kind A8 needs for AAD. Four new
+  envelope version bytes (`0x04`–`0x07`), since `spec/envelope.md` §7 freezes the existing ones; the
+  layout and the deterministic nonce label are unchanged.
+
+  The amendment states the cost rather than burying it: today a truncated key fails loudly because 32
+  bytes is the only valid length, and afterwards a 32-byte key truncated to 16 is a valid AES-128 key
+  that `gcm_encrypt` will accept. A `gcm.min_key_bytes` sysvar defaulting to 32 is the recommended
+  mitigation — it makes the feature opt-in rather than a silent weakening — but the choice is left open
+  pending the security review A8 requires for anything touching key policy.
+
+  Nothing is implemented. The amendment is the design decision and the sequencing note: this is 0.2.0
+  work, after the 0.1.0 tag, because it bumps the spec version.
+
 - `docs/design.md` amendment **A9**: on a failed install the loader `dlclose()`s the library, so any
   registration that survived a refused rollback points into an unmapped segment. This cannot be fixed
   from inside a component — no service asks the loader to keep the library mapped — so the amendment

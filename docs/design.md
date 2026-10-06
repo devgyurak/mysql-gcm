@@ -8,10 +8,16 @@
 
 > ## Amendment A10 (2026-10-06) — AES-128-GCM and AES-192-GCM
 >
-> **Status: AES-128 implemented; AES-192 allocated and not implemented.** `0x04` and `0x05` ship,
-> `gcm.min_key_bytes` ships with the recommended default of 32, and `spec/envelope.md` is at v2.
-> `0x06` and `0x07` stay reserved and are rejected as `bad_envelope`. The NIST CAVP KAT is imported
-> for both suites: 750 AES-256 cases (191 authentication failures) and 750 AES-128 (196).
+> **Status: implemented in full.** All three suites ship — `0x02`/`0x03` (AES-256), `0x06`/`0x07`
+> (AES-192) and `0x04`/`0x05` (AES-128) — with `gcm.min_key_bytes` defaulting to 32, so anything below
+> AES-256 stays opt-in. `spec/envelope.md` is at v3. The NIST CAVP KAT is imported for every suite:
+> 2,250 cases, 750 per suite, of which 191 / 190 / 196 are authentication failures.
+>
+> Adding AES-192 tested this amendment's own claim that a suite is "one row in the table plus one
+> `EVP_CIPHER_fetch`". It held: four files, seventeen lines. Everything else — parsing, the version
+> and key-length agreement check, the nonce derivation, the error message, the floor — was already
+> driven from the table. What was *not* free was the test and document surface, where a dozen places
+> asserted that AES-192 was unimplemented and each had to be flipped deliberately.
 >
 > **Decided here, and why, since shipping `0x05` means deciding them:**
 >

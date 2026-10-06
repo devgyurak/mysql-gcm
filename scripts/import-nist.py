@@ -34,6 +34,12 @@ SUITES = (
         "version": "02",
     },
     {
+        "bits": "192",
+        "encrypt": "gcmEncryptExtIV192.rsp",
+        "decrypt": "gcmDecrypt192.rsp",
+        "version": "06",
+    },
+    {
         "bits": "128",
         "encrypt": "gcmEncryptExtIV128.rsp",
         "decrypt": "gcmDecrypt128.rsp",

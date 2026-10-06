@@ -1,0 +1,38 @@
+# Given: a 32-, 24- and 16-byte fixture key
+# When: the floor is lowered so the smaller suite is allowed
+# When: the same plaintext is sealed under each key length
+02	06	04	03	07	05
+# Then: 02 / 06 / 04 and 03 / 07 / 05 — the version byte follows the key (above)
+# Scenario 2 — Given: AES-128 and AES-192 envelopes
+# When: it is round-tripped and matched with native LIKE
+홍길동	홍길동	1	1	utf8mb4	38
+# Then: the plaintext twice, 1, 1, utf8mb4 and 38 = 9 + 29 (above)
+# Scenario 3 — Given: deterministic values under the three suites
+# When: they are compared
+1	1	0	0
+# Then: 1, 1, 0, 0 — ciphertext never joins across suites (above)
+# Scenario 4 — Given: an envelope and a key that disagree
+# When: each is decrypted with another suite key
+# Then: bad_key_len, never bad_tag — a key problem reported as one (errors below)
+# Scenario 5 — Given: a 23-byte key, one short of AES-192
+# When: it is used to encrypt
+# Then: an error — never rounded to a neighbouring suite (errors below)
+# Scenario 6 — Given: the floor back at its default
+32
+# When: a 16-byte key is used to encrypt
+# Then: refused by policy — the feature is opt-in (errors below)
+# Scenario 7 — Given: a tampered AES-192 envelope and strict ON
+# When: it is decrypted
+# Then: an error — tag verification is not suite-specific (errors below)
+# Scenario 8 — Given: the floor is 32 but AES-128 data already exists
+# When: it is decrypted
+홍길동
+# Then: the plaintext — raising the floor never locks out data (above)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 43: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 16
+ERROR 3200 (HY000) at line 44: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 32
+ERROR 3200 (HY000) at line 45: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 32
+ERROR 3200 (HY000) at line 46: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 24
+ERROR 3200 (HY000) at line 51: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 23
+ERROR 3200 (HY000) at line 58: gcm_encrypt UDF failed; key of 16 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 69: gcm_decrypt UDF failed; authentication tag verification failed

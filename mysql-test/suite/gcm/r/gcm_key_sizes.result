@@ -1,0 +1,84 @@
+SET @k192 = UNHEX('091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734');
+SET @k128 = UNHEX('0310171e252c333a41484f565d646b72');
+# Given: the floor at its default, which is AES-256 only
+SELECT @@global.gcm.min_key_bytes AS floor_default;
+floor_default
+32
+# When: a 16-byte key is used to encrypt
+SELECT gcm_encrypt('홍길동', @k128);
+ERROR HY000: gcm_encrypt UDF failed; key of 16 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+# Then: refused by policy — the smaller suites are opt-in
+# Given: the floor lowered to allow AES-128
+SET GLOBAL gcm.min_key_bytes = 16;
+# When: the same plaintext is sealed under each key length
+SELECT HEX(LEFT(gcm_encrypt('홍길동', @k), 1))        AS random_256_version,
+HEX(LEFT(gcm_encrypt('홍길동', @k192), 1))     AS random_192_version,
+HEX(LEFT(gcm_encrypt('홍길동', @k128), 1))     AS random_128_version,
+HEX(LEFT(gcm_encrypt_det('홍길동', @k), 1))    AS det_256_version,
+HEX(LEFT(gcm_encrypt_det('홍길동', @k192), 1)) AS det_192_version,
+HEX(LEFT(gcm_encrypt_det('홍길동', @k128), 1)) AS det_128_version;
+random_256_version	random_192_version	random_128_version	det_256_version	det_192_version	det_128_version
+02	06	04	03	07	05
+# Then: 02 / 06 / 04 and 03 / 07 / 05 — the version byte follows the key
+# Given: AES-128 and AES-192 envelopes
+# When: each is round-tripped and matched with native LIKE
+SELECT gcm_decrypt(gcm_encrypt_det('홍길동', @k128), @k128) LIKE '%길%' AS korean_like_128,
+gcm_decrypt(gcm_encrypt_det('홍길동', @k192), @k192) LIKE '%길%' AS korean_like_192,
+CHARSET(gcm_decrypt(gcm_encrypt('홍길동', @k192), @k192)) AS result_charset,
+LENGTH(gcm_encrypt_det('홍길동', @k192)) AS envelope_length;
+korean_like_128	korean_like_192	result_charset	envelope_length
+1	1	utf8mb4	38
+# Then: 1, 1, utf8mb4 and 38 = 9 + 29 — the same layout as AES-256
+# Given: deterministic values under the two suites
+# When: they are compared
+SELECT gcm_encrypt_det('EMR-001', @k128) = gcm_encrypt_det('EMR-001', @k128) AS det_128_stable,
+gcm_encrypt_det('EMR-001', @k192) = gcm_encrypt_det('EMR-001', @k192) AS det_192_stable,
+gcm_encrypt_det('EMR-001', @k) = gcm_encrypt_det('EMR-001', @k192) AS joins_256_192,
+gcm_encrypt_det('EMR-001', @k192) = gcm_encrypt_det('EMR-001', @k128) AS joins_192_128;
+det_128_stable	det_192_stable	joins_256_192	joins_192_128
+1	1	0	0
+# Then: 1, 1, 0, 0 — ciphertext never joins across suites
+# Given: an envelope and a key that disagree about the suite
+SET @e256 = gcm_encrypt_det('홍길동', @k);
+SET @e192 = gcm_encrypt_det('홍길동', @k192);
+SET @e128 = gcm_encrypt_det('홍길동', @k128);
+# When: each is decrypted with the other suite's key
+SELECT gcm_decrypt(@e256, @k128);
+ERROR HY000: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 16
+SELECT gcm_decrypt(@e128, @k);
+ERROR HY000: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 32
+SELECT gcm_decrypt(@e192, @k);
+ERROR HY000: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 32
+SELECT gcm_decrypt(@e256, @k192);
+ERROR HY000: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 24
+# Then: bad_key_len every way, never bad_tag — a key problem reported as one
+# Given: a 23-byte key, one short of AES-192
+# When: it is used to encrypt
+SELECT gcm_encrypt('홍길동', UNHEX('000102030405060708090a0b0c0d0e0f10111213141516'));
+ERROR HY000: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 23
+# Then: an error — never rounded to a neighbouring suite
+# Given: a tampered 0x05 envelope and strict ON
+SET @bad128 = CONCAT(LEFT(@e128, LENGTH(@e128)-1),
+UNHEX(LPAD(HEX(ORD(RIGHT(@e128, 1)) ^ 255), 2, '0')));
+# When: it is decrypted
+SELECT gcm_decrypt(@bad128, @k128);
+ERROR HY000: gcm_decrypt UDF failed; authentication tag verification failed
+# Then: an error — tag verification is not suite-specific
+# Given: the same envelope with strict OFF
+# (this half is here rather than in tests/integration because SET GLOBAL
+#  reaches the current session on 8.0/8.4 but not on 9.x, where the session
+#  holds its own value (design A5); MTR is 8.4-only so the scope is unambiguous)
+SET GLOBAL gcm.strict = OFF;
+# When: it is decrypted
+SELECT gcm_decrypt(@bad128, @k128) IS NULL AS strict_off_null;
+strict_off_null
+1
+# Then: 1 — NULL, exactly the AES-256 semantics
+SET GLOBAL gcm.strict = DEFAULT;
+# Given: AES-128 data written while the floor was low, and the floor raised back
+SET GLOBAL gcm.min_key_bytes = DEFAULT;
+# When: that data is decrypted
+SELECT gcm_decrypt(@e128, @k128) AS decrypt_ignores_floor;
+decrypt_ignores_floor
+홍길동
+# Then: the plaintext — raising the floor never locks out data

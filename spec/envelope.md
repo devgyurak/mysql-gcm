@@ -1,8 +1,9 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v2 of this document, 2026-10-06). v2 adds the AES-128 version bytes `0x04` and
-`0x05` and the key-length rule in §2.5; it changes no byte of any v1 envelope, and a v1 implementation
-reading a v2 envelope rejects it as a reserved version, which §2.6 already required. Supersedes the
+Status: **FINAL** (v3 of this document, 2026-10-06). v3 adds the AES-192 version bytes `0x06` and
+`0x07`; v2 added the AES-128 bytes `0x04` and `0x05` and the key-length rule in §2.5. Neither changes
+a byte of any earlier envelope, and an older implementation reading a newer envelope rejects it as a
+reserved version, which §2.6 has required throughout. Supersedes the
 draft that carried open issue A2. Rationale lives in `docs/design.md` (amendments A1–A4, A10); this
 file is the normative byte-level contract for the server implementation, stored data and conformance
 tests.
@@ -18,9 +19,9 @@ Internal fixture generation MUST match this format; this scope change does not a
 
 | Function | Envelope | Result type |
 |---|---|---|
-| `gcm_encrypt(plaintext, key [, aad])` | version `0x02` or `0x04`, per §2.5 | BLOB (charset `binary`) |
-| `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03` or `0x05`, per §2.5 | BLOB (charset `binary`) |
-| `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`, `0x02`, `0x03`, `0x04`, `0x05` | VARCHAR tagged `utf8mb4` |
+| `gcm_encrypt(plaintext, key [, aad])` | version `0x02`, `0x04` or `0x06`, per §2.5 | BLOB (charset `binary`) |
+| `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03`, `0x05` or `0x07`, per §2.5 | BLOB (charset `binary`) |
+| `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`–`0x07` | VARCHAR tagged `utf8mb4` |
 
 ## 2. Byte layout
 
@@ -95,11 +96,11 @@ wherever v1 is exposed:
   `gcm_decrypt`: the function cannot know the legacy charset, and guessing would corrupt values that
   really are binary.
 
-### 2.5 Versions `0x04` and `0x05` — AES-128-GCM
+### 2.5 Versions `0x04`–`0x07` — AES-128-GCM and AES-192-GCM
 
-`0x04` is byte-for-byte the layout of `0x02`, and `0x05` that of `0x03`: `version(1) || nonce(12) ||
-ciphertext(n) || tag(16)`, total `n + 29`, minimum 29. Only the version byte and the key length
-differ.
+Every one is byte-for-byte the layout of `0x02` (random) or `0x03` (deterministic):
+`version(1) || nonce(12) || ciphertext(n) || tag(16)`, total `n + 29`, minimum 29. Only the version
+byte and the key length differ.
 
 | Version | Cipher | Nonce |
 |---|---|---|
@@ -107,6 +108,8 @@ differ.
 | `0x03` | AES-256-GCM | synthetic, §3 |
 | `0x04` | AES-128-GCM | random, 96-bit, from a CSPRNG |
 | `0x05` | AES-128-GCM | synthetic, §3 |
+| `0x06` | AES-192-GCM | random, 96-bit, from a CSPRNG |
+| `0x07` | AES-192-GCM | synthetic, §3 |
 
 **The suite is a function of the key length and of nothing else** (`docs/design.md` amendment A10).
 There is no selector argument and no system variable that can disagree with the key.
@@ -114,12 +117,12 @@ There is no selector argument and no system variable that can disagree with the 
 | Key length | Suite | `gcm_encrypt` writes | `gcm_encrypt_det` writes |
 |---|---|---|---|
 | 16 | AES-128-GCM | `0x04` | `0x05` |
+| 24 | AES-192-GCM | `0x06` | `0x07` |
 | 32 | AES-256-GCM | `0x02` | `0x03` |
 
 Any other key length MUST be rejected with `bad_key_len`, on every call, with no folding, padding,
-hashing or truncation. 24 bytes is included in "any other": AES-192 holds `0x06` and `0x07` by
-allocation (§2.6) and is not implemented, so a 24-byte key MUST NOT be folded into a neighbouring
-suite.
+hashing or truncation. A length one byte either side of a suite's — 15, 17, 23, 25, 31, 33 — MUST NOT
+be rounded to it.
 
 **On decryption the version byte states the required key length, and a disagreement MUST be reported
 as `bad_key_len`, never as `bad_tag`.** Decrypting a `0x02` envelope with a 16-byte key is a key
@@ -138,20 +141,16 @@ Deterministic ciphertext is comparable only under the same key, and a key has ex
 joins and UNIQUE constraints need no rule beyond the one already in §3. Values written under
 different suites never compare equal.
 
-### 2.6 Allocated-but-unimplemented, and reserved, versions
+### 2.6 Reserved versions
 
-`0x06` and `0x07` are **allocated** to AES-192-GCM (random and deterministic) by `docs/design.md`
-amendment A10 and are **not implemented**. Until they are, a decryptor MUST reject them with
-`bad_envelope` exactly as it rejects an unassigned byte. Allocation reserves the number; it does not
-make the format readable.
-
-Every remaining version byte (`0x00`, `0x08`–`0xFF`) is unassigned. A decryptor MUST reject it with
-`bad_envelope`; it MUST NOT be silently treated as a known version and MUST NOT return NULL.
+Every version byte outside `0x01`–`0x07` — that is `0x00` and `0x08`–`0xFF` — is unassigned. A
+decryptor MUST reject it with `bad_envelope`; it MUST NOT be silently treated as a known version and
+MUST NOT return NULL.
 
 ## 3. Key and nonce derivation
 
-The key is an argument, 32 bytes (AES-256) or 16 (AES-128); §2.5 maps each length to its suite and
-its version bytes. Any other length is an error (`bad_key_len`) — implementations MUST NOT fold,
+The key is an argument, 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128); §2.5 maps each length to
+its suite and its version bytes. Any other length is an error (`bad_key_len`) — implementations MUST NOT fold,
 hash, truncate or pad a key to length, which is precisely the `AES_ENCRYPT` weakness this project
 does not reproduce.
 
@@ -198,7 +197,7 @@ enforce these across calls. This clarification does not change the envelope byte
 
 | Condition | Error code | `gcm.strict=ON` | `gcm.strict=OFF` |
 |---|---|---|---|
-| Key length is not 16 or 32 (§2.5) | `bad_key_len` | error | **error** |
+| Key length is not 16, 24 or 32 (§2.5) | `bad_key_len` | error | **error** |
 | Key length disagrees with the envelope's version byte (§2.5) | `bad_key_len` | error | **error** |
 | Key shorter than `gcm.min_key_bytes`, on encryption only (§4.1) | policy error | error | **error** |
 | Envelope shorter than its version's minimum | `bad_envelope` | error | **error** |
@@ -224,7 +223,8 @@ Rules that follow, and that every implementation MUST honour:
 ### 4.1 `gcm.min_key_bytes`
 
 A GLOBAL integer, default 32, range 16–32 (`docs/design.md` amendment A10). `gcm_encrypt` and
-`gcm_encrypt_det` MUST refuse a key shorter than it. `gcm_decrypt` MUST ignore it entirely.
+`gcm_encrypt_det` MUST refuse a key shorter than it. A floor of 24 therefore permits AES-192 and
+AES-256 while refusing AES-128. `gcm_decrypt` MUST ignore it entirely.
 
 The default keeps an existing deployment exactly as it was: 32 means AES-256 only, so the suites this
 spec version adds are opt-in. The reason the floor exists is that §2.5 makes the key length select the
@@ -319,11 +319,9 @@ How a suite MUST consume a vector:
 | `bad_key_len`, key length no suite has | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
 | `bad_key_len`, key length valid but disagreeing with the envelope's version | `decrypt` raises it. `encrypt` and `encrypt_det` **succeed** — they have no envelope to disagree with, and the key is a perfectly good key for its own suite. A conformance runner MUST NOT feed these to the encryption entry points |
 
-Current contents: 1500 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 from
-`gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp` (191 of them authentication failures) and
-750 from `gcmEncryptExtIV128.rsp` and `gcmDecrypt128.rsp` (196 authentication
-failures) — plus 46 project cases. The CAVP files for AES-192 are deliberately not imported:
-`0x06` and `0x07` are allocated and unimplemented (§2.6). Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
+Current contents: 2250 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 AES-256 (191 authentication failures), 750 AES-192 (190) and 750 AES-128 (196) — plus 54 project cases covering the deterministic envelopes, which the
+CAVP files never reach because they are all random-nonce.
+Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
 `scripts/gen-vectors.py --check` (CI does this).
 
 ## 7. Versioning of this document

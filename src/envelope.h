@@ -38,8 +38,11 @@ inline constexpr unsigned char kVersionRandom = 0x02;     // AES-256-GCM
 inline constexpr unsigned char kVersionDet = 0x03;        // AES-256-GCM
 inline constexpr unsigned char kVersionRandom128 = 0x04;  // AES-128-GCM (design A10)
 inline constexpr unsigned char kVersionDet128 = 0x05;     // AES-128-GCM (design A10)
+inline constexpr unsigned char kVersionRandom192 = 0x06;  // AES-192-GCM (design A10)
+inline constexpr unsigned char kVersionDet192 = 0x07;     // AES-192-GCM (design A10)
 
 inline constexpr size_t kKeyLen256 = 32;
+inline constexpr size_t kKeyLen192 = 24;
 inline constexpr size_t kKeyLen128 = 16;
 inline constexpr size_t kNonceLen = 12;
 inline constexpr size_t kTagLen = 16;
@@ -55,8 +58,9 @@ inline constexpr size_t kMinCbcLen = kVersionLen + kIvLen + kCbcBlockLen;  // 33
    The suite is a function of the key length and of nothing else (design A10),
    so there is no selector argument and no sysvar to disagree with the key.
 
-   This table is the single place the mapping lives. Adding AES-192 is one row
-   here plus one EVP_CIPHER_fetch in gcm.cc; everything else is driven from it. */
+   This table is the single place the mapping lives. Adding a suite is one row
+   here plus one EVP_CIPHER_fetch in gcm.cc; everything else is driven from it.
+   AES-192 was added that way and the claim held. */
 struct Suite {
   size_t key_len;
   unsigned char version_random;

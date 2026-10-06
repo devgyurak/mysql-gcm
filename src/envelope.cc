@@ -10,6 +10,7 @@ namespace {
    the overwhelmingly common case, so the common lookup is one comparison. */
 constexpr Suite kSuites[] = {
     {kKeyLen256, kVersionRandom, kVersionDet},
+    {kKeyLen192, kVersionRandom192, kVersionDet192},
     {kKeyLen128, kVersionRandom128, kVersionDet128},
 };
 

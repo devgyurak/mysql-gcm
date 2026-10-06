@@ -6,6 +6,32 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **AES-192-GCM**, completing amendment A10. Envelope versions `0x06` (random) and `0x07`
+  (deterministic), byte-for-byte the layout of the other four. All three suites now ship, selected by
+  key length and nothing else: 32 → AES-256, 24 → AES-192, 16 → AES-128. `spec/envelope.md` is at v3.
+
+  **The default does not move.** `gcm.min_key_bytes` stays at 32, so a server that is left alone still
+  refuses anything below AES-256; `24` now permits AES-192 and AES-256 while still refusing AES-128.
+
+  This tested A10's own claim that adding a suite is "one row in the table plus one
+  `EVP_CIPHER_fetch`". It held — four files, seventeen lines, and parsing, the version/key agreement
+  check, the nonce derivation, the error message and the floor all followed from the table. What was
+  **not** free was the test and document surface: a dozen places asserted AES-192 was unimplemented
+  and each had to be flipped deliberately, which is the honest cost of allocating a version byte
+  before implementing it.
+
+  The CAVP KAT is now imported for every suite — 2,250 cases, 750 each, with 191 / 190 / 196
+  authentication failures — plus project tamper vectors for `0x07`, which the CAVP decrypt files never
+  reach because they are all random-nonce. The generator's list of valid version bytes is now derived
+  from the suite table rather than written out, after a hardcoded tuple went stale the moment this
+  suite was added and the generator's own verifier was what caught it.
+
+  Two latent test defects surfaced while writing this. The tamper fixture appended a constant `0xFF`
+  to replace the last tag byte, which is a **no-op when the tag already ends in `0xFF`** — the AES-192
+  envelope did, so the case decrypted successfully and claimed to be testing a tag failure. It now
+  XORs. And the AES-192 fixture key in the integration case was 20 bytes rather than 24, which the
+  key-length error reported before any of it could pass.
+
 - **AES-128-GCM**, alongside AES-256-GCM (`docs/design.md` amendment A10, `spec/envelope.md` v2).
   Envelope versions `0x04` (random) and `0x05` (deterministic), byte-for-byte the layout of
   `0x02`/`0x03` — plaintext + 29 either way. **The key length selects the suite and nothing else

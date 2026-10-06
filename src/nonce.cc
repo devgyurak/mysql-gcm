@@ -53,7 +53,12 @@ Error hmac_sha256(Bytes key, Bytes msg, unsigned char *out) {
 }
 
 Error derive_nonce_key(Bytes key, unsigned char *out) {
-  if (key.size != kKeyLen) return Error::bad_key_len;
+  /* Any suite's key length (design A10). The label and the derivation are
+     identical for all of them — HMAC-SHA256 takes a key of any length, and the
+     label is frozen by spec/envelope.md §7. Note that this does *not* make the
+     suites domain-separated from each other: RFC 2104 §2 zero-pads a short key,
+     so K and K||0^16 derive the same nonce key (design A10, open question). */
+  if (suite_for_key_len(key.size) == nullptr) return Error::bad_key_len;
   const Bytes label{reinterpret_cast<const unsigned char *>(kDetNonceLabel), kDetNonceLabelLen};
   return hmac_sha256(key, label, out);
 }

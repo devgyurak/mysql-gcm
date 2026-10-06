@@ -6,7 +6,51 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
-> ## Amendment A10 (2026-10-06, proposed) — AES-128-GCM and AES-192-GCM
+> ## Amendment A10 (2026-10-06) — AES-128-GCM and AES-192-GCM
+>
+> **Status: AES-128 implemented; AES-192 allocated and not implemented.** `0x04` and `0x05` ship,
+> `gcm.min_key_bytes` ships with the recommended default of 32, and `spec/envelope.md` is at v2.
+> `0x06` and `0x07` stay reserved and are rejected as `bad_envelope`. The NIST CAVP KAT is imported
+> for both suites: 750 AES-256 cases (191 authentication failures) and 750 AES-128 (196).
+>
+> **Decided here, and why, since shipping `0x05` means deciding them:**
+>
+> - **`gcm_encrypt_det` is offered for AES-128.** The deterministic nonce is HMAC-SHA256 truncated to
+>   96 bits regardless of suite, so the §5.2 collision bound does not move with key size, and the
+>   construction's exposure — equality, frequency, length — is the same one AES-256 already has. What
+>   a 128-bit key changes is the cipher's own margin, which is a key-strength decision the operator
+>   makes by choosing the key length, not one this component should make for them by withholding a
+>   variant. Withholding it would also be incoherent: `gcm_encrypt` at 128 bits would still be
+>   available, and a deployment that wanted determinism would be pushed to a *worse* answer, such as
+>   a hash column.
+> - **The suites share one derivation label, and that is accepted rather than changed.** An earlier
+>   draft justified this by saying per-suite labels would make `0x03` and `0x05` incomparable; that is
+>   wrong and is withdrawn. They already differ from the version byte onward and never compare equal —
+>   `tests/adapter` and the MTR case both assert it — and giving only the *new* `0x05` its own label
+>   would leave every existing `0x03` envelope reproducible.
+>
+>   The actual reason is narrower. The label exists to separate the encryption key from the HMAC key,
+>   which it does for every suite, and `crypto-safety.md` requires it to be **one constant in one
+>   place**. A second label means a label-per-suite mapping in exactly the file that rule says must not
+>   grow one, bought for a separation nothing has yet shown a need for: the suites are already
+>   separated by having different keys, with the single documented exception that a short key and its
+>   zero-extension derive the same nonce key (RFC 2104 §2). That exception is not itself an attack —
+>   the two AES keys differ, and GCM's catastrophic case is one nonce under one key — and it is
+>   recorded in `spec/envelope.md` §2.5 as something implementations must not rely on.
+>
+>   If the security review finds a need, a per-suite label costs **no existing `0x03` data** — that is
+>   the scope of the claim, and it narrows the moment `0x05` ships. From then on, changing the label
+>   breaks the deterministic reproducibility of `0x05` data exactly as it would for `0x03`: the same
+>   plaintext stops reproducing the stored envelope, so joins, UNIQUE and exact match on those columns
+>   stop matching. It would need its own version bytes and a migration, which is the general rule in
+>   `spec/envelope.md` §7 and not a special case. The window in which this is cheap is before `0x05`
+>   is in anyone's data, which is now.
+>
+> **Still open, for the security review this amendment asks for:** whether the shared label should
+> become per-suite in a future spec version, and the four `gcm.min_key_bytes` contract points — of
+> which three are answered by the implementation (encryption only, GLOBAL-only, fail closed to 32)
+> and the fourth, the violation error, is a message distinct from `bad_key_len`. The review is to
+> confirm those choices, not to discover them.
 >
 > §2 and amendment A1 fix the suite at AES-256-GCM: `EVP_CIPHER_fetch("AES-256-GCM")` is the only
 > cipher fetched for sealing, and the key is exactly 32 bytes, checked on every call. This amendment

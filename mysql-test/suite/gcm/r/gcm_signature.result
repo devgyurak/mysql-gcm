@@ -19,15 +19,15 @@ ERROR HY000: Can't initialize function 'gcm_decrypt'; gcm_decrypt(ciphertext, ke
 # Given: a key of the wrong length
 # When: encryption is attempted with 5 bytes
 SELECT gcm_encrypt('x', 'short');
-ERROR HY000: gcm_encrypt UDF failed; key must be exactly 32 bytes, got 5
+ERROR HY000: gcm_encrypt UDF failed; key must be 32 bytes (AES-256) or 16 (AES-128), and on decryption must match the envelope version; got 5
 # Then: bad_key_len, and the message carries lengths only
 # Given: a key one byte short of AES-256
 # When: decryption is attempted with 31 bytes
 SELECT gcm_decrypt(gcm_encrypt('x', @k), LEFT(@k, 31));
-ERROR HY000: gcm_decrypt UDF failed; key must be exactly 32 bytes, got 31
+ERROR HY000: gcm_decrypt UDF failed; key must be 32 bytes (AES-256) or 16 (AES-128), and on decryption must match the envelope version; got 31
 # Then: bad_key_len — the check runs on every call, not just at init
 # Given: a key one byte too long
 # When: the deterministic variant is called with 33 bytes
 SELECT gcm_encrypt_det('x', CONCAT(@k, UNHEX('00')));
-ERROR HY000: gcm_encrypt_det UDF failed; key must be exactly 32 bytes, got 33
+ERROR HY000: gcm_encrypt_det UDF failed; key must be 32 bytes (AES-256) or 16 (AES-128), and on decryption must match the envelope version; got 33
 # Then: bad_key_len — no folding, hashing or padding to length

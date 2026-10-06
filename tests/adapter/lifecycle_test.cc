@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include "envelope.h"
 #include "service_stubs.h"
 #include "sysvar.h"
 
@@ -31,11 +32,20 @@ using gcm_adapter::component_init;
 using gcm_adapter::details_for;
 using gcm_adapter::fail;
 using gcm_adapter::FailureRule;
+using gcm_adapter::min_key_bytes_is_registered;
 using gcm_adapter::registered_udfs;
 using gcm_adapter::sysvar_is_registered;
 
 const std::vector<std::string> kAllUdfs = {"gcm_encrypt", "gcm_encrypt_det", "gcm_decrypt"};
 constexpr const char *kStrict = "gcm.strict";
+constexpr const char *kFloor = "gcm.min_key_bytes";
+/* min_key_bytes() reads GLOBAL on every version, but through a different service:
+   9.x deprecates get_variable() and -Werror makes using it a build failure there. */
+#if GCM_HAS_SESSION_SYSVAR
+constexpr const char *kFloorReadMethod = "variable_reader_get";
+#else
+constexpr const char *kFloorReadMethod = "get_variable";
+#endif
 
 class Lifecycle : public ::testing::Test {
  protected:
@@ -68,9 +78,10 @@ TEST_F(Lifecycle, GivenEveryServiceSucceeds_WhenInit_ThenAllUdfsThenTheSysvarAre
   // Then
   EXPECT_EQ(status, 0);
   EXPECT_EQ(details_for("udf_register"), kAllUdfs);
-  EXPECT_EQ(details_for("register_variable"), std::vector<std::string>{kStrict});
+  EXPECT_EQ(details_for("register_variable"), (std::vector<std::string>{kStrict, kFloor}));
   EXPECT_EQ(registered_udfs(), std::set<std::string>(kAllUdfs.begin(), kAllUdfs.end()));
   EXPECT_TRUE(sysvar_is_registered());
+  EXPECT_TRUE(min_key_bytes_is_registered());
   EXPECT_TRUE(algorithms_live());
 }
 
@@ -101,6 +112,7 @@ TEST_F(Lifecycle, GivenTheSecondUdfFailsToRegister_WhenInit_ThenTheFirstIsUnregi
   EXPECT_TRUE(details_for("register_variable").empty());
   EXPECT_TRUE(registered_udfs().empty());
   EXPECT_FALSE(sysvar_is_registered());
+  EXPECT_FALSE(min_key_bytes_is_registered());
 }
 
 TEST_F(Lifecycle, GivenAUdfFailsAndRollbackSucceeds_WhenInit_ThenTheAlgorithmsAreReleased) {
@@ -336,10 +348,11 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast)
   //       see the variable moved to the front, which is exactly the mutation that slipped past
   //       an earlier version of this file.
   ASSERT_EQ(status, 0);
-  EXPECT_EQ(
-      gcm_adapter::call_sequence(),
-      std::vector<std::string>({"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
-                                "udf_unregister:gcm_decrypt", "unregister_variable:gcm.strict"}));
+  EXPECT_EQ(gcm_adapter::call_sequence(),
+            std::vector<std::string>(
+                {"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
+                 "udf_unregister:gcm_decrypt", "unregister_variable:gcm.min_key_bytes",
+                 "unregister_variable:gcm.strict"}));
 }
 
 TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreReleased) {
@@ -353,8 +366,181 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreRele
   // Then
   EXPECT_EQ(status, 0);
   EXPECT_EQ(details_for("udf_unregister"), kAllUdfs);
-  EXPECT_EQ(details_for("unregister_variable"), std::vector<std::string>{kStrict});
+  EXPECT_EQ(details_for("unregister_variable"), (std::vector<std::string>{kFloor, kStrict}));
   EXPECT_TRUE(algorithms_released());
 }
+
+TEST_F(Lifecycle, GivenTheFloorFailsToRegister_WhenInit_ThenStrictIsRolledBackToo) {
+  // Given: gcm.strict registers, gcm.min_key_bytes does not (design A10)
+  fail(FailureRule{"register_variable", kFloor, 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: neither variable survives. One left behind would sit in the server's
+  //       dictionary pointing into memory the loader is about to unmap, and a
+  //       variable is reachable by enumeration alone (design A9).
+  EXPECT_EQ(status, 1);
+  EXPECT_FALSE(sysvar_is_registered());
+  EXPECT_FALSE(min_key_bytes_is_registered());
+  EXPECT_TRUE(registered_udfs().empty());
+  EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheFloorFailsAndStrictWillNotUnregister_WhenInit_ThenAlgorithmsAreKept) {
+  // Given
+  fail(FailureRule{"register_variable", kFloor, 1, true});
+  fail(FailureRule{"unregister_variable", kStrict, 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: a variable survived the rollback, so the handles it may still reach
+  //       stay alive — the same position deinit takes (design A9)
+  EXPECT_EQ(status, 1);
+  EXPECT_TRUE(sysvar_is_registered());
+  EXPECT_TRUE(algorithms_live());
+}
+
+// --- gcm.min_key_bytes (design A10) ------------------------------------------
+
+TEST_F(Lifecycle, GivenANonDefaultFloorAndStrictRefuses_WhenDeinit_ThenThePolicyNeverWidens) {
+  // Given: a server booted with a lower floor than the one now in force --
+  //        loose_gcm.min_key_bytes=16 in my.cnf, raised to 32 at runtime
+  gcm_adapter::set_startup_option(kFloor, "16");
+  ASSERT_EQ(component_init(), 0);
+  ASSERT_EQ(gcm::min_key_bytes(), gcm::kKeyLen128) << "the startup option must take effect";
+  gcm_adapter::set_sysvar_value(kFloor, "32");  // SET GLOBAL gcm.min_key_bytes = 32
+  ASSERT_EQ(gcm::min_key_bytes(), gcm::kKeyLen256);
+  fail(FailureRule{"unregister_variable", kStrict, 1, true});
+
+  // When: the uninstall is refused after the floor has already come out
+  const int refused = component_deinit();
+
+  // Then: the effective policy at that moment is 32, not the 16 the startup
+  //       option would restore. register_variable re-applies argv_cached plus the
+  //       persisted variables, so re-registering the floor here would hand an
+  //       operator back a policy they had deliberately raised, and AES-128 writes
+  //       with it. An absent floor reads as 32 instead: strictly narrower.
+  EXPECT_EQ(refused, 1);
+  EXPECT_FALSE(min_key_bytes_is_registered());
+  EXPECT_EQ(gcm::min_key_bytes(), gcm::kKeyLen256);
+}
+
+TEST_F(Lifecycle, GivenStrictWillNotUnregister_WhenDeinit_ThenRetryStillCompletes) {
+  // Given: an install, and a server that refuses the first unregister of gcm.strict
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::reset();
+  fail(FailureRule{"unregister_variable", kStrict, 1, true});
+
+  // When: the first uninstall is attempted and then retried
+  const int refused = component_deinit();
+  gcm_adapter::reset();  // the refusal was a one-shot rule
+  const int retried = component_deinit();
+
+  // Then: the first is refused and the retry succeeds. What makes the retry work
+  //       is the state flags, not a re-registration: the floor is already gone, and
+  //       unregistering a variable the server does not have is itself a failure, so
+  //       an unguarded retry would fail forever.
+  EXPECT_EQ(refused, 1);
+  EXPECT_EQ(retried, 0);
+  EXPECT_FALSE(sysvar_is_registered());
+  EXPECT_FALSE(min_key_bytes_is_registered());
+  EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheFloorWillNotUnregister_WhenDeinit_ThenNothingIsRemovedAndRetryWorks) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::reset();
+  fail(FailureRule{"unregister_variable", kFloor, 1, true});
+
+  // When
+  const int refused = component_deinit();
+  gcm_adapter::reset();
+  const int retried = component_deinit();
+
+  // Then: the floor is removed first precisely so a refusal there leaves the
+  //       component exactly as it was
+  EXPECT_EQ(refused, 1);
+  EXPECT_EQ(retried, 0);
+  EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheFloorCannotBeRead_WhenAUdfInitRuns_ThenItFailsClosedTo32) {
+  // Given: the read of gcm.min_key_bytes fails
+  ASSERT_EQ(component_init(), 0);
+  fail(FailureRule{kFloorReadMethod, kFloor, 0, true});
+
+  // When
+  const size_t floor = gcm::min_key_bytes();
+
+  // Then: the strictest floor, so a lost setting can never widen what the server
+  //       accepts. Answering 16 here would silently allow AES-128 everywhere.
+  EXPECT_EQ(floor, gcm::kKeyLen256);
+}
+
+class FloorValue : public ::testing::TestWithParam<const char *> {
+ protected:
+  void SetUp() override {
+    gcm_adapter::install();
+    gcm_adapter::reset();
+    gcm_adapter::forget_registrations();
+    ASSERT_EQ(component_init(), 0);
+  }
+  void TearDown() override {
+    gcm_adapter::reset();
+    component_deinit();
+    gcm_adapter::reset();
+    gcm_adapter::forget_registrations();
+  }
+};
+
+TEST_P(FloorValue, GivenAValueTheComponentCannotTrust_WhenRead_ThenItFallsBackTo32) {
+  // Given
+  gcm_adapter::set_sysvar_value(kFloor, GetParam());
+
+  // When
+  const size_t floor = gcm::min_key_bytes();
+
+  // Then: anything that is not a plain decimal inside the registered range is
+  //       refused rather than guessed at
+  EXPECT_EQ(floor, gcm::kKeyLen256);
+}
+
+INSTANTIATE_TEST_SUITE_P(Untrusted, FloorValue,
+                         ::testing::Values("", " ", "notanumber", "16x", "0x10", "-16", "8", "48",
+                                           "99999999999999999999"),
+                         [](const ::testing::TestParamInfo<const char *> &info) {
+                           return "case" + std::to_string(info.index);
+                         });
+
+TEST_F(Lifecycle, GivenTheFloorIsLowered_WhenRead_ThenTheValueIsHonoured) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::set_sysvar_value(kFloor, "16");
+
+  // When
+  const size_t floor = gcm::min_key_bytes();
+
+  // Then: the fallback is for untrusted input, not for every read
+  EXPECT_EQ(floor, gcm::kKeyLen128);
+}
+
+#if GCM_HAS_SESSION_SYSVAR
+TEST_F(Lifecycle, GivenTheReaderIsUsed_WhenTheFloorIsRead_ThenItAsksForGlobalScope) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::reset();
+
+  // When
+  (void)gcm::min_key_bytes();
+
+  // Then: GLOBAL, not SESSION. The floor is an administrator policy, and reading it
+  //       per session would make it something a caller could set for itself —
+  //       which is exactly what design A10 says it must not be.
+  EXPECT_EQ(gcm_adapter::extra_for("variable_reader_get"), "GLOBAL");
+}
+#endif
 
 }  // namespace

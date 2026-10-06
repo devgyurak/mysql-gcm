@@ -59,6 +59,20 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   const Bytes key = gcm::arg_bytes(args, 1);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
 
+  /* design A10: the suite follows the key length, so a key that was truncated in
+     transit is a *valid* key for a weaker suite and would seal successfully. The
+     floor is what puts that check back, and it is an encryption-side policy — a
+     SQL policy, so it lives here and not in the core (architecture rule §2).
+     gcm_decrypt deliberately does not consult it. */
+  /* Only for a key whose length a suite actually has. A 5-byte key is not a
+     policy violation, it is not a key — letting the floor answer first would
+     report "below gcm.min_key_bytes" for a length no setting could ever allow. */
+  if (gcm::suite_for_key_len(key.size) != nullptr && key.size < state->min_key_bytes) {
+    gcm::raise_below_floor(func, key.size, state->min_key_bytes);
+    *error = 1;
+    return nullptr;
+  }
+
   /* Checked before the envelope size is computed, so that addition cannot wrap. */
   if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);

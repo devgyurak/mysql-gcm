@@ -106,8 +106,12 @@ TEST_P(UnknownVersion, GivenReservedVersionByte_WhenParse_ThenBadEnvelope) {
   EXPECT_EQ(err, Error::bad_envelope);
 }
 
+/* 0x04 and 0x05 left this list when AES-128 took them (design A10). 0x06 and
+   0x07 are allocated to AES-192 and are deliberately here: the amendment names
+   them, this version does not implement them, and an envelope carrying one must
+   still be rejected rather than quietly parsed. */
 INSTANTIATE_TEST_SUITE_P(Reserved, UnknownVersion,
-                         ::testing::Values(0x00, 0x04, 0x05, 0x7F, 0x80, 0xFF),
+                         ::testing::Values(0x00, 0x06, 0x07, 0x7F, 0x80, 0xFF),
                          [](const ::testing::TestParamInfo<int> &info) {
                            char buf[8];
                            std::snprintf(buf, sizeof(buf), "v%02x", info.param);
@@ -177,7 +181,10 @@ TEST(EnvelopeConstants, GivenSpecConstants_WhenRead_ThenMatchEnvelopeSpec) {
   EXPECT_EQ(gcm::kVersionLegacyCbc, 0x01);
   EXPECT_EQ(gcm::kVersionRandom, 0x02);
   EXPECT_EQ(gcm::kVersionDet, 0x03);
-  EXPECT_EQ(gcm::kKeyLen, 32u);
+  EXPECT_EQ(gcm::kVersionRandom128, 0x04);
+  EXPECT_EQ(gcm::kVersionDet128, 0x05);
+  EXPECT_EQ(gcm::kKeyLen256, 32u);
+  EXPECT_EQ(gcm::kKeyLen128, 16u);
   EXPECT_EQ(gcm::kNonceLen, 12u);
   EXPECT_EQ(gcm::kTagLen, 16u);
   EXPECT_EQ(gcm::kGcmOverhead, 29u);
@@ -229,5 +236,62 @@ INSTANTIATE_TEST_SUITE_P(SpecVectors, StructurallyBadVector,
                            }
                            return name;
                          });
+
+// --- the suite table (design A10) --------------------------------------------
+
+TEST(Suite, GivenEachKeyLength_WhenLookedUp_ThenItsOwnVersionBytes) {
+  // Given / When
+  const gcm::Suite *wide = gcm::suite_for_key_len(gcm::kKeyLen256);
+  const gcm::Suite *narrow = gcm::suite_for_key_len(gcm::kKeyLen128);
+  // Then
+  ASSERT_NE(wide, nullptr);
+  ASSERT_NE(narrow, nullptr);
+  EXPECT_EQ(wide->version_random, gcm::kVersionRandom);
+  EXPECT_EQ(wide->version_det, gcm::kVersionDet);
+  EXPECT_EQ(narrow->version_random, gcm::kVersionRandom128);
+  EXPECT_EQ(narrow->version_det, gcm::kVersionDet128);
+}
+
+class UnsupportedKeyLen : public ::testing::TestWithParam<size_t> {};
+
+TEST_P(UnsupportedKeyLen, GivenAKeyLengthNoSuiteHas_WhenLookedUp_ThenNullptr) {
+  // Given / When
+  const gcm::Suite *suite = gcm::suite_for_key_len(GetParam());
+  // Then: nullptr is how a wrong key length is detected, so it must never be a
+  // default. 24 is here because AES-192 is allocated but not implemented.
+  EXPECT_EQ(suite, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(Lengths, UnsupportedKeyLen,
+                         ::testing::Values(size_t{0}, size_t{1}, size_t{15}, size_t{17}, size_t{24},
+                                           size_t{31}, size_t{33}, size_t{64}),
+                         [](const ::testing::TestParamInfo<size_t> &info) {
+                           return "len" + std::to_string(info.param);
+                         });
+
+TEST(Suite, GivenAVersionByteNoSuiteOwns_WhenLookedUp_ThenNullptr) {
+  // Given / When / Then: 0x01 is legacy CBC and has no GCM suite; 0x06 and 0x07
+  // belong to AES-192, which A10 allocates and this version does not implement.
+  EXPECT_EQ(gcm::suite_for_version(0x00), nullptr);
+  EXPECT_EQ(gcm::suite_for_version(gcm::kVersionLegacyCbc), nullptr);
+  EXPECT_EQ(gcm::suite_for_version(0x06), nullptr);
+  EXPECT_EQ(gcm::suite_for_version(0x07), nullptr);
+  EXPECT_EQ(gcm::suite_for_version(0xFF), nullptr);
+}
+
+TEST(Envelope, GivenAnAes128Envelope_WhenParsed_ThenSameLayoutAsAes256) {
+  // Given: 0x04 with the same 29-byte overhead
+  std::vector<unsigned char> env(gcm::kGcmOverhead + 3, 0x5A);
+  env[0] = gcm::kVersionRandom128;
+  gcm::ParsedEnvelope parsed{};
+  // When
+  const gcm::Error err = gcm::parse(gcm::Bytes{env.data(), env.size()}, &parsed);
+  // Then
+  ASSERT_EQ(err, gcm::Error::ok);
+  EXPECT_EQ(parsed.version, gcm::kVersionRandom128);
+  EXPECT_EQ(parsed.nonce.size, gcm::kNonceLen);
+  EXPECT_EQ(parsed.body.size, 3u);
+  EXPECT_EQ(parsed.tag.size, gcm::kTagLen);
+}
 
 }  // namespace

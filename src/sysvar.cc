@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "sysvar.h"
 
+#include "envelope.h"
+
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
 
 #include <mysql/components/component_implementation.h>
@@ -23,6 +27,7 @@ namespace {
 
 constexpr const char *kComponent = "gcm";
 constexpr const char *kStrict = "strict";
+constexpr const char *kMinKeyBytes = "min_key_bytes";
 
 /* Both read paths get the SHOW representation of a bool — "ON" or "OFF", not a bool,
    because sql/sql_plugin_var.cc maps PLUGIN_VAR_BOOL to SHOW_MY_BOOL and
@@ -49,9 +54,49 @@ bool reads_as_off(const char *value, size_t len) {
    register_variable requires somewhere to put the value. */
 bool g_strict = true;
 
-}  // namespace
+/* Storage for gcm.min_key_bytes. Not read by this component either — see
+   min_key_bytes() for why the value goes through the service instead. */
+int g_min_key_bytes = static_cast<int>(kKeyLen256);
 
-bool sysvar_register() {
+/* Which of the two are registered right now. The server fails an unregister of a
+   variable it does not have, so attempting one unconditionally turns a retry into
+   a permanent failure: UNINSTALL removes gcm.strict, the floor refuses, the
+   component stays loaded, and every later UNINSTALL then fails on the strict that
+   is already gone. Tracking the state is what makes a refused uninstall retryable
+   (architecture rule §3: "track which releases succeeded so a retry does not
+   double-free"). */
+bool g_strict_registered = false;
+bool g_floor_registered = false;
+
+/* Unregisters one variable if it is registered, and clears its flag on success.
+   Returns true on failure, the MySQL convention. A variable that is not
+   registered is already in the wanted state, so that is success, not a call. */
+bool drop(const char *name, bool *registered) {
+  if (!*registered) return false;
+  if (mysql_service_component_sys_variable_unregister->unregister_variable(kComponent, name)) {
+    return true;
+  }
+  *registered = false;
+  return false;
+}
+
+/* Parses the SHOW representation of an integer sysvar. Returns false when the
+   buffer is not a plain decimal number that fits the registered range, which the
+   caller turns into the strictest answer rather than a guess. */
+bool parse_int(const char *value, size_t len, long *out) {
+  if (value == nullptr || len == 0 || len >= 16) return false;
+  char buf[16];
+  std::memcpy(buf, value, len);
+  buf[len] = '\0';
+  char *end = nullptr;
+  errno = 0;
+  const long parsed = std::strtol(buf, &end, 10);
+  if (errno != 0 || end != buf + len) return false;
+  *out = parsed;
+  return true;
+}
+
+bool register_strict() {
   /* A stack local is correct here: register_variable copies the field rather than
      keeping the pointer — sql/server_component/component_sys_var_service.cc does
      `sysvar_bool->def_val = bool_arg->def_val` into a my_malloc'd struct. */
@@ -63,17 +108,133 @@ bool sysvar_register() {
   flags |= PLUGIN_VAR_THDLOCAL;  // 9.0.0+ only — see sysvar.h
 #endif
 
-  return mysql_service_component_sys_variable_register->register_variable(
+  const bool failed = mysql_service_component_sys_variable_register->register_variable(
       kComponent, kStrict, flags,
       "Raise an error (ON, default) or return NULL (OFF) when GCM tag "
       "verification fails. Malformed envelopes and wrong key lengths are "
       "always errors.",
       nullptr /* check */, nullptr /* update */, static_cast<void *>(&arg),
       static_cast<void *>(&g_strict));
+  if (!failed) g_strict_registered = true;
+  return failed;
+}
+
+bool register_min_key_bytes() {
+  /* GLOBAL-only on every version, deliberately, and not for the A5 reason.
+     design A10 asks whether this is an administrator policy or a mistake guard:
+     GLOBAL-only makes it the former, because a session cannot lower the floor
+     its administrator set. A session-scoped floor would be a setting a caller
+     could turn off for itself, which is not a policy. */
+  INTEGRAL_CHECK_ARG(int) arg;
+  arg.def_val = static_cast<int>(kKeyLen256);  // design A10: the feature is opt-in
+  arg.min_val = static_cast<int>(kKeyLen128);
+  arg.max_val = static_cast<int>(kKeyLen256);
+  arg.blk_sz = 0;
+
+  const bool failed = mysql_service_component_sys_variable_register->register_variable(
+      kComponent, kMinKeyBytes, PLUGIN_VAR_INT,
+      "Smallest key, in bytes, that gcm_encrypt and gcm_encrypt_det will accept "
+      "(32 = AES-256 only, the default; 16 also allows AES-128). Decryption is "
+      "not affected, so lowering and then raising this never locks out data.",
+      nullptr /* check */, nullptr /* update */, static_cast<void *>(&arg),
+      static_cast<void *>(&g_min_key_bytes));
+  if (!failed) g_floor_registered = true;
+  return failed;
+}
+}  // namespace
+
+bool sysvar_register(bool *fully_rolled_back) {
+  *fully_rolled_back = true;
+  if (register_strict()) return true;
+  if (register_min_key_bytes()) {
+    /* Roll the first one back. Leaving gcm.strict registered while reporting
+       failure would put a variable in the dictionary of a component the loader
+       is about to unmap, which is exactly the exposure A9 orders against — and
+       a variable is reachable by enumeration, so nobody has to name it.
+
+       The result is reported rather than discarded. If the server refuses, a
+       variable pointing at this component's storage survives, and the caller
+       must keep the crypto handles alive for the same reason deinit does.
+       Discarding it here was a real defect, caught by
+       GivenTheFloorFailsAndStrictWillNotUnregister_WhenInit_ThenAlgorithmsAreKept
+       — the same shape as the discarded result that issue #7 was opened for. */
+    *fully_rolled_back = !drop(kStrict, &g_strict_registered);
+    return true;
+  }
+  return false;
 }
 
 bool sysvar_unregister() {
-  return mysql_service_component_sys_variable_unregister->unregister_variable(kComponent, kStrict);
+  /* The floor comes out first so that a refusal leaves the pair in a state a
+     retry can act on: nothing has been removed and the component is exactly as
+     it was.
+
+     Each call is guarded by the state flag, because the server fails an
+     unregister of a variable it does not have — attempting one unconditionally
+     is what would turn a single refusal into a component that can never be
+     uninstalled.
+
+     Nothing is re-registered when the second drop refuses, and that is the whole
+     point rather than an omission. register_variable re-applies the startup
+     options: once mysqld_server_started it reads argv_cached, appends the
+     persisted variables and runs handle_options
+     (sql/server_component/component_sys_var_service.cc). So putting the floor
+     back would discard the running value and restore whatever my.cnf said —
+     and an operator who booted with loose_gcm.min_key_bytes=16 and then raised
+     it to 32 would silently get 16 back, re-allowing AES-128 writes. A failed
+     UNINSTALL must never widen a policy.
+
+     What the component is left with instead is no floor at all, which
+     min_key_bytes() reads as 32 because the read of an unregistered variable
+     fails and this one fails closed. Strictly narrower than any value an
+     operator could have set, visible in SHOW VARIABLES by its absence, and the
+     state flags make the retry remove only what is still there. Restoring the
+     running value properly would need a service that can set a component
+     variable from inside the component, which 8.0 and 8.4 do not have. */
+  if (drop(kMinKeyBytes, &g_floor_registered)) return true;
+  if (drop(kStrict, &g_strict_registered)) return true;
+  return false;
+}
+
+size_t min_key_bytes() {
+  /* GLOBAL on every version (design A10), so the scope is never in question —
+     unlike strict_enabled(), the branch below is about which service may be
+     called, not about which value is correct.
+
+     Read through a service rather than from g_min_key_bytes: the server assigns
+     into that storage under LOCK_global_system_variables and loading it directly
+     is a data race, the same reasoning sysvar.h gives for strict.
+
+     Any failure returns the strictest floor. For this variable "fail closed"
+     means refusing the weaker suites, so a lost setting can never widen what the
+     server accepts. */
+  char buf[32] = {0};
+  void *value = buf;
+  size_t len = sizeof(buf) - 1;
+
+#if GCM_HAS_SESSION_SYSVAR
+  /* 9.0+ deprecates get_variable() in favour of the reader, and -Werror makes
+     that a build failure rather than a warning. "GLOBAL" is explicit here
+     because that is the only scope this variable has. */
+  MYSQL_THD thd = nullptr;
+  if (mysql_service_mysql_current_thread_reader->get(&thd) || thd == nullptr) return kKeyLen256;
+  if (mysql_service_mysql_system_variable_reader->get(thd, "GLOBAL", kComponent, kMinKeyBytes,
+                                                      &value, &len)) {
+    return kKeyLen256;
+  }
+#else
+  if (mysql_service_component_sys_variable_register->get_variable(kComponent, kMinKeyBytes, &value,
+                                                                  &len)) {
+    return kKeyLen256;
+  }
+#endif
+
+  long parsed = 0;
+  if (!parse_int(static_cast<const char *>(value), len, &parsed)) return kKeyLen256;
+  if (parsed < static_cast<long>(kKeyLen128) || parsed > static_cast<long>(kKeyLen256)) {
+    return kKeyLen256;
+  }
+  return static_cast<size_t>(parsed);
 }
 
 #if GCM_HAS_SESSION_SYSVAR

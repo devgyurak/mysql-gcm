@@ -1,8 +1,11 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v1 of this document, 2026-09-28). Supersedes the draft that carried open issue A2.
-Rationale lives in `docs/design.md` (amendments A1–A4); this file is the normative byte-level
-contract for the server implementation, stored data and conformance tests.
+Status: **FINAL** (v2 of this document, 2026-10-06). v2 adds the AES-128 version bytes `0x04` and
+`0x05` and the key-length rule in §2.5; it changes no byte of any v1 envelope, and a v1 implementation
+reading a v2 envelope rejects it as a reserved version, which §2.6 already required. Supersedes the
+draft that carried open issue A2. Rationale lives in `docs/design.md` (amendments A1–A4, A10); this
+file is the normative byte-level contract for the server implementation, stored data and conformance
+tests.
 
 Conformance keywords MUST / MUST NOT / SHOULD are used in the usual sense.
 
@@ -15,16 +18,16 @@ Internal fixture generation MUST match this format; this scope change does not a
 
 | Function | Envelope | Result type |
 |---|---|---|
-| `gcm_encrypt(plaintext, key [, aad])` | version `0x02` | BLOB (charset `binary`) |
-| `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03` | BLOB (charset `binary`) |
-| `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`, `0x02`, `0x03` | VARCHAR tagged `utf8mb4` |
+| `gcm_encrypt(plaintext, key [, aad])` | version `0x02` or `0x04`, per §2.5 | BLOB (charset `binary`) |
+| `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03` or `0x05`, per §2.5 | BLOB (charset `binary`) |
+| `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`, `0x02`, `0x03`, `0x04`, `0x05` | VARCHAR tagged `utf8mb4` |
 
 ## 2. Byte layout
 
 All lengths are in bytes. `n` is the plaintext length, which MAY be zero. Multi-byte fields have no
 endianness: they are opaque octet strings.
 
-### 2.1 Version `0x02` — GCM, random nonce
+### 2.1 Version `0x02` — AES-256-GCM, random nonce
 
 | Offset | Length | Field |
 |---|---|---|
@@ -35,7 +38,7 @@ endianness: they are opaque octet strings.
 
 Total length = `n + 29`. Minimum 29.
 
-### 2.2 Version `0x03` — GCM, deterministic (synthetic) nonce
+### 2.2 Version `0x03` — AES-256-GCM, deterministic (synthetic) nonce
 
 | Offset | Length | Field |
 |---|---|---|
@@ -92,16 +95,69 @@ wherever v1 is exposed:
   `gcm_decrypt`: the function cannot know the legacy charset, and guessing would corrupt values that
   really are binary.
 
-### 2.4 Reserved versions
+### 2.5 Versions `0x04` and `0x05` — AES-128-GCM
 
-Every other version byte (`0x00`, `0x04`–`0xFF`) is unassigned. A decryptor MUST reject it with
+`0x04` is byte-for-byte the layout of `0x02`, and `0x05` that of `0x03`: `version(1) || nonce(12) ||
+ciphertext(n) || tag(16)`, total `n + 29`, minimum 29. Only the version byte and the key length
+differ.
+
+| Version | Cipher | Nonce |
+|---|---|---|
+| `0x02` | AES-256-GCM | random, 96-bit, from a CSPRNG |
+| `0x03` | AES-256-GCM | synthetic, §3 |
+| `0x04` | AES-128-GCM | random, 96-bit, from a CSPRNG |
+| `0x05` | AES-128-GCM | synthetic, §3 |
+
+**The suite is a function of the key length and of nothing else** (`docs/design.md` amendment A10).
+There is no selector argument and no system variable that can disagree with the key.
+
+| Key length | Suite | `gcm_encrypt` writes | `gcm_encrypt_det` writes |
+|---|---|---|---|
+| 16 | AES-128-GCM | `0x04` | `0x05` |
+| 32 | AES-256-GCM | `0x02` | `0x03` |
+
+Any other key length MUST be rejected with `bad_key_len`, on every call, with no folding, padding,
+hashing or truncation. 24 bytes is included in "any other": AES-192 holds `0x06` and `0x07` by
+allocation (§2.6) and is not implemented, so a 24-byte key MUST NOT be folded into a neighbouring
+suite.
+
+**On decryption the version byte states the required key length, and a disagreement MUST be reported
+as `bad_key_len`, never as `bad_tag`.** Decrypting a `0x02` envelope with a 16-byte key is a key
+error and must say so; letting the tag check fail instead reports data corruption for what is a key
+problem. This error means only that the envelope and the supplied key disagree about length — it is
+not evidence that a key was truncated, since a corrupted version byte produces the same result.
+
+The deterministic derivation in §3, including its label, is identical for every suite. Note that this
+does **not** domain-separate the suites from each other: HMAC zero-pads a key shorter than its block
+([RFC 2104 §2](https://www.rfc-editor.org/rfc/rfc2104.html#section-2)), so a 16-byte key `K` and the
+32-byte key `K ‖ 0¹⁶` derive the same nonce key and therefore the same nonce for a given plaintext.
+Those two are different AES keys, so this is not a nonce reuse, but no implementation may rely on key
+length for separation.
+
+Deterministic ciphertext is comparable only under the same key, and a key has exactly one length, so
+joins and UNIQUE constraints need no rule beyond the one already in §3. Values written under
+different suites never compare equal.
+
+### 2.6 Allocated-but-unimplemented, and reserved, versions
+
+`0x06` and `0x07` are **allocated** to AES-192-GCM (random and deterministic) by `docs/design.md`
+amendment A10 and are **not implemented**. Until they are, a decryptor MUST reject them with
+`bad_envelope` exactly as it rejects an unassigned byte. Allocation reserves the number; it does not
+make the format readable.
+
+Every remaining version byte (`0x00`, `0x08`–`0xFF`) is unassigned. A decryptor MUST reject it with
 `bad_envelope`; it MUST NOT be silently treated as a known version and MUST NOT return NULL.
 
 ## 3. Key and nonce derivation
 
-The key is an argument, exactly 32 bytes (AES-256). Any other length is an error
-(`bad_key_len`) — implementations MUST NOT fold, hash, truncate or pad a key to length, which is
-precisely the `AES_ENCRYPT` weakness this project does not reproduce.
+The key is an argument, 32 bytes (AES-256) or 16 (AES-128); §2.5 maps each length to its suite and
+its version bytes. Any other length is an error (`bad_key_len`) — implementations MUST NOT fold,
+hash, truncate or pad a key to length, which is precisely the `AES_ENCRYPT` weakness this project
+does not reproduce.
+
+The derivation below is byte-identical for every suite, including its label. That does **not** make
+the suites domain-separated from one another — see §2.5 — and no implementation may treat key length
+as separation.
 
 The deterministic nonce uses a separate, domain-separated key:
 
@@ -142,9 +198,11 @@ enforce these across calls. This clarification does not change the envelope byte
 
 | Condition | Error code | `gcm.strict=ON` | `gcm.strict=OFF` |
 |---|---|---|---|
-| Key length ≠ 32 | `bad_key_len` | error | **error** |
+| Key length is not 16 or 32 (§2.5) | `bad_key_len` | error | **error** |
+| Key length disagrees with the envelope's version byte (§2.5) | `bad_key_len` | error | **error** |
+| Key shorter than `gcm.min_key_bytes`, on encryption only (§4.1) | policy error | error | **error** |
 | Envelope shorter than its version's minimum | `bad_envelope` | error | **error** |
-| Unknown version byte | `bad_envelope` | error | **error** |
+| Unknown, or allocated-but-unimplemented, version byte | `bad_envelope` | error | **error** |
 | v1 body not a multiple of 16 | `bad_envelope` | error | **error** |
 | v1 with non-empty AAD | `bad_envelope` | error | **error** |
 | v1 PKCS#7 padding invalid | `bad_envelope` | error | **error** |
@@ -162,6 +220,23 @@ Rules that follow, and that every implementation MUST honour:
    not a failure mode.
 4. Error messages, logs and assertion strings MUST NOT contain key, plaintext, nonce, tag or
    ciphertext bytes. Lengths and the version byte are the only values allowed.
+
+### 4.1 `gcm.min_key_bytes`
+
+A GLOBAL integer, default 32, range 16–32 (`docs/design.md` amendment A10). `gcm_encrypt` and
+`gcm_encrypt_det` MUST refuse a key shorter than it. `gcm_decrypt` MUST ignore it entirely.
+
+The default keeps an existing deployment exactly as it was: 32 means AES-256 only, so the suites this
+spec version adds are opt-in. The reason the floor exists is that §2.5 makes the key length select the
+suite, which means a key truncated in transit is a *valid* key for a weaker suite and would otherwise
+seal successfully.
+
+Decryption ignoring it is not an oversight but the contract: an operator who lowers the floor, writes
+data, then raises it again MUST still be able to read that data in order to re-encrypt it. A floor
+applied to decryption would lock out exactly the rows that need migrating.
+
+Reading the setting is per statement, not per row. Any failure to read it MUST be treated as 32 — for
+a floor, failing closed means refusing the weaker suites.
 
 ## 5. Worked examples
 
@@ -241,11 +316,14 @@ How a suite MUST consume a vector:
 | `ok`, kind `legacy` | `decrypt(envelope, key, aad) == pt` only — encryption of v1 does not exist |
 | `bad_tag` | `decrypt` raises the tag error (server: error under `strict=ON`, NULL under OFF) |
 | `bad_envelope` | `decrypt` raises the envelope error under **both** strict settings |
-| `bad_key_len` | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
+| `bad_key_len`, key length no suite has | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
+| `bad_key_len`, key length valid but disagreeing with the envelope's version | `decrypt` raises it. `encrypt` and `encrypt_det` **succeed** — they have no envelope to disagree with, and the key is a perfectly good key for its own suite. A conformance runner MUST NOT feed these to the encryption entry points |
 
-Current contents: 750 NIST CAVP cases (`[Keylen=256][IVlen=96][Taglen=128]` from
-`gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp`, 191 of them authentication failures) and 33
-project cases. Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
+Current contents: 1500 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 from
+`gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp` (191 of them authentication failures) and
+750 from `gcmEncryptExtIV128.rsp` and `gcmDecrypt128.rsp` (196 authentication
+failures) — plus 46 project cases. The CAVP files for AES-192 are deliberately not imported:
+`0x06` and `0x07` are allocated and unimplemented (§2.6). Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
 `scripts/gen-vectors.py --check` (CI does this).
 
 ## 7. Versioning of this document

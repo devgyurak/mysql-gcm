@@ -144,8 +144,13 @@ mysql_service_status_t gcm_component_init() {
      landing in it reads an unregistered variable, the service fails, and strict_enabled()
      returns true — strict ON, which is the fail-closed direction and the safe one. The
      window is inside INSTALL COMPONENT. */
-  if (gcm::sysvar_register()) {
-    if (unregister_first(kUdfCount)) gcm::crypto_deinit();
+  bool vars_rolled_back = true;
+  if (gcm::sysvar_register(&vars_rolled_back)) {
+    /* Both conditions, not just the functions: sysvar_register registers two
+       variables and rolls the first back if the second fails, and that rollback
+       can itself be refused. A surviving variable reaches this component's
+       storage by enumeration, so the handles stay (design A9, A10). */
+    if (unregister_first(kUdfCount) && vars_rolled_back) gcm::crypto_deinit();
     return 1;
   }
   return 0;

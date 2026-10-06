@@ -6,6 +6,71 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **AES-128-GCM**, alongside AES-256-GCM (`docs/design.md` amendment A10, `spec/envelope.md` v2).
+  Envelope versions `0x04` (random) and `0x05` (deterministic), byte-for-byte the layout of
+  `0x02`/`0x03` — plaintext + 29 either way. **The key length selects the suite and nothing else
+  does**: 32 bytes gives AES-256, 16 gives AES-128. No new argument, no selector, no change to the
+  call shape.
+
+  **It is off by default.** `gcm.min_key_bytes` (GLOBAL, default `32`) is the floor the encryption
+  functions enforce; a server that is left alone behaves exactly as before and still refuses a short
+  key. That floor is the whole reason the feature can ship with length-based selection: a 32-byte key
+  truncated in transit is a *valid* AES-128 key, so without it `gcm_encrypt` would seal at a strength
+  nobody asked for. Decryption ignores the floor, so raising it again never locks out data written
+  while it was lower — which is what makes migrating off AES-128 possible at all.
+
+  On decryption the version byte states the key length it needs, and a disagreement is `bad_key_len`,
+  **never `bad_tag`** — a key problem reported as one rather than as suspected data corruption. The
+  error says only that the envelope and the key disagree about length; a corrupted version byte gives
+  the same signal, and the documentation says so rather than calling it a truncation detector.
+
+  AES-192 is **not** implemented. `0x06` and `0x07` are allocated to it and rejected as
+  `bad_envelope`, and a 24-byte key is an error — pinned by tests at three layers, because that is
+  the case most likely to rot into a silent accept when the suite table grows.
+
+  The deterministic nonce label is unchanged for every suite. Note that this does not domain-separate
+  them: RFC 2104 §2 zero-pads, so `K` and `K ‖ 0¹⁶` derive the same nonce key. Those are different
+  AES keys, so it is not a nonce reuse, but no implementation may rely on key length for separation
+  and the question is in the security review A10 still asks for.
+
+  Also withdrawn after review: the claim that per-suite derivation labels would make `0x03` and
+  `0x05` incomparable. They already differ from the version byte onward, and labelling only the new
+  suite would leave existing data reproducible. The real reason for one shared label is that
+  `crypto-safety.md` requires it to be a single constant, and a second one buys a separation nothing
+  has shown a need for — and that the claim "costs no existing data" is scoped to existing `0x03`
+  data, because once `0x05` ships a label change breaks its deterministic reproducibility too. The
+  window in which that change is cheap is before `0x05` is in anyone's data.
+
+  Found while implementing, by a test written for it: `sysvar_register` discarded the result of its
+  own rollback, so a refused unregister of `gcm.strict` left a variable in the dictionary while the
+  crypto handles were freed underneath it — the same shape of defect issue #7 was opened for. The
+  result is now reported and the caller keeps the handles.
+
+  The NIST CAVP KAT is imported for both suites — `scripts/import-nist.py` was single-suite and now
+  carries the version byte per file. 1,500 KAT cases (750 AES-256 with 191 authentication failures,
+  750 AES-128 with 196), plus project tamper vectors for `0x05`, which the CAVP decrypt files do not
+  reach because they are all random-nonce. AES-192's CAVP files are deliberately not imported.
+
+  A second review found a **P1 on the uninstall path**: the first fix re-registered the floor when
+  `gcm.strict` then refused, and `register_variable` re-applies the startup options — once
+  `mysqld_server_started` it reads `argv_cached`, appends the persisted variables and runs
+  `handle_options`. A server booted with `loose_gcm.min_key_bytes=16` whose administrator had raised
+  it to 32 would have had 16 handed back by a *failed* UNINSTALL, re-allowing AES-128 writes. A
+  failed uninstall must never widen a policy. The re-registration is gone: the state flags already
+  made the retry work without it, and an absent floor reads as 32, which is strictly narrower than
+  anything an operator could have set. The adapter stub now models the option re-application, so the
+  test asserts the policy value rather than merely that no re-registration happened.
+
+  Review found four more things, all fixed here. `sysvar_unregister` attempted both unregisters
+  unconditionally, so a refused UNINSTALL that had already removed one left **every retry failing**
+  on the one that was gone — the stub had been returning success for an absent variable and hiding
+  it. It now tracks each variable, removes the floor first so a refusal changes nothing, and
+  re-registers it if `gcm.strict` then refuses. `gcm_signature.result` still carried the old
+  key-length message and would have failed CI. The floor's failure paths had no test: service
+  failure, nine untrusted values, and the GLOBAL scope on 9.x are now pinned. And `spec/envelope.md`
+  still said "exactly 32 bytes" in §3 while claiming FINAL v2, and required every `bad_key_len`
+  vector to fail encryption — which the new suite-mismatch vectors do not and must not.
+
 - **The documentation and the agent instructions are English.** `AGENTS.md`, `CLAUDE.md`, the three
   nested `AGENTS.md` files, all ten rules in `.agents/rules`, all ten skills and the four subagents
   were Korean; they are now English, and the generated adapters follow from `agents-sync.sh`.

@@ -59,6 +59,14 @@ void install();
 /* Clears recorded calls and failure rules. Call at the start of every case. */
 void reset();
 
+/* Overrides what a sysvar read returns, keyed by "component.name" (for example
+   "gcm.min_key_bytes" -> "notanumber"). Cleared by reset(). */
+void set_sysvar_value(const std::string &name, const std::string &value);
+
+/* The value a *registration* of this variable re-applies, the way the real
+   service re-reads the startup options. Cleared by reset(). */
+void set_startup_option(const std::string &name, const std::string &value);
+
 /* Clears the modelled registration state. Separate from reset() because a case often
    wants to drop its failure rules while keeping what is installed. */
 void forget_registrations();
@@ -84,6 +92,10 @@ std::vector<std::string> call_sequence();
    the name was never there, and only a state model can tell that from a refusal. */
 const std::set<std::string> &registered_udfs();
 bool sysvar_is_registered();
+/* Separate from sysvar_is_registered(): the component registers two variables as
+   a unit, and the branch where the second fails must roll the first back. One
+   accessor for both would make that branch untestable. */
+bool min_key_bytes_is_registered();
 
 /* One probe per fetched algorithm, each reaching it through the core's public API rather
    than a test-only accessor. They return the core's own Error, because collapsing to a bool

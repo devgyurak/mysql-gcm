@@ -16,8 +16,22 @@ namespace {
 
 /* Fetched once; immutable afterwards. Per-call state lives in EVP_*_CTX so the
    UDFs are safe to call from many sessions at once. */
-EVP_CIPHER *g_aes_gcm = nullptr;
+EVP_CIPHER *g_aes_gcm_256 = nullptr;
+EVP_CIPHER *g_aes_gcm_128 = nullptr;
 EVP_CIPHER *g_aes_cbc = nullptr;
+
+/* The key length picks the cipher (design A10). nullptr for a length no suite
+   has, which the callers turn into bad_key_len rather than a default. */
+const EVP_CIPHER *gcm_cipher_for(size_t key_len) {
+  switch (key_len) {
+    case kKeyLen256:
+      return g_aes_gcm_256;
+    case kKeyLen128:
+      return g_aes_gcm_128;
+    default:
+      return nullptr;
+  }
+}
 
 using CtxPtr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
 
@@ -32,13 +46,14 @@ bool fits_int(size_t n) { return n <= static_cast<size_t>(INT_MAX); }
 
 Error seal(Bytes key, const unsigned char *nonce, Bytes plaintext, Bytes aad, unsigned char *ct,
            unsigned char *tag) {
-  if (g_aes_gcm == nullptr) return Error::openssl;
+  const EVP_CIPHER *cipher = gcm_cipher_for(key.size);
+  if (cipher == nullptr) return Error::openssl;
   if (!fits_int(plaintext.size) || !fits_int(aad.size)) return Error::openssl;
 
   CtxPtr ctx = new_ctx();
   if (!ctx) return Error::openssl;
 
-  if (EVP_EncryptInit_ex2(ctx.get(), g_aes_gcm, nullptr, nullptr, nullptr) != 1) {
+  if (EVP_EncryptInit_ex2(ctx.get(), cipher, nullptr, nullptr, nullptr) != 1) {
     return Error::openssl;
   }
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_AEAD_SET_IVLEN, static_cast<int>(kNonceLen),
@@ -74,7 +89,8 @@ Error seal(Bytes key, const unsigned char *nonce, Bytes plaintext, Bytes aad, un
 
 Error open_gcm(Bytes key, Bytes nonce, Bytes ciphertext, Bytes aad, Bytes tag, unsigned char *out,
                size_t *out_len) {
-  if (g_aes_gcm == nullptr) return Error::openssl;
+  const EVP_CIPHER *cipher = gcm_cipher_for(key.size);
+  if (cipher == nullptr) return Error::openssl;
   if (!fits_int(ciphertext.size) || !fits_int(aad.size)) return Error::openssl;
 
   CtxPtr ctx = new_ctx();
@@ -86,7 +102,7 @@ Error open_gcm(Bytes key, Bytes nonce, Bytes ciphertext, Bytes aad, Bytes tag, u
   if (nonce.size != kNonceLen) return Error::bad_envelope;
 
   int len = 0;
-  if (EVP_DecryptInit_ex2(ctx.get(), g_aes_gcm, nullptr, nullptr, nullptr) != 1) {
+  if (EVP_DecryptInit_ex2(ctx.get(), cipher, nullptr, nullptr, nullptr) != 1) {
     return Error::openssl;
   }
   if (EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_AEAD_SET_IVLEN, static_cast<int>(kNonceLen),
@@ -167,13 +183,22 @@ void wipe(void *data, size_t len) { OPENSSL_cleanse(data, len); }
 int crypto_init() {
   /* Idempotent: a second call would otherwise overwrite the handles and leak the
      first pair. mac_init() already guards itself the same way. */
-  if (g_aes_gcm != nullptr && g_aes_cbc != nullptr) return mac_init();
+  if (g_aes_gcm_256 != nullptr && g_aes_gcm_128 != nullptr && g_aes_cbc != nullptr) {
+    return mac_init();
+  }
 
   /* Fetch by name (crypto-safety): EVP_aes_256_gcm() would bind the component
-     to the build-time OpenSSL and bypass the provider the server configured. */
-  g_aes_gcm = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
+     to the build-time OpenSSL and bypass the provider the server configured.
+
+     All suites are fetched here, including AES-128 on a server that will never
+     see a 16-byte key: fetching once at init is the rule, and a first call that
+     had to fetch would put provider lookup on the row path. A provider that
+     offers neither is a configuration this component refuses to install on. */
+  g_aes_gcm_256 = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
+  g_aes_gcm_128 = EVP_CIPHER_fetch(nullptr, "AES-128-GCM", nullptr);
   g_aes_cbc = EVP_CIPHER_fetch(nullptr, "AES-256-CBC", nullptr);
-  if (g_aes_gcm == nullptr || g_aes_cbc == nullptr || mac_init() != 0) {
+  if (g_aes_gcm_256 == nullptr || g_aes_gcm_128 == nullptr || g_aes_cbc == nullptr ||
+      mac_init() != 0) {
     crypto_deinit();
     return 1;
   }
@@ -181,8 +206,10 @@ int crypto_init() {
 }
 
 void crypto_deinit() {
-  EVP_CIPHER_free(g_aes_gcm);
-  g_aes_gcm = nullptr;
+  EVP_CIPHER_free(g_aes_gcm_256);
+  g_aes_gcm_256 = nullptr;
+  EVP_CIPHER_free(g_aes_gcm_128);
+  g_aes_gcm_128 = nullptr;
   EVP_CIPHER_free(g_aes_cbc);
   g_aes_cbc = nullptr;
   mac_deinit();
@@ -190,21 +217,24 @@ void crypto_deinit() {
 
 Error encrypt_with_nonce(Bytes key, Bytes nonce, Bytes plaintext, Bytes aad, unsigned char *out,
                          size_t *out_len) {
-  if (key.size != kKeyLen) return Error::bad_key_len;
+  const Suite *suite = suite_for_key_len(key.size);
+  if (suite == nullptr) return Error::bad_key_len;
   if (nonce.size != kNonceLen) return Error::bad_envelope;
-  return encrypt_common(kVersionRandom, key, nonce.data, plaintext, aad, out, out_len);
+  return encrypt_common(suite->version_random, key, nonce.data, plaintext, aad, out, out_len);
 }
 
 Error encrypt_random(Bytes key, Bytes plaintext, Bytes aad, unsigned char *out, size_t *out_len) {
-  if (key.size != kKeyLen) return Error::bad_key_len;
+  const Suite *suite = suite_for_key_len(key.size);
+  if (suite == nullptr) return Error::bad_key_len;
 
   unsigned char nonce[kNonceLen];
   if (RAND_bytes(nonce, static_cast<int>(kNonceLen)) != 1) return Error::rng;
-  return encrypt_common(kVersionRandom, key, nonce, plaintext, aad, out, out_len);
+  return encrypt_common(suite->version_random, key, nonce, plaintext, aad, out, out_len);
 }
 
 Error encrypt_det(Bytes key, Bytes plaintext, Bytes aad, unsigned char *out, size_t *out_len) {
-  if (key.size != kKeyLen) return Error::bad_key_len;
+  const Suite *suite = suite_for_key_len(key.size);
+  if (suite == nullptr) return Error::bad_key_len;
 
   unsigned char nonce[kNonceLen];
   const Error err = derive_det_nonce(key, plaintext, nonce);
@@ -212,25 +242,40 @@ Error encrypt_det(Bytes key, Bytes plaintext, Bytes aad, unsigned char *out, siz
     OPENSSL_cleanse(nonce, sizeof(nonce));
     return err;
   }
-  const Error sealed = encrypt_common(kVersionDet, key, nonce, plaintext, aad, out, out_len);
+  const Error sealed = encrypt_common(suite->version_det, key, nonce, plaintext, aad, out, out_len);
   OPENSSL_cleanse(nonce, sizeof(nonce));
   return sealed;
 }
 
 Error decrypt(Bytes key, Bytes envelope, Bytes aad, unsigned char *out, size_t *out_len) {
   /* Checked on every call: init-time validation is not enough because the key
-     argument need not be constant (component-src rule). */
-  if (key.size != kKeyLen) return Error::bad_key_len;
+     argument need not be constant (component-src rule).
+
+     A length no suite has is rejected before the envelope is looked at, so a
+     wrong key length reports as one whatever the envelope holds. A length that
+     *is* a suite's is then checked against the version byte below. */
+  if (suite_for_key_len(key.size) == nullptr) return Error::bad_key_len;
 
   ParsedEnvelope parsed;
   const Error err = parse(envelope, &parsed);
   if (err != Error::ok) return err;
 
   if (parsed.version == kVersionLegacyCbc) {
+    /* v1 is AES-256-CBC only (design A3): the migration prefixes an existing
+       AES_ENCRYPT value, and that value was written with a 32-byte key. */
+    if (key.size != kKeyLen256) return Error::bad_key_len;
     /* v1 predates AAD and cannot bind one (spec/envelope.md §2.3). */
     if (aad.size != 0) return Error::bad_envelope;
     return open_cbc(key, parsed.nonce, parsed.body, out, out_len);
   }
+
+  /* design A10: the version byte states the key length this envelope was
+     written with, so a disagreement is reported as the key-length problem it
+     is. Letting the tag check catch it would report bad_tag and point an
+     operator at data corruption. */
+  const Suite *suite = suite_for_version(parsed.version);
+  if (suite == nullptr || key.size != suite->key_len) return Error::bad_key_len;
+
   return open_gcm(key, parsed.nonce, parsed.body, aad, parsed.tag, out, out_len);
 }
 

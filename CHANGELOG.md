@@ -63,10 +63,10 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ### Documented
 - `docs/design.md` amendment **A10 (proposed)**: AES-128-GCM and AES-192-GCM alongside AES-256-GCM.
-  The suite is selected by key length and nothing else — 16/24/32 bytes — which keeps the suite a pure
-  function of the key and so adds no cross-call consistency rule of the kind A8 needs for AAD. Four new
-  envelope version bytes (`0x04`–`0x07`), since `spec/envelope.md` §7 freezes the existing ones; the
-  layout and the deterministic nonce label are unchanged.
+  The suite is selected by key length and nothing else — 16/24/32 bytes — which buys API simplicity and
+  gives up the chance to cross-check the intended suite against the key that arrived. Four new envelope
+  version bytes (`0x04`–`0x07`), since `spec/envelope.md` §7 freezes the existing ones; the layout and
+  the deterministic nonce label are unchanged.
 
   The amendment states the cost rather than burying it: today a truncated key fails loudly because 32
   bytes is the only valid length, and afterwards a 32-byte key truncated to 16 is a valid AES-128 key
@@ -75,7 +75,18 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   pending the security review A8 requires for anything touching key policy.
 
   Nothing is implemented. The amendment is the design decision and the sequencing note: this is 0.2.0
-  work, after the 0.1.0 tag, because it bumps the spec version.
+  work, after the 0.1.0 tag, because it bumps the spec version. The work breakdown and the open
+  questions are issue #15.
+
+  Four rationale errors from the first draft were corrected in review, and the conclusions survived all
+  four. An explicit selector would **not** have forced a cross-call consistency rule, since FIPS 197
+  fixes one key length per suite and a disagreeing pair is simply rejected — so the real trade-off is
+  API simplicity against a lost cross-check, which is the truncation problem seen from the other side.
+  Changing the nonce label would **not** break decryption, because A2 stores the nonce; it would break
+  the reproducibility that JOIN and UNIQUE depend on. Different key lengths do **not** imply different
+  nonce keys: RFC 2104 §2 zero-pads, so `K` and `K ‖ 0¹⁶` derive the same one, verified rather than
+  argued. And a truncated key is **not** reliably caught on decryption — a writer and reader sharing the
+  truncated key agree forever.
 
 - `docs/design.md` amendment **A9**: on a failed install the loader `dlclose()`s the library, so any
   registration that survived a refused rollback points into an unmapped segment. This cannot be fixed

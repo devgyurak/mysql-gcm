@@ -6,6 +6,23 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **English is the first principle for everything committed**, stated once in
+  `.agents/rules/docs.md` and referenced from `AGENTS.md` §9 and `CONTRIBUTING.md`, which each carried
+  their own partial version of it. A document may carry a translation named `{document}-{LANG}.md`
+  (`README-KO.md`), the English file is canonical, and the two change in the same PR — a translation
+  that lags is a documentation bug rather than a second opinion. The allowance stops at two documents,
+  `README.md` and `docs/design.md`, because each translation doubles the cost of every change to it;
+  the agent rules, the skills and `spec/` are not translated.
+
+  The rule also says explicitly that **Korean in tests and fixtures is data, not prose**: `'홍길동'`,
+  `LIKE '%김%'`, `tests/load/run.py`'s `SURNAMES`, and the Korean cases across `tests/integration`,
+  `mysql-test/suite/gcm` and `tests/e2e`. A language policy is exactly the kind of instruction that
+  gets over-applied, and applying it there would delete the thing under test.
+
+  This replaces the previous plan of a separate English *summary* at `docs/design.en.md`, which was
+  never written and used a different naming scheme. `docs/design.md` is still Korean at this commit
+  and flips to English with `docs/design-KO.md` beside it in the translation pass that follows.
+
 - **`gcm.strict` is registered after the three functions, not before** (`docs/design.md` amendment
   A9). Registered first, a `udf_register` failure rolled back with the variable still in the server's
   dictionary pointing at `&g_strict` — in memory the loader is about to unmap, since `dlopen` gets

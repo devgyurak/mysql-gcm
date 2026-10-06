@@ -173,5 +173,12 @@ CHANGELOG.md                   릴리스별 변경. 봉투 변경은 호환성 �
 - 모르는 MySQL/OpenSSL API 는 **헤더·공식 문서로 확인**한다. 시그니처를 추측해서 컴파일 안 되는 코드를 내지 않는다.
 - 커밋: Conventional Commits (`feat(component): ...`, `fix(crypto): ...`, `test(mtr): ...`, `ci: ...`, `docs: ...`). 하나의 커밋은 하나의 관심사.
 - PR: `.github/PULL_REQUEST_TEMPLATE.md` 체크리스트를 전부 채운다. 순 변경 400줄 초과 diff 는 분할한다.
-- 사용자와의 대화는 한국어. 코드·주석·커밋·README·spec 은 영어 (오픈소스 대상).
+- **English first.** Everything committed — code, comments, commit messages, PR descriptions,
+  documents, specs — is written in English. A document may carry a translation named
+  `{document}-{LANG}.md` (`README-KO.md` today, `docs/design-KO.md` once design.md flips); the English
+  file is canonical and both change in the same PR. Only those two documents are translated — not the
+  rules, the skills or `spec/`. Korean
+  strings in tests are **data** (`'홍길동'`, `LIKE '%김%'`) and are never translated. Full rule:
+  `.agents/rules/docs.md`. **Conversation with the user is in Korean**, which is a separate matter from
+  what gets committed.
 - 관리형 MySQL, 프록시, 키 관리 시스템 자체, keyring 연동은 범위 밖. 요청받아도 설계 개정 제안으로 돌린다.

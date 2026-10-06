@@ -31,11 +31,13 @@ using gcm_adapter::component_init;
 using gcm_adapter::details_for;
 using gcm_adapter::fail;
 using gcm_adapter::FailureRule;
+using gcm_adapter::min_key_bytes_is_registered;
 using gcm_adapter::registered_udfs;
 using gcm_adapter::sysvar_is_registered;
 
 const std::vector<std::string> kAllUdfs = {"gcm_encrypt", "gcm_encrypt_det", "gcm_decrypt"};
 constexpr const char *kStrict = "gcm.strict";
+constexpr const char *kFloor = "gcm.min_key_bytes";
 
 class Lifecycle : public ::testing::Test {
  protected:
@@ -68,9 +70,10 @@ TEST_F(Lifecycle, GivenEveryServiceSucceeds_WhenInit_ThenAllUdfsThenTheSysvarAre
   // Then
   EXPECT_EQ(status, 0);
   EXPECT_EQ(details_for("udf_register"), kAllUdfs);
-  EXPECT_EQ(details_for("register_variable"), std::vector<std::string>{kStrict});
+  EXPECT_EQ(details_for("register_variable"), (std::vector<std::string>{kStrict, kFloor}));
   EXPECT_EQ(registered_udfs(), std::set<std::string>(kAllUdfs.begin(), kAllUdfs.end()));
   EXPECT_TRUE(sysvar_is_registered());
+  EXPECT_TRUE(min_key_bytes_is_registered());
   EXPECT_TRUE(algorithms_live());
 }
 
@@ -101,6 +104,7 @@ TEST_F(Lifecycle, GivenTheSecondUdfFailsToRegister_WhenInit_ThenTheFirstIsUnregi
   EXPECT_TRUE(details_for("register_variable").empty());
   EXPECT_TRUE(registered_udfs().empty());
   EXPECT_FALSE(sysvar_is_registered());
+  EXPECT_FALSE(min_key_bytes_is_registered());
 }
 
 TEST_F(Lifecycle, GivenAUdfFailsAndRollbackSucceeds_WhenInit_ThenTheAlgorithmsAreReleased) {
@@ -339,7 +343,8 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast)
   EXPECT_EQ(
       gcm_adapter::call_sequence(),
       std::vector<std::string>({"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
-                                "udf_unregister:gcm_decrypt", "unregister_variable:gcm.strict"}));
+                                "udf_unregister:gcm_decrypt", "unregister_variable:gcm.strict",
+                                "unregister_variable:gcm.min_key_bytes"}));
 }
 
 TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreReleased) {
@@ -353,8 +358,40 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreRele
   // Then
   EXPECT_EQ(status, 0);
   EXPECT_EQ(details_for("udf_unregister"), kAllUdfs);
-  EXPECT_EQ(details_for("unregister_variable"), std::vector<std::string>{kStrict});
+  EXPECT_EQ(details_for("unregister_variable"), (std::vector<std::string>{kStrict, kFloor}));
   EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheFloorFailsToRegister_WhenInit_ThenStrictIsRolledBackToo) {
+  // Given: gcm.strict registers, gcm.min_key_bytes does not (design A10)
+  fail(FailureRule{"register_variable", kFloor, 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: neither variable survives. One left behind would sit in the server's
+  //       dictionary pointing into memory the loader is about to unmap, and a
+  //       variable is reachable by enumeration alone (design A9).
+  EXPECT_EQ(status, 1);
+  EXPECT_FALSE(sysvar_is_registered());
+  EXPECT_FALSE(min_key_bytes_is_registered());
+  EXPECT_TRUE(registered_udfs().empty());
+  EXPECT_TRUE(algorithms_released());
+}
+
+TEST_F(Lifecycle, GivenTheFloorFailsAndStrictWillNotUnregister_WhenInit_ThenAlgorithmsAreKept) {
+  // Given
+  fail(FailureRule{"register_variable", kFloor, 1, true});
+  fail(FailureRule{"unregister_variable", kStrict, 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: a variable survived the rollback, so the handles it may still reach
+  //       stay alive — the same position deinit takes (design A9)
+  EXPECT_EQ(status, 1);
+  EXPECT_TRUE(sysvar_is_registered());
+  EXPECT_TRUE(algorithms_live());
 }
 
 }  // namespace

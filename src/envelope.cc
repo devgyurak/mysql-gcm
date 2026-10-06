@@ -4,6 +4,30 @@
 #include <cstring>
 
 namespace gcm {
+namespace {
+
+/* The suite table (design A10). AES-256 is first because it is the default and
+   the overwhelmingly common case, so the common lookup is one comparison. */
+constexpr Suite kSuites[] = {
+    {kKeyLen256, kVersionRandom, kVersionDet},
+    {kKeyLen128, kVersionRandom128, kVersionDet128},
+};
+
+}  // namespace
+
+const Suite *suite_for_key_len(size_t key_len) {
+  for (const Suite &suite : kSuites) {
+    if (suite.key_len == key_len) return &suite;
+  }
+  return nullptr;
+}
+
+const Suite *suite_for_version(unsigned char version) {
+  for (const Suite &suite : kSuites) {
+    if (suite.version_random == version || suite.version_det == version) return &suite;
+  }
+  return nullptr;
+}
 
 const char *error_name(Error err) {
   switch (err) {
@@ -28,7 +52,7 @@ Error parse(Bytes envelope, ParsedEnvelope *out) {
   if (envelope.data == nullptr || envelope.size < kVersionLen) return Error::bad_envelope;
 
   const unsigned char version = envelope.data[0];
-  if (version == kVersionRandom || version == kVersionDet) {
+  if (suite_for_version(version) != nullptr) {
     /* Compare before subtracting: `size - kGcmOverhead` on a short envelope
        would wrap around on size_t and hand out a huge body. */
     if (envelope.size < kMinGcmLen) return Error::bad_envelope;

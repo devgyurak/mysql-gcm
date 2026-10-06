@@ -42,7 +42,10 @@ namespace {
 std::vector<Call> g_calls;
 std::vector<FailureRule> g_rules;
 std::set<std::string> g_registered_udfs;
-bool g_sysvar_registered = false;
+/* Per-name, not a single flag: the component now registers two variables as a
+   unit (gcm.strict and gcm.min_key_bytes, design A10), and the branch where the
+   second fails has to roll the first back. A single bool cannot see that. */
+std::set<std::string> g_registered_vars;
 
 /* Returns the matching rule, or nullptr. Counts only calls already recorded for this
    method+detail, so `nth` is 1-based over the sequence the component produces. */
@@ -110,7 +113,7 @@ DEFINE_BOOL_METHOD(stub_register_variable,
                     mysql_sys_var_check_func, mysql_sys_var_update_func, void *, void *)) {
   const std::string detail = std::string(component_name) + "." + name;
   if (record_and_decide("register_variable", detail.c_str(), nullptr)) return true;
-  g_sysvar_registered = true;
+  g_registered_vars.insert(detail);
   return false;
 }
 
@@ -119,8 +122,10 @@ DEFINE_BOOL_METHOD(stub_register_variable,
    Shared so that neither stub records a call on behalf of the other — a stub that delegated to
    another stub counted one read as two, which is a property of the harness and not of the
    component. */
-bool write_strict_value(void **val, size_t *out_length_of_val) {
-  const char *value = "ON";
+bool write_sysvar_value(const std::string &name, void **val, size_t *out_length_of_val) {
+  /* The SHOW form of each variable: a bool renders as ON/OFF and an int as its
+     digits, which is what the component parses. */
+  const char *value = name == "gcm.min_key_bytes" ? "32" : "ON";
   const size_t len = std::strlen(value);
   if (val == nullptr || *val == nullptr || out_length_of_val == nullptr) return true;
   if (*out_length_of_val < len + 1) {
@@ -139,16 +144,17 @@ DEFINE_BOOL_METHOD(stub_get_variable, (const char *component_name, const char *n
   /* The real service fails for a variable that is not registered, which is what makes the
      window opened by registering the variable last fail closed (design A9). Modelling it here
      is what lets a case assert that. */
-  if (!g_sysvar_registered) return true;
-  /* Always ON: the OFF path is covered where it matters, against a real server
-     (31_strict_scope, strict_scope_global). */
-  return write_strict_value(val, out_length_of_val);
+  if (g_registered_vars.count(detail) == 0) return true;
+  /* strict always ON and the floor always 32: the other values are covered where
+     they matter, against a real server (31_strict_scope, 32_min_key_bytes,
+     strict_scope_global). */
+  return write_sysvar_value(detail, val, out_length_of_val);
 }
 
 DEFINE_BOOL_METHOD(stub_unregister_variable, (const char *component_name, const char *name)) {
   const std::string detail = std::string(component_name) + "." + name;
   if (record_and_decide("unregister_variable", detail.c_str(), nullptr)) return true;
-  g_sysvar_registered = false;
+  g_registered_vars.erase(detail);
   return false;
 }
 
@@ -169,8 +175,8 @@ DEFINE_BOOL_METHOD(stub_system_variable_get,
   if (record_and_decide("variable_reader_get", detail.c_str(), nullptr, variable_type)) {
     return true;
   }
-  if (!g_sysvar_registered) return true;
-  return write_strict_value(val, len);
+  if (g_registered_vars.count(detail) == 0) return true;
+  return write_sysvar_value(detail, val, len);
 }
 
 DEFINE_BOOL_METHOD(stub_current_thread_get, (MYSQL_THD * thd)) {
@@ -194,7 +200,7 @@ SERVICE_TYPE(mysql_system_variable_reader) g_variable_reader{stub_system_variabl
 SERVICE_TYPE(mysql_current_thread_reader) g_thread_reader{stub_current_thread_get};
 #endif
 
-const unsigned char kKey[gcm::kKeyLen] = {
+const unsigned char kKey[gcm::kKeyLen256] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
     0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
 
@@ -219,7 +225,7 @@ void reset() {
 
 void forget_registrations() {
   g_registered_udfs.clear();
-  g_sysvar_registered = false;
+  g_registered_vars.clear();
 }
 
 void fail(const FailureRule &rule) { g_rules.push_back(rule); }
@@ -251,7 +257,9 @@ std::vector<std::string> call_sequence() {
 
 const std::set<std::string> &registered_udfs() { return g_registered_udfs; }
 
-bool sysvar_is_registered() { return g_sysvar_registered; }
+bool sysvar_is_registered() { return g_registered_vars.count("gcm.strict") != 0; }
+
+bool min_key_bytes_is_registered() { return g_registered_vars.count("gcm.min_key_bytes") != 0; }
 
 gcm::Error probe_gcm() {
   const unsigned char plaintext[] = {'x'};

@@ -34,10 +34,13 @@ struct Bytes {
 };
 
 inline constexpr unsigned char kVersionLegacyCbc = 0x01;  // decrypt only (design A3)
-inline constexpr unsigned char kVersionRandom = 0x02;
-inline constexpr unsigned char kVersionDet = 0x03;
+inline constexpr unsigned char kVersionRandom = 0x02;     // AES-256-GCM
+inline constexpr unsigned char kVersionDet = 0x03;        // AES-256-GCM
+inline constexpr unsigned char kVersionRandom128 = 0x04;  // AES-128-GCM (design A10)
+inline constexpr unsigned char kVersionDet128 = 0x05;     // AES-128-GCM (design A10)
 
-inline constexpr size_t kKeyLen = 32;
+inline constexpr size_t kKeyLen256 = 32;
+inline constexpr size_t kKeyLen128 = 16;
 inline constexpr size_t kNonceLen = 12;
 inline constexpr size_t kTagLen = 16;
 inline constexpr size_t kIvLen = 16;
@@ -47,6 +50,26 @@ inline constexpr size_t kVersionLen = 1;
 inline constexpr size_t kGcmOverhead = kVersionLen + kNonceLen + kTagLen;  // 29
 inline constexpr size_t kMinGcmLen = kGcmOverhead;
 inline constexpr size_t kMinCbcLen = kVersionLen + kIvLen + kCbcBlockLen;  // 33
+
+/* A GCM suite: the key length it takes and the two version bytes it writes.
+   The suite is a function of the key length and of nothing else (design A10),
+   so there is no selector argument and no sysvar to disagree with the key.
+
+   This table is the single place the mapping lives. Adding AES-192 is one row
+   here plus one EVP_CIPHER_fetch in gcm.cc; everything else is driven from it. */
+struct Suite {
+  size_t key_len;
+  unsigned char version_random;
+  unsigned char version_det;
+};
+
+/* nullptr when no suite has that key length — which is how a wrong key length
+   is detected, so callers must not treat nullptr as a default. */
+const Suite *suite_for_key_len(size_t key_len);
+
+/* nullptr for a version byte that is not a GCM envelope, including the legacy
+   v1 (0x01) and every reserved byte. */
+const Suite *suite_for_version(unsigned char version);
 
 /* Fields of a parsed envelope, all pointing into the caller's buffer.
    v1 carries a 16-byte IV in `nonce` and an empty `tag` — it is not

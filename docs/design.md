@@ -6,7 +6,16 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
-> ## Amendment A10 (2026-10-06, proposed) — AES-128-GCM and AES-192-GCM
+> ## Amendment A10 (2026-10-06) — AES-128-GCM and AES-192-GCM
+>
+> **Status: AES-128 implemented; AES-192 allocated and not implemented.** `0x04` and `0x05` ship,
+> `gcm.min_key_bytes` ships with the recommended default of 32, and `spec/envelope.md` is at v2.
+> `0x06` and `0x07` stay reserved and are rejected as `bad_envelope`. Still open: the security review
+> this amendment asks for, which covers the four `gcm.min_key_bytes` contract points, domain
+> separation between the suites, and whether `gcm_encrypt_det` should be offered for AES-128 at all.
+> The NIST CAVP KAT for AES-128-GCM is not in `spec/test-vectors.json` yet — it needs the CAVP
+> archive through `gen-vectors.py --rsp-dir`, and the project vectors cover the round trip,
+> determinism and envelope bytes in the meantime.
 >
 > §2 and amendment A1 fix the suite at AES-256-GCM: `EVP_CIPHER_fetch("AES-256-GCM")` is the only
 > cipher fetched for sealing, and the key is exactly 32 bytes, checked on every call. This amendment

@@ -72,8 +72,11 @@ bool init_state(UDF_INIT *initid, char *msg) {
     snprintf(msg, kInitMsgLen, "out of memory");
     return true;
   }
-  /* Read once per statement, not per row: see sysvar.h. */
+  /* Read once per statement, not per row: see sysvar.h. Both are read for every
+     UDF; gcm_decrypt ignores the floor, which is the point — raising the policy
+     must never lock out data written under a lower one (design A10). */
   state->strict = strict_enabled();
+  state->min_key_bytes = min_key_bytes();
   initid->ptr = reinterpret_cast<char *>(state);
   return false;
 }
@@ -125,7 +128,10 @@ void raise(const char *func, Error err, size_t key_len, size_t envelope_len) {
   char detail[192];
   switch (err) {
     case Error::bad_key_len:
-      snprintf(detail, sizeof(detail), "key must be exactly %zu bytes, got %zu", kKeyLen, key_len);
+      snprintf(detail, sizeof(detail),
+               "key must be %zu bytes (AES-256) or %zu (AES-128), and on decryption must "
+               "match the envelope version; got %zu",
+               kKeyLen256, kKeyLen128, key_len);
       break;
     case Error::bad_envelope:
       snprintf(detail, sizeof(detail), "malformed or unsupported envelope (length %zu)",
@@ -142,6 +148,15 @@ void raise(const char *func, Error err, size_t key_len, size_t envelope_len) {
       snprintf(detail, sizeof(detail), "an OpenSSL operation failed");
       break;
   }
+  raise_message(func, detail);
+}
+
+void raise_below_floor(const char *func, size_t key_len, size_t floor) {
+  char detail[192];
+  snprintf(detail, sizeof(detail),
+           "key of %zu bytes is below gcm.min_key_bytes = %zu; decryption of existing "
+           "data is unaffected",
+           key_len, floor);
   raise_message(func, detail);
 }
 

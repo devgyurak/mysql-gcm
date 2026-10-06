@@ -18,8 +18,9 @@ namespace gcm {
 /* Hung off UDF_INIT::ptr, one per invocation. Nothing is shared between calls:
    the same UDF runs concurrently in many sessions (component-src rule). */
 struct UdfState {
-  bool strict;        /* gcm.strict, read once in init (design A5) */
-  unsigned char *out; /* result bytes; holds plaintext for gcm_decrypt */
+  bool strict;          /* gcm.strict, read once in init (design A5) */
+  size_t min_key_bytes; /* gcm.min_key_bytes, read once in init (design A10) */
+  unsigned char *out;   /* result bytes; holds plaintext for gcm_decrypt */
   size_t capacity;
 };
 
@@ -102,6 +103,12 @@ void raise_message(const char *func, const char *detail);
 
 /* Reports an argument that exceeds kMaxArgLen. Carries lengths only. */
 void raise_too_long(const char *func, size_t len);
+
+/* Reports a key that is shorter than gcm.min_key_bytes. Distinct from
+   bad_key_len: the key is a valid length for a suite, and the server policy is
+   what refuses it, so the message has to say that rather than claim the length
+   is wrong (design A10). Carries lengths only. */
+void raise_below_floor(const char *func, size_t key_len, size_t floor);
 
 }  // namespace gcm
 

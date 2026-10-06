@@ -40,10 +40,20 @@ SPEC = ROOT / "spec" / "test-vectors.json"
 SCHEMA_VERSION = 1
 DET_NONCE_LABEL = b"mysql-gcm/v1/det-nonce"
 
+# The version byte is a function of the key length (design A10, spec §2).
+# This mirrors kSuites in src/envelope.cc; the C++ vector test consumes both.
+RANDOM_VERSION = {32: 0x02, 16: 0x04}
+DET_VERSION = {32: 0x03, 16: 0x05}
+
 #: Test key from the testing rule: never a real key, never PHI.
 KEY = bytes(range(32))
 #: A second key, used to show that a valid envelope fails under the wrong key.
 KEY_ALT = bytes((b + 0x80) % 256 for b in range(32))
+
+# design A10: the suite follows the key length, so the AES-128 fixture is just a
+# shorter key. Deliberately NOT a prefix of KEY -- a prefix would make the
+# truncation failure mode look like a legitimate fixture.
+KEY_128 = bytes((b * 7 + 3) % 256 for b in range(16))
 #: Fixed nonces for the random-variant vectors: production uses RAND_bytes, but a
 #: vector has to be reproducible, so these are passed directly to AESGCM.
 NONCE_A = bytes.fromhex("000000000000000000000001")
@@ -85,14 +95,17 @@ def vec(**kw: Any) -> dict[str, Any]:
     return {k: kw[k] for k in order if k in kw}
 
 
-def det_vector(vid: str, plaintext: bytes, aad: bytes, note: str) -> dict[str, Any]:
-    nonce_key = _hmac_sha256(KEY, DET_NONCE_LABEL)
+def det_vector(
+    vid: str, plaintext: bytes, aad: bytes, note: str, key: bytes = KEY
+) -> dict[str, Any]:
+    version = DET_VERSION[len(key)]
+    nonce_key = _hmac_sha256(key, DET_NONCE_LABEL)
     nonce = _hmac_sha256(nonce_key, plaintext)[:12]
-    env = b"\x03" + nonce + AESGCM(KEY).encrypt(nonce, plaintext, aad)
+    env = bytes([version]) + nonce + AESGCM(key).encrypt(nonce, plaintext, aad)
     return vec(
         id=vid,
         kind="det",
-        key_hex=KEY.hex(),
+        key_hex=key.hex(),
         nonce_key_hex=nonce_key.hex(),
         nonce_hex=nonce.hex(),
         aad_hex=aad.hex(),
@@ -104,16 +117,17 @@ def det_vector(vid: str, plaintext: bytes, aad: bytes, note: str) -> dict[str, A
 
 
 def random_vector(
-    vid: str, nonce: bytes, plaintext: bytes, aad: bytes, note: str
+    vid: str, nonce: bytes, plaintext: bytes, aad: bytes, note: str, key: bytes = KEY
 ) -> dict[str, Any]:
+    version = RANDOM_VERSION[len(key)]
     return vec(
         id=vid,
         kind="random",
-        key_hex=KEY.hex(),
+        key_hex=key.hex(),
         nonce_hex=nonce.hex(),
         aad_hex=aad.hex(),
         plaintext_hex=plaintext.hex(),
-        envelope_hex=(b"\x02" + nonce + AESGCM(KEY).encrypt(nonce, plaintext, aad)).hex(),
+        envelope_hex=(bytes([version]) + nonce + AESGCM(key).encrypt(nonce, plaintext, aad)).hex(),
         expect="ok",
         note=note,
     )
@@ -246,7 +260,11 @@ def project_vectors() -> list[dict[str, Any]]:
                 note=f"{n} bytes: below the 29-byte minimum",
             )
         )
-    for version in (0x00, 0x04, 0x7F, 0xFF):
+    # 0x04 and 0x05 left this list when AES-128 took them (design A10). 0x06 and
+    # 0x07 are allocated to AES-192 by the same amendment but are NOT implemented,
+    # so they must still be rejected -- that is the case most likely to rot into a
+    # silent accept when the suite table grows, which is why it is pinned here.
+    for version in (0x00, 0x06, 0x07, 0x7F, 0xFF):
         body = bytes([version]) + good[1:]
         out.append(
             vec(
@@ -257,7 +275,7 @@ def project_vectors() -> list[dict[str, Any]]:
                 plaintext_hex="",
                 envelope_hex=body.hex(),
                 expect="bad_envelope",
-                note="unknown version byte is an error, never a NULL",
+                note="unimplemented or reserved version byte is an error, never a NULL",
             )
         )
     legacy = legacy_envelope(HONG)
@@ -298,8 +316,50 @@ def project_vectors() -> list[dict[str, Any]]:
         )
     )
 
+    # --- AES-128 (design A10) --------------------------------------------------
+    out.append(
+        random_vector(
+            "aes128-random-korean",
+            NONCE_A,
+            HONG,
+            b"",
+            "0x04: AES-128-GCM random, the key length selects the suite",
+            key=KEY_128,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes128-det-korean",
+            HONG,
+            b"",
+            "0x05: AES-128-GCM deterministic, same layout as 0x03",
+            key=KEY_128,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes128-det-empty",
+            b"",
+            b"",
+            "0x05 over an empty plaintext is still 29 bytes",
+            key=KEY_128,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes128-det-with-aad",
+            KIM,
+            b"patients.name",
+            "0x05 with an AAD; the AAD is not an input to the nonce (design §5.2)",
+            key=KEY_128,
+        )
+    )
+
     # --- failure: key length ---------------------------------------------------
-    for n in (0, 16, 31, 33, 64):
+    # 16 is no longer here: it is a valid AES-128 key (design A10). 15 and 17
+    # bracket it, and 24 pins that AES-192 is NOT implemented -- the suite table
+    # has two rows, and a 24-byte key must not be folded into one of them.
+    for n in (0, 15, 17, 24, 31, 33, 64):
         out.append(
             vec(
                 id=f"bad-key-len-{n}",
@@ -309,9 +369,41 @@ def project_vectors() -> list[dict[str, Any]]:
                 plaintext_hex=HONG.hex(),
                 envelope_hex=good.hex(),
                 expect="bad_key_len",
-                note=f"{n}-byte key: error, never folded or padded to 32",
+                note=f"{n}-byte key: error, never folded or padded to a suite length",
             )
         )
+
+    # --- failure: the key length disagrees with the version byte (design A10) ---
+    out.append(
+        vec(
+            id="bad-key-len-suite-mismatch-256-envelope-128-key",
+            kind="det",
+            key_hex=KEY_128.hex(),
+            aad_hex="",
+            plaintext_hex=HONG.hex(),
+            envelope_hex=good.hex(),
+            expect="bad_key_len",
+            note="0x03 envelope read with a 16-byte key: bad_key_len, never bad_tag",
+        )
+    )
+    out.append(
+        vec(
+            id="bad-key-len-suite-mismatch-128-envelope-256-key",
+            kind="det",
+            key_hex=KEY.hex(),
+            aad_hex="",
+            plaintext_hex=HONG.hex(),
+            envelope_hex=(
+                bytes([DET_VERSION[16]])
+                + _hmac_sha256(_hmac_sha256(KEY_128, DET_NONCE_LABEL), HONG)[:12]
+                + AESGCM(KEY_128).encrypt(
+                    _hmac_sha256(_hmac_sha256(KEY_128, DET_NONCE_LABEL), HONG)[:12], HONG, b""
+                )
+            ).hex(),
+            expect="bad_key_len",
+            note="0x05 envelope read with a 32-byte key: bad_key_len, never bad_tag",
+        )
+    )
     return out
 
 
@@ -352,14 +444,26 @@ def _verify_failure(v: dict[str, Any]) -> None:
     expect = str(v["expect"])
 
     if expect == "bad_key_len":
-        _require(len(key) != 32, f"{v['id']}: bad_key_len fixture carries a 32 byte key")
+        # design A10: two ways to earn this. Either the key length is not one a
+        # suite has, or it is -- and disagrees with the envelope's version byte.
+        # The second is the case that must not collapse into bad_tag.
+        version = env[0] if env else None
+        no_such_suite = len(key) not in RANDOM_VERSION
+        wrong_suite = version is not None and version not in (
+            RANDOM_VERSION.get(len(key)),
+            DET_VERSION.get(len(key)),
+        )
+        _require(
+            no_such_suite or wrong_suite,
+            f"{v['id']}: bad_key_len fixture has a key that matches its envelope",
+        )
         return
 
     if expect == "bad_envelope":
         version = env[0] if env else None
         structural = (
-            version not in (0x01, 0x02, 0x03)
-            or (version in (0x02, 0x03) and len(env) < 29)
+            version not in (0x01, 0x02, 0x03, 0x04, 0x05)
+            or (version in (0x02, 0x03, 0x04, 0x05) and len(env) < 29)
             or (version == 0x01 and (len(env) < 33 or (len(env) - 17) % 16 != 0))
             or (version == 0x01 and bool(aad))
         )
@@ -368,7 +472,10 @@ def _verify_failure(v: dict[str, Any]) -> None:
 
     if expect == "bad_tag":
         _require(len(env) >= 29, f"{v['id']}: bad_tag fixture is too short to reach the tag")
-        _require(env[0] in (0x02, 0x03), f"{v['id']}: bad_tag fixture is not a GCM envelope")
+        _require(
+            env[0] in (0x02, 0x03, 0x04, 0x05),
+            f"{v['id']}: bad_tag fixture is not a GCM envelope",
+        )
         authenticates = True
         try:
             AESGCM(key).decrypt(env[1:13], env[13:], aad)
@@ -403,13 +510,19 @@ def verify(vectors: list[dict[str, Any]]) -> None:
             unpadder = PKCS7(128).unpadder()
             actual = unpadder.update(padded) + unpadder.finalize()
         else:
-            _require(env[0] in (0x02, 0x03), f"{v['id']}: wrong version byte")
+            _require(env[0] in (0x02, 0x03, 0x04, 0x05), f"{v['id']}: wrong version byte")
+            _require(
+                env[0] in (RANDOM_VERSION[len(key)], DET_VERSION[len(key)]),
+                f"{v['id']}: version byte does not match the key length",
+            )
             actual = AESGCM(key).decrypt(env[1:13], env[13:], aad)
         _require(actual == plaintext, f"{v['id']}: decrypt mismatch")
         if v["kind"] == "det":
             nonce_key = _hmac_sha256(key, DET_NONCE_LABEL)
             nonce = _hmac_sha256(nonce_key, plaintext)[:12]
-            expected = b"\x03" + nonce + AESGCM(key).encrypt(nonce, plaintext, aad)
+            expected = (
+                bytes([DET_VERSION[len(key)]]) + nonce + AESGCM(key).encrypt(nonce, plaintext, aad)
+            )
             _require(expected == env, f"{v['id']}: not deterministic")
 
 

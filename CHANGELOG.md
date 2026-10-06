@@ -6,6 +6,42 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **AES-128-GCM**, alongside AES-256-GCM (`docs/design.md` amendment A10, `spec/envelope.md` v2).
+  Envelope versions `0x04` (random) and `0x05` (deterministic), byte-for-byte the layout of
+  `0x02`/`0x03` — plaintext + 29 either way. **The key length selects the suite and nothing else
+  does**: 32 bytes gives AES-256, 16 gives AES-128. No new argument, no selector, no change to the
+  call shape.
+
+  **It is off by default.** `gcm.min_key_bytes` (GLOBAL, default `32`) is the floor the encryption
+  functions enforce; a server that is left alone behaves exactly as before and still refuses a short
+  key. That floor is the whole reason the feature can ship with length-based selection: a 32-byte key
+  truncated in transit is a *valid* AES-128 key, so without it `gcm_encrypt` would seal at a strength
+  nobody asked for. Decryption ignores the floor, so raising it again never locks out data written
+  while it was lower — which is what makes migrating off AES-128 possible at all.
+
+  On decryption the version byte states the key length it needs, and a disagreement is `bad_key_len`,
+  **never `bad_tag`** — a key problem reported as one rather than as suspected data corruption. The
+  error says only that the envelope and the key disagree about length; a corrupted version byte gives
+  the same signal, and the documentation says so rather than calling it a truncation detector.
+
+  AES-192 is **not** implemented. `0x06` and `0x07` are allocated to it and rejected as
+  `bad_envelope`, and a 24-byte key is an error — pinned by tests at three layers, because that is
+  the case most likely to rot into a silent accept when the suite table grows.
+
+  The deterministic nonce label is unchanged for every suite. Note that this does not domain-separate
+  them: RFC 2104 §2 zero-pads, so `K` and `K ‖ 0¹⁶` derive the same nonce key. Those are different
+  AES keys, so it is not a nonce reuse, but no implementation may rely on key length for separation
+  and the question is in the security review A10 still asks for.
+
+  Found while implementing, by a test written for it: `sysvar_register` discarded the result of its
+  own rollback, so a refused unregister of `gcm.strict` left a variable in the dictionary while the
+  crypto handles were freed underneath it — the same shape of defect issue #7 was opened for. The
+  result is now reported and the caller keeps the handles.
+
+  Not included: the NIST CAVP KAT for AES-128-GCM, which needs the CAVP archive through
+  `gen-vectors.py --rsp-dir`. The project vectors cover the round trip, determinism and envelope
+  bytes, and the KAT remains on issue #15.
+
 - **The documentation and the agent instructions are English.** `AGENTS.md`, `CLAUDE.md`, the three
   nested `AGENTS.md` files, all ten rules in `.agents/rules`, all ten skills and the four subagents
   were Korean; they are now English, and the generated adapters follow from `agents-sync.sh`.

@@ -5,7 +5,14 @@
 > 이 문서는 [`design.md`](design.md) 의 한국어 번역입니다. **영어판이 정본**이고, 두 문서가 다르면
 > 영어판이 맞습니다 (`.agents/rules/docs.md`). 설계를 바꿀 때는 두 문서를 같은 PR 에서 함께 고칩니다.
 
-> ## 개정 A10 (2026-10-06, 제안) — AES-128-GCM 과 AES-192-GCM
+> ## 개정 A10 (2026-10-06) — AES-128-GCM 과 AES-192-GCM
+>
+> **상태: AES-128 구현 완료, AES-192 는 할당만 되고 미구현.** `0x04`·`0x05` 가 출시되고,
+> `gcm.min_key_bytes` 가 권고 기본값 32 로 들어갔으며, `spec/envelope.md` 는 v2 다. `0x06`·`0x07` 은
+> 예약 상태로 남아 `bad_envelope` 로 거부된다. 남은 것: 이 개정이 요구하는 보안 검토 — `gcm.min_key_bytes`
+> 계약 4항, 수트 간 도메인 분리, AES-128 에 `gcm_encrypt_det` 를 제공할지. AES-128-GCM 의 NIST CAVP KAT
+> 는 아직 `spec/test-vectors.json` 에 없다. CAVP 아카이브를 `gen-vectors.py --rsp-dir` 로 넣어야 하고,
+> 그동안은 자체 벡터가 왕복·결정성·봉투 바이트를 덮는다.
 >
 > §2 와 개정 A1 은 수트를 AES-256-GCM 으로 고정한다. 봉인에 쓰는 cipher 는
 > `EVP_CIPHER_fetch("AES-256-GCM")` 하나뿐이고, 키는 정확히 32 바이트를 호출마다 검사한다.

@@ -8490,17 +8490,27 @@
       "plaintext_hex": "",
       "envelope_hex": "00b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_envelope",
-      "note": "unknown version byte is an error, never a NULL"
+      "note": "unimplemented or reserved version byte is an error, never a NULL"
     },
     {
-      "id": "bad-envelope-version-04",
+      "id": "bad-envelope-version-06",
       "kind": "det",
       "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
       "aad_hex": "",
       "plaintext_hex": "",
-      "envelope_hex": "04b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
+      "envelope_hex": "06b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_envelope",
-      "note": "unknown version byte is an error, never a NULL"
+      "note": "unimplemented or reserved version byte is an error, never a NULL"
+    },
+    {
+      "id": "bad-envelope-version-07",
+      "kind": "det",
+      "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "aad_hex": "",
+      "plaintext_hex": "",
+      "envelope_hex": "07b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
+      "expect": "bad_envelope",
+      "note": "unimplemented or reserved version byte is an error, never a NULL"
     },
     {
       "id": "bad-envelope-version-7f",
@@ -8510,7 +8520,7 @@
       "plaintext_hex": "",
       "envelope_hex": "7fb9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_envelope",
-      "note": "unknown version byte is an error, never a NULL"
+      "note": "unimplemented or reserved version byte is an error, never a NULL"
     },
     {
       "id": "bad-envelope-version-ff",
@@ -8520,7 +8530,7 @@
       "plaintext_hex": "",
       "envelope_hex": "ffb9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_envelope",
-      "note": "unknown version byte is an error, never a NULL"
+      "note": "unimplemented or reserved version byte is an error, never a NULL"
     },
     {
       "id": "bad-envelope-legacy-misaligned",
@@ -8553,6 +8563,53 @@
       "note": "v1 is unauthenticated and cannot bind an AAD (design A3)"
     },
     {
+      "id": "aes128-random-korean",
+      "kind": "random",
+      "key_hex": "030a11181f262d343b424950575e656c",
+      "nonce_hex": "000000000000000000000001",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "04000000000000000000000001e777cf1561a8b231c7287bfbd830621f9209ce98c60a6e1211",
+      "expect": "ok",
+      "note": "0x04: AES-128-GCM random, the key length selects the suite"
+    },
+    {
+      "id": "aes128-det-korean",
+      "kind": "det",
+      "key_hex": "030a11181f262d343b424950575e656c",
+      "nonce_key_hex": "2830948da4f8305e8555966310f2e84f5d3ff609754fc1d50f18a14687f340ae",
+      "nonce_hex": "305e0ed5680ae1d025321750",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "05305e0ed5680ae1d025321750e994328bfb663bfc8f5dcff26e7eaab92da58fa86552dcdcff",
+      "expect": "ok",
+      "note": "0x05: AES-128-GCM deterministic, same layout as 0x03"
+    },
+    {
+      "id": "aes128-det-empty",
+      "kind": "det",
+      "key_hex": "030a11181f262d343b424950575e656c",
+      "nonce_key_hex": "2830948da4f8305e8555966310f2e84f5d3ff609754fc1d50f18a14687f340ae",
+      "nonce_hex": "498c7ce0d6450dc7249347ab",
+      "aad_hex": "",
+      "plaintext_hex": "",
+      "envelope_hex": "05498c7ce0d6450dc7249347ab884a6f5b85af66681a503c7522ba3e7b",
+      "expect": "ok",
+      "note": "0x05 over an empty plaintext is still 29 bytes"
+    },
+    {
+      "id": "aes128-det-with-aad",
+      "kind": "det",
+      "key_hex": "030a11181f262d343b424950575e656c",
+      "nonce_key_hex": "2830948da4f8305e8555966310f2e84f5d3ff609754fc1d50f18a14687f340ae",
+      "nonce_hex": "ac289aaccafb3661fe0eb5fc",
+      "aad_hex": "70617469656e74732e6e616d65",
+      "plaintext_hex": "eab980ecb2a0ec8898",
+      "envelope_hex": "05ac289aaccafb3661fe0eb5fcb8b5da025fed88f49f8bcfc2418415438386b8b0591c114bc2",
+      "expect": "ok",
+      "note": "0x05 with an AAD; the AAD is not an input to the nonce (design §5.2)"
+    },
+    {
       "id": "bad-key-len-0",
       "kind": "det",
       "key_hex": "",
@@ -8560,17 +8617,37 @@
       "plaintext_hex": "ed998deab8b8eb8f99",
       "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_key_len",
-      "note": "0-byte key: error, never folded or padded to 32"
+      "note": "0-byte key: error, never folded or padded to a suite length"
     },
     {
-      "id": "bad-key-len-16",
+      "id": "bad-key-len-15",
       "kind": "det",
-      "key_hex": "000102030405060708090a0b0c0d0e0f",
+      "key_hex": "000102030405060708090a0b0c0d0e",
       "aad_hex": "",
       "plaintext_hex": "ed998deab8b8eb8f99",
       "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_key_len",
-      "note": "16-byte key: error, never folded or padded to 32"
+      "note": "15-byte key: error, never folded or padded to a suite length"
+    },
+    {
+      "id": "bad-key-len-17",
+      "kind": "det",
+      "key_hex": "000102030405060708090a0b0c0d0e0f10",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
+      "expect": "bad_key_len",
+      "note": "17-byte key: error, never folded or padded to a suite length"
+    },
+    {
+      "id": "bad-key-len-24",
+      "kind": "det",
+      "key_hex": "000102030405060708090a0b0c0d0e0f1011121314151617",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
+      "expect": "bad_key_len",
+      "note": "24-byte key: error, never folded or padded to a suite length"
     },
     {
       "id": "bad-key-len-31",
@@ -8580,7 +8657,7 @@
       "plaintext_hex": "ed998deab8b8eb8f99",
       "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_key_len",
-      "note": "31-byte key: error, never folded or padded to 32"
+      "note": "31-byte key: error, never folded or padded to a suite length"
     },
     {
       "id": "bad-key-len-33",
@@ -8590,7 +8667,7 @@
       "plaintext_hex": "ed998deab8b8eb8f99",
       "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_key_len",
-      "note": "33-byte key: error, never folded or padded to 32"
+      "note": "33-byte key: error, never folded or padded to a suite length"
     },
     {
       "id": "bad-key-len-64",
@@ -8600,7 +8677,27 @@
       "plaintext_hex": "ed998deab8b8eb8f99",
       "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
       "expect": "bad_key_len",
-      "note": "64-byte key: error, never folded or padded to 32"
+      "note": "64-byte key: error, never folded or padded to a suite length"
+    },
+    {
+      "id": "bad-key-len-suite-mismatch-256-envelope-128-key",
+      "kind": "det",
+      "key_hex": "030a11181f262d343b424950575e656c",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "03b9c3a065d8c76ea9d627c591bb12160661ad43902eb8263c49815e07483158555819839732",
+      "expect": "bad_key_len",
+      "note": "0x03 envelope read with a 16-byte key: bad_key_len, never bad_tag"
+    },
+    {
+      "id": "bad-key-len-suite-mismatch-128-envelope-256-key",
+      "kind": "det",
+      "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "aad_hex": "",
+      "plaintext_hex": "ed998deab8b8eb8f99",
+      "envelope_hex": "05305e0ed5680ae1d025321750e994328bfb663bfc8f5dcff26e7eaab92da58fa86552dcdcff",
+      "expect": "bad_key_len",
+      "note": "0x05 envelope read with a 32-byte key: bad_key_len, never bad_tag"
     }
   ]
 }

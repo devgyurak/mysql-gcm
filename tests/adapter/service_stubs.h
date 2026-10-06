@@ -84,6 +84,10 @@ std::vector<std::string> call_sequence();
    the name was never there, and only a state model can tell that from a refusal. */
 const std::set<std::string> &registered_udfs();
 bool sysvar_is_registered();
+/* Separate from sysvar_is_registered(): the component registers two variables as
+   a unit, and the branch where the second fails must roll the first back. One
+   accessor for both would make that branch untestable. */
+bool min_key_bytes_is_registered();
 
 /* One probe per fetched algorithm, each reaching it through the core's public API rather
    than a test-only accessor. They return the core's own Error, because collapsing to a bool

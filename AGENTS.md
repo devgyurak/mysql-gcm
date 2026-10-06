@@ -20,22 +20,29 @@ gcm_encrypt_det(plaintext, key [, aad])   -> BLOB     deterministic — joins, U
 gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 → native LIKE works
 ```
 
-- `key`: exactly 32 binary bytes. Any other length is an error (`AES_ENCRYPT`'s key folding is not
-  reproduced).
+- `key`: 32 binary bytes (AES-256) or 16 (AES-128). Any other length is an error (`AES_ENCRYPT`'s key
+  folding is not reproduced). **The key length selects the suite and nothing else does** (amendment
+  A10). AES-192 is allocated but not implemented, so 24 bytes is an error.
 - Deterministic nonce: `nonce_key = HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`,
   `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`.
 - Envelope (the normative definition is `spec/envelope.md`):
 
 ```
 0x01  legacy CBC (dual-read only; never produced)
-0x02  GCM random        : 0x02 || nonce(12) || ciphertext || tag(16)
-0x03  GCM deterministic : 0x03 || nonce(12) || ciphertext || tag(16)
+0x02  AES-256-GCM random        : 0x02 || nonce(12) || ciphertext || tag(16)
+0x03  AES-256-GCM deterministic : 0x03 || nonce(12) || ciphertext || tag(16)
+0x04  AES-128-GCM random        : same layout (amendment A10)
+0x05  AES-128-GCM deterministic : same layout (amendment A10)
+0x06  0x07  allocated to AES-192, NOT implemented -- rejected as bad_envelope
 ```
 
   The deterministic nonce is an HMAC of the plaintext and therefore cannot be recomputed at decryption
   time, so it is **stored** in the envelope (settled by amendment A2).
-- sysvar: `gcm.strict` (GLOBAL + SESSION, default ON). On a tag mismatch, ON gives an error and OFF
-  gives NULL. In my.cnf it is `loose_gcm.strict`. The session scope is 9.0+ only (amendment A5).
+- sysvars: `gcm.strict` (GLOBAL + SESSION, default ON) — on a tag mismatch, ON gives an error and OFF
+  gives NULL; the session scope is 9.0+ only (amendment A5). And `gcm.min_key_bytes` (GLOBAL, default
+  32) — the smallest key the two encryption functions accept, which is what keeps a truncated key
+  from silently selecting AES-128; decryption ignores it (amendment A10). In my.cnf both take the
+  `loose_` prefix.
 - Withdrawn (amendment A1): keyring integration, `gcm.key_id`, `gcm.nonce_key_id`, `gcm_key_id()`. If
   asked for one, turn it back into a proposal to amend the design.
 

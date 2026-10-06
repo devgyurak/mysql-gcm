@@ -16,10 +16,15 @@
 > **The performance gain has not been measured.** AES-128 runs fewer rounds than AES-256, so the cipher
 > itself is cheaper, but this project has no number for how much of that survives at the SQL level and
 > should not quote one. The load results in `docs/perf.md` compare GCM against the CBC builtin and say
-> nothing about AES-128 against AES-256. What they do establish is that the row scan dominates this
-> workload — the p95 ratio against the builtin is 0.80–0.95 — which makes a large end-to-end gain
-> unlikely a priori. `tests/bench` could answer it cheaply with a 128-bit reference case, and that
-> should happen before any performance claim is made for the smaller suites.
+> nothing about AES-128 against AES-256. Nor does a ratio near 0.9 between two ciphers establish how
+> much of the query the cipher accounts for: two ciphers of similar cost give the same ratio whether
+> that cost is large or small, so the row scan may or may not dominate and these numbers do not say
+> which.
+>
+> The measurement splits in two, and neither half answers the other's question. **`tests/bench` measures
+> the core difference between the suites** — it runs without a server, so it cannot speak to SQL at all.
+> **A load scenario measures the end-to-end SQL difference.** Both should exist before any performance
+> claim is made for the smaller suites.
 >
 > **The suite is selected by key length, and by nothing else.** 16 bytes → AES-128-GCM, 24 → AES-192,
 > 32 → AES-256. No new function argument, no new sysvar, no change to the call shape.
@@ -40,10 +45,13 @@
 > into an error; length inference has no stated intent to compare against. That is the same problem as
 > the cost section below, seen from the other side, and the two are to be read together.
 >
-> Length inference is still the choice here, on the condition that the cross-check is replaced rather
-> than dropped: `gcm.min_key_bytes`, defaulting to 32, puts the floor back where an explicit selector
-> would have caught the truncation. If that mitigation is not adopted, this decision should be revisited
-> in favour of the selector rather than shipped without either.
+> Length inference is still the choice here, on the condition that the truncation guard is kept rather
+> than dropped: `gcm.min_key_bytes`, defaulting to 32, preserves that guard for a deployment that leaves
+> the default alone. It is **not** equivalent to what a selector would give. A minimum-length policy is a
+> server-wide floor, not per-call verification of what a caller intended, and a mixed deployment that has
+> to lower the floor to accommodate one application loses the guard for all of them — see the contract
+> points below. If the mitigation is not adopted at all, this decision should be revisited in favour of
+> the selector rather than shipped without either.
 >
 > **Envelope: four new version bytes.** `spec/envelope.md` §7 freezes the existing bytes — a new format
 > is a new version byte, never a redefinition — so `0x02` and `0x03` keep meaning exactly AES-256-GCM.
@@ -68,9 +76,11 @@
 > and key-rotation tooling can tell what produced a row without holding the key.
 >
 > **The version byte determines the expected key length, and a mismatch is `bad_key_len`.** Decrypting
-> a `0x02` envelope with a 16-byte key is an error naming the mismatch, not a tag failure. This matters
-> because it is the one place a truncated key is still caught precisely; relying on the tag check would
-> report `bad_tag`, which tells an operator to suspect data corruption when the real problem is the key.
+> a `0x02` envelope with a 16-byte key is an error naming the mismatch, not a tag failure. What it buys
+> is exactly one distinction: **the key length the envelope requires disagrees with the key length
+> supplied**, told apart from a failed tag. Without it the same situation reports `bad_tag` and points an
+> operator at data corruption. It is not a truncation detector — the cost section below gives the case
+> where a truncated key goes unnoticed, and a corrupted version byte raises this same error.
 >
 > **What does not change:**
 >

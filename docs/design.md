@@ -6,6 +6,195 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A10 (2026-10-06, proposed) — AES-128-GCM and AES-192-GCM
+>
+> §2 and amendment A1 fix the suite at AES-256-GCM: `EVP_CIPHER_fetch("AES-256-GCM")` is the only
+> cipher fetched for sealing, and the key is exactly 32 bytes, checked on every call. This amendment
+> adds **AES-128-GCM and AES-192-GCM alongside it**. AES-256-GCM stays the default and the
+> recommendation; the smaller key sizes exist for interoperability and compliance, not for speed.
+>
+> **The performance gain has not been measured.** AES-128 runs fewer rounds than AES-256, so the cipher
+> itself is cheaper, but this project has no number for how much of that survives at the SQL level and
+> should not quote one. The load results in `docs/perf.md` compare GCM against the CBC builtin and say
+> nothing about AES-128 against AES-256. Nor does a ratio near 0.9 between two ciphers establish how
+> much of the query the cipher accounts for: two ciphers of similar cost give the same ratio whether
+> that cost is large or small, so the row scan may or may not dominate and these numbers do not say
+> which.
+>
+> The measurement splits in two, and neither half answers the other's question. **`tests/bench` measures
+> the core difference between the suites** — it runs without a server, so it cannot speak to SQL at all.
+> **A load scenario measures the end-to-end SQL difference.** Both should exist before any performance
+> claim is made for the smaller suites.
+>
+> **The suite is selected by key length, and by nothing else.** 16 bytes → AES-128-GCM, 24 → AES-192,
+> 32 → AES-256. No new function argument, no new sysvar, no change to the call shape.
+>
+> That is the central decision, and the trade-off it takes has to be stated precisely.
+>
+> An explicit selector — `gcm_encrypt(plaintext, key, suite)` — would **not** create a cross-call
+> consistency obligation of the kind A8 has to impose on AAD. The AES key lengths are fixed by
+> [FIPS 197](https://csrc.nist.gov/pubs/fips/197/final), so the component would reject any (suite, key
+> length) pair that disagrees — AES-128 with a 32-byte key is an immediate error, with no folding and no
+> truncation. There is exactly one valid key length per suite, so one key could not be used at two
+> strengths, and no new rule would land on the operator.
+>
+> What length inference actually buys is API simplicity: the call shape does not change, and there is no
+> fourth argument for an application to get wrong. What it gives up is the **cross-check** — the chance
+> to compare the suite the caller intended against the key that actually arrived. "I meant AES-256 and
+> my key was truncated to 16 bytes" is a disagreement between intent and key, and a selector turns it
+> into an error; length inference has no stated intent to compare against. That is the same problem as
+> the cost section below, seen from the other side, and the two are to be read together.
+>
+> Length inference is still the choice here, on the condition that the truncation guard is kept rather
+> than dropped: `gcm.min_key_bytes`, defaulting to 32, preserves that guard for a deployment that leaves
+> the default alone. It is **not** equivalent to what a selector would give. A minimum-length policy is a
+> server-wide floor, not per-call verification of what a caller intended, and a mixed deployment that has
+> to lower the floor to accommodate one application loses the guard for all of them — see the contract
+> points below. If the mitigation is not adopted at all, this decision should be revisited in favour of
+> the selector rather than shipped without either.
+>
+> **Envelope: four new version bytes.** `spec/envelope.md` §7 freezes the existing bytes — a new format
+> is a new version byte, never a redefinition — so `0x02` and `0x03` keep meaning exactly AES-256-GCM.
+>
+> ```
+> 0x02  AES-256-GCM random          (unchanged)
+> 0x03  AES-256-GCM deterministic   (unchanged)
+> 0x04  AES-128-GCM random
+> 0x05  AES-128-GCM deterministic
+> 0x06  AES-192-GCM random
+> 0x07  AES-192-GCM deterministic
+> ```
+>
+> The layout of each is identical to `0x02`/`0x03` — `version(1) || nonce(12) || ciphertext || tag(16)`,
+> so plaintext + 29 bytes. Only the version byte and the key length differ. The even/odd split of
+> random/deterministic that `0x02`/`0x03` started continues, which is a readability property and not
+> something an implementation may rely on: the mapping is a table, not arithmetic.
+>
+> Recording the suite in the envelope is not strictly necessary — the key the caller supplies at
+> decryption already determines it — but the envelope stays **self-describing**, which is the same
+> choice A2 made when it stored the deterministic nonce rather than recomputing it. Migration, audit
+> and key-rotation tooling can tell what produced a row without holding the key.
+>
+> **The version byte determines the expected key length, and a mismatch is `bad_key_len`.** Decrypting
+> a `0x02` envelope with a 16-byte key is an error naming the mismatch, not a tag failure. What it buys
+> is exactly one distinction: **the key length the envelope requires disagrees with the key length
+> supplied**, told apart from a failed tag. Without it the same situation reports `bad_tag` and points an
+> operator at data corruption. It is not a truncation detector — the cost section below gives the case
+> where a truncated key goes unnoticed, and a corrupted version byte raises this same error.
+>
+> **What does not change:**
+>
+> - The deterministic nonce derivation and its label.
+>   `nonce_key = HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` stays byte for byte, for every key length,
+>   and the label is frozen by `spec/envelope.md` §7.
+>
+>   Changing it would **not** break decryption of existing data. A2 stores the nonce in the envelope
+>   precisely so decryption never recomputes it. What it would break is that re-encrypting the same
+>   input stops reproducing the existing ciphertext — which is the entire value of the deterministic
+>   variant, so what is at stake is JOIN, UNIQUE and exact-match continuity. Keep the label; the reason
+>   is continuity, not decryptability.
+>
+>   HMAC-SHA256 accepts a key of any length, so no new derivation is mechanically required. It does
+>   **not** follow that different key lengths are separated from one another.
+>   [RFC 2104 §2](https://www.rfc-editor.org/rfc/rfc2104.html#section-2) zero-pads a key shorter than
+>   the 64-byte block, so a 16-byte key `K` and the 32-byte key `K ‖ 0¹⁶` derive the **identical** nonce
+>   key, and therefore the identical nonce for the same plaintext. Verified rather than assumed. That
+>   pair is not itself a GCM nonce reuse — the two AES keys differ, and GCM's catastrophic case is one
+>   nonce under one key — but "different lengths separate the domains" is not an argument that is
+>   available, and whether the new suites need explicit domain separation belongs to the security review
+>   below rather than to this amendment.
+> - The tag length (16) and the nonce length (12), for all three suites.
+> - The strict semantics, the failure codes, and the AAD rules.
+> - The legacy `0x01` CBC path, which stays AES-256-CBC and decrypt-only (see the open question below).
+> - Deterministic JOIN and UNIQUE behaviour. Ciphertext is comparable only under the same key, and a key
+>   has exactly one length, so the existing "same key, same AAD" requirement already covers it. No new
+>   operational rule follows from this amendment.
+>
+> **The cost, stated plainly.** Today `key.size != 32` is an error, which means a key that was truncated
+> in transit — by a client bug, a bad environment variable, a mis-sliced buffer — fails loudly. After
+> this amendment, a 32-byte key truncated to 16 is a *valid AES-128 key*, and `gcm_encrypt` will seal
+> with it and report success. The data is encrypted at a lower strength than intended and nothing says
+> so.
+>
+> **Nor is it reliably caught later.** Decryption only reveals it when someone reads with the key that
+> was intended: a writer and a reader both using the same truncated 16-byte key agree with the `0x04`
+> envelope and both keep succeeding indefinitely. The mismatch surfaces the first time the original
+> 32-byte key is used against that row, which may be a backup restore, a migration, or never.
+>
+> The `bad_key_len` distinction above is still worth having, but read it for what it is: a statement
+> that the envelope and the supplied key disagree about length. It is not evidence that a key was
+> truncated — a corrupted version byte produces the same signal.
+>
+> This is the real price of the feature and it cannot be designed away while the key length is the
+> selector. Two mitigations are possible and the choice between them is **not settled here**:
+>
+> 1. A sysvar — `gcm.min_key_bytes` (default 32, settable to 24 or 16) — so a deployment that does not
+>    intend to use the smaller suites refuses them at the server. This keeps the current behaviour as
+>    the default: an installation that does nothing sees no change, and a truncated key still fails
+>    loudly. The cost is one more sysvar and the 8.0/8.4 GLOBAL-only scope problem of amendment A5.
+>
+>    Adopting it means settling its contract first, and these are not implementation details:
+>
+>    - **It applies to new encryption, not to decryption of existing data.** Otherwise raising the
+>      policy from 16 to 32 locks out exactly the rows that have to be read in order to be re-encrypted.
+>    - **Administrator policy, or a mistake guard?** If a session can lower it at will it is the latter
+>      and must not be described as the former. A5 already constrains the answer, since the variable is
+>      GLOBAL-only on 8.0 and 8.4.
+>    - **On a GLOBAL-only server, lowering it for one application removes the guard for every
+>      application on that server.** The default protects an existing deployment; it cannot express a
+>      mixed deployment's intent.
+>    - **The error raised on a policy violation, and the behaviour when the setting cannot be read**,
+>      both have to be decided. Fail closed is the established pattern for the second (A5).
+> 2. Nothing in the component, with the expectation documented as an operational constraint.
+>
+> Option 1 is the recommendation, precisely because it makes this amendment **opt-in** rather than a
+> silent weakening of an existing deployment's guarantees. It needs a security review before it is
+> settled, as amendment A8 requires for anything touching key policy.
+>
+> **Out of scope, deliberately:** the legacy `0x01` CBC envelope stays AES-256-CBC. A deployment
+> currently running `block_encryption_mode = 'aes-128-cbc'` therefore still cannot dual-read its data,
+> which is a real gap and a separate question — it concerns reading existing `AES_ENCRYPT` output, not
+> producing GCM. If it is wanted it needs its own amendment and its own version bytes, and it should be
+> decided on migration evidence rather than bundled here.
+>
+> **Sequencing.** This lands after 0.1.0 is tagged, as 0.2.0. The envelope is frozen for 0.1.0 and the
+> release pipeline has been dry-run against it; adding version bytes is backward compatible — every
+> 0.1.0 envelope still decodes, and a 0.1.0 component rejects `0x04`–`0x07` with `bad_envelope` as
+> `spec/envelope.md` §2.4 requires — but it is a spec version bump and does not belong in a release
+> that is one tag away.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `spec/envelope.md` | v2: the four new version bytes, the key-length-per-version table, the `bad_key_len` rule on mismatch |
+> | `spec/test-vectors.json` | NIST CAVP KAT for AES-128-GCM and AES-192-GCM at IVlen 96 / Taglen 128, plus project vectors for the new version bytes |
+> | `src/gcm.{h,cc}` | fetch three ciphers in `crypto_init`, select by key length, release all three in `crypto_deinit` |
+> | `src/envelope.{h,cc}` | the new version constants and their key lengths; parsing is otherwise unchanged |
+> | `src/udf_glue.cc` | accept {16, 24, 32}; the error message currently names 32 |
+> | `src/nonce.cc` | the key length check; the derivation itself is unchanged |
+> | `src/sysvar.{h,cc}` | `gcm.min_key_bytes`, if mitigation 1 is adopted |
+> | `tests/unit` | KAT for all three suites; key lengths 0, 15, 17, 23, 25, 31, 33; version/key mismatch |
+> | `tests/adapter` | `crypto_init` partial-fetch failure now has three handles to roll back |
+> | `tests/integration`, `mysql-test` | round trip and Korean LIKE per suite; the mismatch error |
+> | `tests/bench` | the three suites against their own bare-EVP references |
+> | README, `docs/ops-constraints.md` | the truncated-key exposure, and which suite each version byte is |
+>
+> **Open questions this amendment does not answer:**
+>
+> - Mitigation 1 or 2 (above), pending security review — and, if 1, the four contract points listed with
+>   it.
+> - **Whether the new suites need explicit domain separation in the nonce derivation.** The label is
+>   shared across all three, and the zero-padding property above means a short key and its zero-extension
+>   derive the same nonce key. No attack follows from that pair on its own, but the question belongs to
+>   the same security review rather than to an implementation PR.
+> - Whether `gcm_encrypt_det` should be offered at all for AES-128. The deterministic nonce is
+>   HMAC-SHA256 truncated to 96 bits regardless of suite, so the collision bound in §5.2 is unchanged by
+>   key size — but the argument for using a 128-bit key in a construction whose whole point is long-term
+>   stored ciphertext deserves to be made explicitly rather than inherited.
+> - Whether to expose the suite in SQL at all, for example a `gcm_envelope_version(ciphertext)` helper.
+>   That is a new public function and belongs to its own amendment.
+
 > ## Amendment A9 (2026-10-02, settled) — registrations that survive a failed install, and registration order
 >
 > When `gcm_component_init()` returns 1 during `INSTALL COMPONENT`, the loader rolls back and its scope

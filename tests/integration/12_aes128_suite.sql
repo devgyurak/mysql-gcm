@@ -47,7 +47,20 @@ SELECT '# When: a 16-byte key is used to encrypt';
 SELECT gcm_encrypt('홍길동', @k128) AS below_floor;
 SELECT '# Then: refused by policy — the feature is opt-in (errors below)';
 
-SELECT '# Scenario 7 — Given: the floor is 32 but AES-128 data already exists';
+SELECT '# Scenario 7 — Given: a tampered AES-128 envelope and strict ON';
+SET @bad128 = CONCAT(LEFT(@e128, LENGTH(@e128)-1), UNHEX('FF'));
+SET GLOBAL gcm.strict = ON;  -- GLOBAL: session scope is 9.0+ only (design A5), and 31_strict_scope covers it
+SELECT '# When: it is decrypted';
+SELECT gcm_decrypt(@bad128, @k128) AS strict_on;
+SELECT '# Then: an error — tag verification is not suite-specific (errors below)';
+
+-- The strict=OFF half lives in mysql-test/suite/gcm/t/gcm_aes128.test instead.
+-- SET GLOBAL reaches the current session on 8.0/8.4 but not on 9.x, where the
+-- session holds its own value (design A5), so putting it here would split this
+-- case into per-major expected files for a difference that has nothing to do
+-- with the suite. MTR runs 8.4 only, so it can set the scope and assert the NULL.
+
+SELECT '# Scenario 9 — Given: the floor is 32 but AES-128 data already exists';
 SELECT '# When: it is decrypted';
 SELECT gcm_decrypt(@e128, @k128) AS decrypt_ignores_floor;
 SELECT '# Then: the plaintext — raising the floor never locks out data (above)';

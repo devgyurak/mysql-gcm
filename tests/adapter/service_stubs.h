@@ -59,6 +59,10 @@ void install();
 /* Clears recorded calls and failure rules. Call at the start of every case. */
 void reset();
 
+/* Overrides what a sysvar read returns, keyed by "component.name" (for example
+   "gcm.min_key_bytes" -> "notanumber"). Cleared by reset(). */
+void set_sysvar_value(const std::string &name, const std::string &value);
+
 /* Clears the modelled registration state. Separate from reset() because a case often
    wants to drop its failure rules while keeping what is installed. */
 void forget_registrations();

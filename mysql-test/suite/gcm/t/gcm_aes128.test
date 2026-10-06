@@ -1,0 +1,75 @@
+# AES-128-GCM: the key length selects the suite, and gcm.min_key_bytes is the
+# floor that keeps a truncated key from silently choosing a weaker one (design A10).
+--source suite/gcm/include/gcm_install.inc
+
+SET @k128 = UNHEX('0310171e252c333a41484f565d646b72');
+
+--echo # Given: the floor at its default, which is AES-256 only
+SELECT @@global.gcm.min_key_bytes AS floor_default;
+--echo # When: a 16-byte key is used to encrypt
+--error ER_UDF_ERROR
+SELECT gcm_encrypt('홍길동', @k128);
+--echo # Then: refused by policy — the smaller suites are opt-in
+
+--echo # Given: the floor lowered to allow AES-128
+SET GLOBAL gcm.min_key_bytes = 16;
+--echo # When: the same plaintext is sealed under each key length
+SELECT HEX(LEFT(gcm_encrypt('홍길동', @k), 1))        AS random_256_version,
+       HEX(LEFT(gcm_encrypt('홍길동', @k128), 1))     AS random_128_version,
+       HEX(LEFT(gcm_encrypt_det('홍길동', @k), 1))    AS det_256_version,
+       HEX(LEFT(gcm_encrypt_det('홍길동', @k128), 1)) AS det_128_version;
+--echo # Then: 02 / 04 / 03 / 05 — the version byte follows the key
+
+--echo # Given: an AES-128 envelope
+--echo # When: it is round-tripped and matched with native LIKE
+SELECT gcm_decrypt(gcm_encrypt_det('홍길동', @k128), @k128) LIKE '%길%' AS korean_like,
+       CHARSET(gcm_decrypt(gcm_encrypt('홍길동', @k128), @k128)) AS result_charset,
+       LENGTH(gcm_encrypt_det('홍길동', @k128)) AS envelope_length;
+--echo # Then: 1, utf8mb4 and 38 = 9 + 29 — the same layout as AES-256
+
+--echo # Given: deterministic values under the two suites
+--echo # When: they are compared
+SELECT gcm_encrypt_det('EMR-001', @k128) = gcm_encrypt_det('EMR-001', @k128) AS det_128_stable,
+       gcm_encrypt_det('EMR-001', @k) = gcm_encrypt_det('EMR-001', @k128) AS joins_across_suites;
+--echo # Then: 1 and 0 — ciphertext never joins across suites
+
+--echo # Given: an envelope and a key that disagree about the suite
+SET @e256 = gcm_encrypt_det('홍길동', @k);
+SET @e128 = gcm_encrypt_det('홍길동', @k128);
+--echo # When: each is decrypted with the other suite's key
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@e256, @k128);
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@e128, @k);
+--echo # Then: bad_key_len both ways, never bad_tag — a key problem reported as one
+
+--echo # Given: a 24-byte key; AES-192 is allocated by A10 and not implemented
+--echo # When: it is used to encrypt
+--error ER_UDF_ERROR
+SELECT gcm_encrypt('홍길동', UNHEX('000102030405060708090a0b0c0d0e0f1011121314151617'));
+--echo # Then: an error — never folded into a neighbouring suite
+
+--echo # Given: a tampered 0x05 envelope and strict ON
+SET @bad128 = CONCAT(LEFT(@e128, LENGTH(@e128)-1), UNHEX('FF'));
+--echo # When: it is decrypted
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@bad128, @k128);
+--echo # Then: an error — tag verification is not suite-specific
+
+--echo # Given: the same envelope with strict OFF
+--echo # (this half is here rather than in tests/integration because SET GLOBAL
+--echo #  reaches the current session on 8.0/8.4 but not on 9.x, where the session
+--echo #  holds its own value (design A5); MTR is 8.4-only so the scope is unambiguous)
+SET GLOBAL gcm.strict = OFF;
+--echo # When: it is decrypted
+SELECT gcm_decrypt(@bad128, @k128) IS NULL AS strict_off_null;
+--echo # Then: 1 — NULL, exactly the AES-256 semantics
+SET GLOBAL gcm.strict = DEFAULT;
+
+--echo # Given: AES-128 data written while the floor was low, and the floor raised back
+SET GLOBAL gcm.min_key_bytes = DEFAULT;
+--echo # When: that data is decrypted
+SELECT gcm_decrypt(@e128, @k128) AS decrypt_ignores_floor;
+--echo # Then: the plaintext — raising the floor never locks out data
+
+--source suite/gcm/include/gcm_uninstall.inc

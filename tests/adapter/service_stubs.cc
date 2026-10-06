@@ -3,6 +3,7 @@
 
 #include <cstdarg>
 #include <cstring>
+#include <map>
 
 #include <mysql/components/component_implementation.h>
 #include <mysql/components/services/component_sys_var_service.h>
@@ -46,6 +47,11 @@ std::set<std::string> g_registered_udfs;
    unit (gcm.strict and gcm.min_key_bytes, design A10), and the branch where the
    second fails has to roll the first back. A single bool cannot see that. */
 std::set<std::string> g_registered_vars;
+
+/* Overrides for what a read returns, by "component.name". Without this a test
+   cannot drive the parsing side of min_key_bytes() at all, and a regression that
+   answered 16 on a malformed value would pass unnoticed. */
+std::map<std::string, std::string> g_sysvar_values;
 
 /* Returns the matching rule, or nullptr. Counts only calls already recorded for this
    method+detail, so `nth` is 1-based over the sequence the component produces. */
@@ -124,9 +130,12 @@ DEFINE_BOOL_METHOD(stub_register_variable,
    component. */
 bool write_sysvar_value(const std::string &name, void **val, size_t *out_length_of_val) {
   /* The SHOW form of each variable: a bool renders as ON/OFF and an int as its
-     digits, which is what the component parses. */
-  const char *value = name == "gcm.min_key_bytes" ? "32" : "ON";
-  const size_t len = std::strlen(value);
+     digits, which is what the component parses. A test may override either. */
+  const auto override_it = g_sysvar_values.find(name);
+  const std::string fallback = name == "gcm.min_key_bytes" ? "32" : "ON";
+  const std::string &stored = override_it != g_sysvar_values.end() ? override_it->second : fallback;
+  const char *value = stored.c_str();
+  const size_t len = stored.size();
   if (val == nullptr || *val == nullptr || out_length_of_val == nullptr) return true;
   if (*out_length_of_val < len + 1) {
     *out_length_of_val = len + 1;
@@ -154,7 +163,13 @@ DEFINE_BOOL_METHOD(stub_get_variable, (const char *component_name, const char *n
 DEFINE_BOOL_METHOD(stub_unregister_variable, (const char *component_name, const char *name)) {
   const std::string detail = std::string(component_name) + "." + name;
   if (record_and_decide("unregister_variable", detail.c_str(), nullptr)) return true;
-  g_registered_vars.erase(detail);
+  /* The real service fails for a variable it does not have — measured on 8.4,
+     where mysql_component_sys_variable_imp::unregister_variable looks the name up
+     and returns true when it is absent. Returning success here hid a defect: the
+     component attempted both unregisters unconditionally, so a refused UNINSTALL
+     that had already removed one left every retry failing on the one that was
+     gone. Modelling the real behaviour is what makes that testable. */
+  if (g_registered_vars.erase(detail) == 0) return true;
   return false;
 }
 
@@ -221,6 +236,11 @@ void install() {
 void reset() {
   g_calls.clear();
   g_rules.clear();
+  g_sysvar_values.clear();
+}
+
+void set_sysvar_value(const std::string &name, const std::string &value) {
+  g_sysvar_values[name] = value;
 }
 
 void forget_registrations() {

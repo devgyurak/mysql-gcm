@@ -355,6 +355,44 @@ def project_vectors() -> list[dict[str, Any]]:
         )
     )
 
+    # --- AES-128 tampering: the 0x05 path, which the CAVP files do not reach ----
+    # The imported CAVP decrypt-failure cases are all 0x04 (random nonce), so the
+    # deterministic AES-128 envelope would otherwise have no authentication-failure
+    # coverage at all.
+    good128 = bytes.fromhex(
+        str(next(v for v in out if v["id"] == "aes128-det-korean")["envelope_hex"])
+    )
+    aes128_tamper = [
+        ("bad-tag-aes128-last-byte", flip_last_bit(good128, len(good128) - 1), "tag bit flipped"),
+        ("bad-tag-aes128-nonce-flip", flip_last_bit(good128, 1), "nonce bit flipped"),
+        ("bad-tag-aes128-ct-flip", flip_last_bit(good128, 13), "ciphertext bit flipped"),
+    ]
+    for vid, env, note in aes128_tamper:
+        out.append(
+            vec(
+                id=vid,
+                kind="det",
+                key_hex=KEY_128.hex(),
+                aad_hex="",
+                plaintext_hex="",
+                envelope_hex=env.hex(),
+                expect="bad_tag",
+                note=f"0x05 envelope, {note}",
+            )
+        )
+    out.append(
+        vec(
+            id="bad-tag-aes128-wrong-key",
+            kind="det",
+            key_hex=bytes((b * 11 + 5) % 256 for b in range(16)).hex(),
+            aad_hex="",
+            plaintext_hex="",
+            envelope_hex=good128.hex(),
+            expect="bad_tag",
+            note="0x05 envelope, a different 16-byte key: authentication, not garbage plaintext",
+        )
+    )
+
     # --- failure: key length ---------------------------------------------------
     # 16 is no longer here: it is a valid AES-128 key (design A10). 15 and 17
     # bracket it, and 24 pins that AES-192 is NOT implemented -- the suite table

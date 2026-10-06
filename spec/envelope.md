@@ -150,9 +150,14 @@ Every remaining version byte (`0x00`, `0x08`–`0xFF`) is unassigned. A decrypto
 
 ## 3. Key and nonce derivation
 
-The key is an argument, exactly 32 bytes (AES-256). Any other length is an error
-(`bad_key_len`) — implementations MUST NOT fold, hash, truncate or pad a key to length, which is
-precisely the `AES_ENCRYPT` weakness this project does not reproduce.
+The key is an argument, 32 bytes (AES-256) or 16 (AES-128); §2.5 maps each length to its suite and
+its version bytes. Any other length is an error (`bad_key_len`) — implementations MUST NOT fold,
+hash, truncate or pad a key to length, which is precisely the `AES_ENCRYPT` weakness this project
+does not reproduce.
+
+The derivation below is byte-identical for every suite, including its label. That does **not** make
+the suites domain-separated from one another — see §2.5 — and no implementation may treat key length
+as separation.
 
 The deterministic nonce uses a separate, domain-separated key:
 
@@ -311,11 +316,14 @@ How a suite MUST consume a vector:
 | `ok`, kind `legacy` | `decrypt(envelope, key, aad) == pt` only — encryption of v1 does not exist |
 | `bad_tag` | `decrypt` raises the tag error (server: error under `strict=ON`, NULL under OFF) |
 | `bad_envelope` | `decrypt` raises the envelope error under **both** strict settings |
-| `bad_key_len` | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
+| `bad_key_len`, key length no suite has | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
+| `bad_key_len`, key length valid but disagreeing with the envelope's version | `decrypt` raises it. `encrypt` and `encrypt_det` **succeed** — they have no envelope to disagree with, and the key is a perfectly good key for its own suite. A conformance runner MUST NOT feed these to the encryption entry points |
 
-Current contents: 750 NIST CAVP cases (`[Keylen=256][IVlen=96][Taglen=128]` from
-`gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp`, 191 of them authentication failures) and 33
-project cases. Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
+Current contents: 1500 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 from
+`gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp` (191 of them authentication failures) and
+750 from `gcmEncryptExtIV128.rsp` and `gcmDecrypt128.rsp` (196 authentication
+failures) — plus 46 project cases. The CAVP files for AES-192 are deliberately not imported:
+`0x06` and `0x07` are allocated and unimplemented (§2.6). Regenerate with `scripts/gen-vectors.py --rsp-dir <unzipped CAVP dir>`; verify with
 `scripts/gen-vectors.py --check` (CI does this).
 
 ## 7. Versioning of this document

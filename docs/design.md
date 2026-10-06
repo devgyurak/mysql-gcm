@@ -10,12 +10,31 @@
 >
 > **Status: AES-128 implemented; AES-192 allocated and not implemented.** `0x04` and `0x05` ship,
 > `gcm.min_key_bytes` ships with the recommended default of 32, and `spec/envelope.md` is at v2.
-> `0x06` and `0x07` stay reserved and are rejected as `bad_envelope`. Still open: the security review
-> this amendment asks for, which covers the four `gcm.min_key_bytes` contract points, domain
-> separation between the suites, and whether `gcm_encrypt_det` should be offered for AES-128 at all.
-> The NIST CAVP KAT for AES-128-GCM is not in `spec/test-vectors.json` yet — it needs the CAVP
-> archive through `gen-vectors.py --rsp-dir`, and the project vectors cover the round trip,
-> determinism and envelope bytes in the meantime.
+> `0x06` and `0x07` stay reserved and are rejected as `bad_envelope`. The NIST CAVP KAT is imported
+> for both suites: 750 AES-256 cases (191 authentication failures) and 750 AES-128 (196).
+>
+> **Decided here, and why, since shipping `0x05` means deciding them:**
+>
+> - **`gcm_encrypt_det` is offered for AES-128.** The deterministic nonce is HMAC-SHA256 truncated to
+>   96 bits regardless of suite, so the §5.2 collision bound does not move with key size, and the
+>   construction's exposure — equality, frequency, length — is the same one AES-256 already has. What
+>   a 128-bit key changes is the cipher's own margin, which is a key-strength decision the operator
+>   makes by choosing the key length, not one this component should make for them by withholding a
+>   variant. Withholding it would also be incoherent: `gcm_encrypt` at 128 bits would still be
+>   available, and a deployment that wanted determinism would be pushed to a *worse* answer, such as
+>   a hash column.
+> - **The suites share one derivation label, and that is accepted rather than fixed.** Changing the
+>   label per suite would make `0x03` and `0x05` incomparable in a way nothing requires, and would
+>   invalidate reproducibility for existing deterministic data if it were ever applied retroactively.
+>   The zero-padding property below means key length is not separation, so the rule is stated in
+>   `spec/envelope.md` §2.5 as something implementations must not rely on. No attack follows from
+>   it on its own: the two AES keys differ, and GCM's catastrophic case is one nonce under one key.
+>
+> **Still open, for the security review this amendment asks for:** whether the shared label should
+> become per-suite in a future spec version, and the four `gcm.min_key_bytes` contract points — of
+> which three are answered by the implementation (encryption only, GLOBAL-only, fail closed to 32)
+> and the fourth, the violation error, is a message distinct from `bad_key_len`. The review is to
+> confirm those choices, not to discover them.
 >
 > §2 and amendment A1 fix the suite at AES-256-GCM: `EVP_CIPHER_fetch("AES-256-GCM")` is the only
 > cipher fetched for sealing, and the key is exactly 32 bytes, checked on every call. This amendment

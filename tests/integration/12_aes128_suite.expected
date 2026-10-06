@@ -21,7 +21,10 @@
 32
 # When: a 16-byte key is used to encrypt
 # Then: refused by policy — the feature is opt-in (errors below)
-# Scenario 7 — Given: the floor is 32 but AES-128 data already exists
+# Scenario 7 — Given: a tampered AES-128 envelope and strict ON
+# When: it is decrypted
+# Then: an error — tag verification is not suite-specific (errors below)
+# Scenario 9 — Given: the floor is 32 but AES-128 data already exists
 # When: it is decrypted
 홍길동
 # Then: the plaintext — raising the floor never locks out data (above)
@@ -30,3 +33,4 @@ ERROR 3200 (HY000) at line 34: gcm_decrypt UDF failed; key must be 32 bytes (AES
 ERROR 3200 (HY000) at line 35: gcm_decrypt UDF failed; key must be 32 bytes (AES-256) or 16 (AES-128), and on decryption must match the envelope version; got 32
 ERROR 3200 (HY000) at line 40: gcm_encrypt UDF failed; key must be 32 bytes (AES-256) or 16 (AES-128), and on decryption must match the envelope version; got 24
 ERROR 3200 (HY000) at line 47: gcm_encrypt UDF failed; key of 16 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 54: gcm_decrypt UDF failed; authentication tag verification failed

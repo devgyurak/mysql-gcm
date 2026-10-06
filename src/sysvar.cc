@@ -58,6 +58,28 @@ bool g_strict = true;
    min_key_bytes() for why the value goes through the service instead. */
 int g_min_key_bytes = static_cast<int>(kKeyLen256);
 
+/* Which of the two are registered right now. The server fails an unregister of a
+   variable it does not have, so attempting one unconditionally turns a retry into
+   a permanent failure: UNINSTALL removes gcm.strict, the floor refuses, the
+   component stays loaded, and every later UNINSTALL then fails on the strict that
+   is already gone. Tracking the state is what makes a refused uninstall retryable
+   (architecture rule §3: "track which releases succeeded so a retry does not
+   double-free"). */
+bool g_strict_registered = false;
+bool g_floor_registered = false;
+
+/* Unregisters one variable if it is registered, and clears its flag on success.
+   Returns true on failure, the MySQL convention. A variable that is not
+   registered is already in the wanted state, so that is success, not a call. */
+bool drop(const char *name, bool *registered) {
+  if (!*registered) return false;
+  if (mysql_service_component_sys_variable_unregister->unregister_variable(kComponent, name)) {
+    return true;
+  }
+  *registered = false;
+  return false;
+}
+
 /* Parses the SHOW representation of an integer sysvar. Returns false when the
    buffer is not a plain decimal number that fits the registered range, which the
    caller turns into the strictest answer rather than a guess. */
@@ -86,13 +108,15 @@ bool register_strict() {
   flags |= PLUGIN_VAR_THDLOCAL;  // 9.0.0+ only — see sysvar.h
 #endif
 
-  return mysql_service_component_sys_variable_register->register_variable(
+  const bool failed = mysql_service_component_sys_variable_register->register_variable(
       kComponent, kStrict, flags,
       "Raise an error (ON, default) or return NULL (OFF) when GCM tag "
       "verification fails. Malformed envelopes and wrong key lengths are "
       "always errors.",
       nullptr /* check */, nullptr /* update */, static_cast<void *>(&arg),
       static_cast<void *>(&g_strict));
+  if (!failed) g_strict_registered = true;
+  return failed;
 }
 
 bool register_min_key_bytes() {
@@ -107,13 +131,15 @@ bool register_min_key_bytes() {
   arg.max_val = static_cast<int>(kKeyLen256);
   arg.blk_sz = 0;
 
-  return mysql_service_component_sys_variable_register->register_variable(
+  const bool failed = mysql_service_component_sys_variable_register->register_variable(
       kComponent, kMinKeyBytes, PLUGIN_VAR_INT,
       "Smallest key, in bytes, that gcm_encrypt and gcm_encrypt_det will accept "
       "(32 = AES-256 only, the default; 16 also allows AES-128). Decryption is "
       "not affected, so lowering and then raising this never locks out data.",
       nullptr /* check */, nullptr /* update */, static_cast<void *>(&arg),
       static_cast<void *>(&g_min_key_bytes));
+  if (!failed) g_floor_registered = true;
+  return failed;
 }
 }  // namespace
 
@@ -132,22 +158,37 @@ bool sysvar_register(bool *fully_rolled_back) {
        Discarding it here was a real defect, caught by
        GivenTheFloorFailsAndStrictWillNotUnregister_WhenInit_ThenAlgorithmsAreKept
        — the same shape as the discarded result that issue #7 was opened for. */
-    *fully_rolled_back =
-        !mysql_service_component_sys_variable_unregister->unregister_variable(kComponent, kStrict);
+    *fully_rolled_back = !drop(kStrict, &g_strict_registered);
     return true;
   }
   return false;
 }
 
 bool sysvar_unregister() {
-  /* Both are attempted and the failures combined, so one refusal does not leave
-     the other registered — on this path the library is about to be unmapped
-     (design A9). */
-  const bool strict_failed =
-      mysql_service_component_sys_variable_unregister->unregister_variable(kComponent, kStrict);
-  const bool floor_failed = mysql_service_component_sys_variable_unregister->unregister_variable(
-      kComponent, kMinKeyBytes);
-  return strict_failed || floor_failed;
+  /* The floor comes out first so that a refusal leaves the pair in a state a
+     retry can act on. If the floor refuses, nothing has been removed yet and the
+     component is exactly as it was. If it succeeds and strict then refuses, the
+     floor is re-registered before returning, so the component that stays loaded
+     keeps both variables and the next UNINSTALL starts from the same place this
+     one did.
+
+     Each call is guarded by the state flag, because the server fails an
+     unregister of a variable it does not have — attempting one unconditionally
+     is what would turn a single refusal into a component that can never be
+     uninstalled. */
+  if (drop(kMinKeyBytes, &g_floor_registered)) return true;
+  if (drop(kStrict, &g_strict_registered)) {
+    /* Put the floor back. A component that survives a refused UNINSTALL must be
+       whole: leaving it without its floor would mean gcm.min_key_bytes silently
+       stops existing while the functions still run, and min_key_bytes() would
+       then fail closed to 32 for every statement — a configuration the operator
+       set, quietly discarded. If this re-registration also fails the component is
+       loaded and incomplete until a restart, which is the same unrecoverable
+       corner gcm_component_deinit documents for the functions. */
+    (void)register_min_key_bytes();
+    return true;
+  }
+  return false;
 }
 
 size_t min_key_bytes() {

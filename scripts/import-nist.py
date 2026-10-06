@@ -23,9 +23,24 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-ENCRYPT_RSP = "gcmEncryptExtIV256.rsp"
-DECRYPT_RSP = "gcmDecrypt256.rsp"
-WANTED = {"Keylen": "256", "IVlen": "96", "Taglen": "128"}
+# One entry per suite (design A10). The version byte is a function of the key
+# length, so the importer carries it alongside the file names rather than
+# hardcoding 0x02 the way the single-suite version did.
+SUITES = (
+    {
+        "bits": "256",
+        "encrypt": "gcmEncryptExtIV256.rsp",
+        "decrypt": "gcmDecrypt256.rsp",
+        "version": "02",
+    },
+    {
+        "bits": "128",
+        "encrypt": "gcmEncryptExtIV128.rsp",
+        "decrypt": "gcmDecrypt128.rsp",
+        "version": "04",
+    },
+)
+WANTED_IV_TAG = {"IVlen": "96", "Taglen": "128"}
 
 
 @dataclass(frozen=True)
@@ -67,46 +82,48 @@ def parse_rsp(path: Path) -> list[Case]:
             key, value = line.split("=", 1)
             fields[key.strip()] = value.strip()
     flush()
-    return [c for c in cases if all(c.header.get(k) == v for k, v in WANTED.items())]
+    return [c for c in cases if all(c.header.get(k) == v for k, v in WANTED_IV_TAG.items())]
 
 
-def envelope_hex(iv: str, ct: str, tag: str) -> str:
-    """v2 envelope for a CAVP case: 0x02 || iv(12) || ct || tag(16)."""
-    return f"02{iv}{ct}{tag}"
+def envelope_hex(iv: str, ct: str, tag: str, version: str) -> str:
+    """Random-nonce envelope for a CAVP case: version || iv(12) || ct || tag(16)."""
+    return f"{version}{iv}{ct}{tag}"
 
 
 def vectors(rsp_dir: Path) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
-    for case in parse_rsp(rsp_dir / ENCRYPT_RSP):
-        f, h = case.fields, case.header
-        out.append(
-            {
-                "id": f"nist-enc-pt{h['PTlen']}-aad{h['AADlen']}-{f['Count']}",
-                "kind": "nist",
-                "key_hex": f["Key"],
-                "nonce_hex": f["IV"],
-                "aad_hex": f["AAD"],
-                "plaintext_hex": f["PT"],
-                "envelope_hex": envelope_hex(f["IV"], f["CT"], f["Tag"]),
-                "expect": "ok",
-                "note": f"CAVP {ENCRYPT_RSP} Count={f['Count']}",
-            }
-        )
-    for case in parse_rsp(rsp_dir / DECRYPT_RSP):
-        f, h = case.fields, case.header
-        out.append(
-            {
-                "id": f"nist-dec-pt{h['PTlen']}-aad{h['AADlen']}-{f['Count']}",
-                "kind": "nist",
-                "key_hex": f["Key"],
-                "nonce_hex": f["IV"],
-                "aad_hex": f["AAD"],
-                "plaintext_hex": "" if case.failed else f["PT"],
-                "envelope_hex": envelope_hex(f["IV"], f["CT"], f["Tag"]),
-                "expect": "bad_tag" if case.failed else "ok",
-                "note": f"CAVP {DECRYPT_RSP} Count={f['Count']}",
-            }
-        )
+    for suite in SUITES:
+        bits, version = suite["bits"], suite["version"]
+        for case in parse_rsp(rsp_dir / suite["encrypt"]):
+            f, h = case.fields, case.header
+            out.append(
+                {
+                    "id": f"nist{bits}-enc-pt{h['PTlen']}-aad{h['AADlen']}-{f['Count']}",
+                    "kind": "nist",
+                    "key_hex": f["Key"],
+                    "nonce_hex": f["IV"],
+                    "aad_hex": f["AAD"],
+                    "plaintext_hex": f["PT"],
+                    "envelope_hex": envelope_hex(f["IV"], f["CT"], f["Tag"], version),
+                    "expect": "ok",
+                    "note": f"CAVP {suite['encrypt']} Count={f['Count']}",
+                }
+            )
+        for case in parse_rsp(rsp_dir / suite["decrypt"]):
+            f, h = case.fields, case.header
+            out.append(
+                {
+                    "id": f"nist{bits}-dec-pt{h['PTlen']}-aad{h['AADlen']}-{f['Count']}",
+                    "kind": "nist",
+                    "key_hex": f["Key"],
+                    "nonce_hex": f["IV"],
+                    "aad_hex": f["AAD"],
+                    "plaintext_hex": "" if case.failed else f["PT"],
+                    "envelope_hex": envelope_hex(f["IV"], f["CT"], f["Tag"], version),
+                    "expect": "bad_tag" if case.failed else "ok",
+                    "note": f"CAVP {suite['decrypt']} Count={f['Count']}",
+                }
+            )
     out.sort(key=lambda v: str(v["id"]))
     return out
 
@@ -117,10 +134,11 @@ def main() -> int:
     ap.add_argument("--out", type=Path, help="write JSON here instead of stdout")
     args = ap.parse_args()
 
-    for name in (ENCRYPT_RSP, DECRYPT_RSP):
-        if not (args.rsp_dir / name).is_file():
-            print(f"missing {args.rsp_dir / name}", file=sys.stderr)
-            return 2
+    for suite in SUITES:
+        for key in ("encrypt", "decrypt"):
+            if not (args.rsp_dir / suite[key]).is_file():
+                print(f"missing {args.rsp_dir / suite[key]}", file=sys.stderr)
+                return 2
 
     data = vectors(args.rsp_dir)
     text = json.dumps(data, indent=2, sort_keys=False) + "\n"

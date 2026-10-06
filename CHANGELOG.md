@@ -38,9 +38,20 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   crypto handles were freed underneath it — the same shape of defect issue #7 was opened for. The
   result is now reported and the caller keeps the handles.
 
-  Not included: the NIST CAVP KAT for AES-128-GCM, which needs the CAVP archive through
-  `gen-vectors.py --rsp-dir`. The project vectors cover the round trip, determinism and envelope
-  bytes, and the KAT remains on issue #15.
+  The NIST CAVP KAT is imported for both suites — `scripts/import-nist.py` was single-suite and now
+  carries the version byte per file. 1,500 KAT cases (750 AES-256 with 191 authentication failures,
+  750 AES-128 with 196), plus project tamper vectors for `0x05`, which the CAVP decrypt files do not
+  reach because they are all random-nonce. AES-192's CAVP files are deliberately not imported.
+
+  Review found four more things, all fixed here. `sysvar_unregister` attempted both unregisters
+  unconditionally, so a refused UNINSTALL that had already removed one left **every retry failing**
+  on the one that was gone — the stub had been returning success for an absent variable and hiding
+  it. It now tracks each variable, removes the floor first so a refusal changes nothing, and
+  re-registers it if `gcm.strict` then refuses. `gcm_signature.result` still carried the old
+  key-length message and would have failed CI. The floor's failure paths had no test: service
+  failure, nine untrusted values, and the GLOBAL scope on 9.x are now pinned. And `spec/envelope.md`
+  still said "exactly 32 bytes" in §3 while claiming FINAL v2, and required every `bad_key_len`
+  vector to fail encryption — which the new suite-mismatch vectors do not and must not.
 
 - **The documentation and the agent instructions are English.** `AGENTS.md`, `CLAUDE.md`, the three
   nested `AGENTS.md` files, all ten rules in `.agents/rules`, all ten skills and the four subagents

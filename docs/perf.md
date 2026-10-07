@@ -220,14 +220,19 @@ Amendment A11 is that amendment. It also covers the larger case the same reasoni
 `gcm_decrypt` built an `EVP_CIPHER_CTX` and ran the key schedule on every row, and at the size of a
 name that setup *was* the cost.
 
-**Where the time was.** A plaintext-column baseline added to the load runner (`plain`: `name_plain
-LIKE`, no crypto, no UDF) and a no-LIKE variant (`gcm_nolike`: `CHAR_LENGTH(gcm_decrypt(...))`)
-split the `gcm_decrypt(col) LIKE` query three ways. On the laptop, 100,000 rows, one session, best of
-three runs with the pre-A11 component: scan and `LIKE` floor 8.2 ms (18%), UDF call plus decryption
-plus tagging 35.9 ms (77%), `LIKE` over the decrypted result 2.4 ms (5%, inside the noise). The
-decryption share is 359 ns per row against a bare 16-byte `open` of about 280 ns in the same
-container: the SQL path was close to the cipher's own per-call setup, and that setup was the thing to
-remove. The builtin `AES_DECRYPT` paid the same per row, which is why it had never looked expensive.
+**Where the time was.** Two control queries were added to the load runner, both with the predicate
+`CHAR_LENGTH(x) > 0`, which is true for every row, so both count the same rows: `plain_len` over a
+plaintext utf8mb4 column and `gcm_len` over `gcm_decrypt(...)`. The queries run in an order where
+every query is preceded by every other equally often. Their differences are **differences of p95
+between queries**, not execution times of components, and they bracket rather than attribute.
+
+On the laptop, 100,000 rows, one session, three runs with the pre-A11 component: `plain_len` p95
+6.7–11.5 ms (13–24% of the `gcm` query's p95), `gcm_len − plain_len` 38.4–39.0 ms (73–85%), and
+`gcm − gcm_len` −1.8 to 7.4 ms, i.e. not distinguishable from zero. Divided over the rows, the
+`gcm_len − plain_len` difference is 384–391 ns per row, beside a bare 16-byte `open` of about 280 ns
+in the same container. That is consistent with the per-call cipher setup being most of what the
+decrypting call adds, and it is what made the context worth keeping; it does not by itself prove
+where inside the call the time goes.
 
 **Core, container on the laptop, one run** (the reference for each reused path keeps the same state
 across calls, so the gated ratio stays structure over algorithm; `*_vs_*` is what the reuse saves):
@@ -236,7 +241,7 @@ across calls, so the gated ratio stays structure over algorithm; `*_vs_*` is wha
 |---|---|---|---|---|
 | `open` (fresh context per call) | 333 ns | 325 ns | 843 ns | 8,547 ns |
 | `open_session` (context kept) | 143 ns | 165 ns | 742 ns | 9,882 ns |
-| `open_session` / `open` | **0.43** | 0.51 | 0.88 | 1.16 (noise) |
+| `open_session` / `open` | **0.43** | 0.51 | 0.88 | 1.16 (one run; not established whether noise or a regression) |
 | `seal_det` (nonce key per call) | 1,599 ns | 1,689 ns | 3,636 ns | 32,734 ns |
 | `seal_det_session` (nonce key kept) | 1,051 ns | 1,123 ns | 3,022 ns | 32,472 ns |
 | `seal_det_session` / `seal_det` | **0.66** | 0.67 | 0.83 | 0.99 |
@@ -255,26 +260,27 @@ and 1.10 at 64 KiB for those two cases, **provisional** until three CI runs set 
 other ceiling in `baseline.json` was set; the same run also put two of the old one-call cases over
 1.10 (`seal_det/aes192/16` 1.155, `open/aes128/256` 1.116), which is this laptop's documented noise.
 
-**SQL, MySQL 8.4.11 on the laptop, 100,000 rows, three runs each way, best run** — the same server,
-the same load runner, the `develop` component and then the A11 component:
+**SQL, MySQL 8.4.11 on the laptop, 100,000 rows, three runs each way** — the same server, the same
+load runner with the balanced order, the `develop` component and then the A11 component. Ranges over
+the three runs; the host was running other containers throughout, recorded per run in the artifacts:
 
-| | Sessions | gcm p50 | gcm p95 | `AES_DECRYPT` p95 | p95 ratio | decrypt share per row |
-|---|---:|---:|---:|---:|---:|---:|
-| before | 1 | 40.8 ms | 46.5 ms | 49.6 ms | 0.936 | 359 ns |
-| after | 1 | 19.6 ms | 22.8 ms | 46.5 ms | **0.489** | 120 ns |
-| before | 8 | 99.1 ms | 120.7 ms | 128.7 ms | 0.938 | 1,072 ns |
-| after | 8 | 25.8 ms | 32.9 ms | 135.4 ms | **0.243** | 205 ns |
+| | Sessions | gcm p95 | `AES_DECRYPT` p95 | p95 ratio | `gcm_len − plain_len` per row |
+|---|---:|---:|---:|---:|---:|
+| before | 1 | 45.8–52.5 ms | 49.0–61.0 ms | 0.800–0.975 | 384–391 ns |
+| after | 1 | 17.9–21.6 ms | 41.3–53.5 ms | **0.393–0.473** | 114–123 ns |
+| before | 8 | 110.2–113.7 ms | 126.7–130.3 ms | 0.864–0.881 | 1,010–1,017 ns |
+| after | 8 | 26.5–43.0 ms | 143.2–171.0 ms | **0.185–0.252** | 154–223 ns |
 
-The one-session result is what the core predicts: the decrypt share falls from 359 to 120 ns per
-row, within a few tens of nanoseconds of the bare kept-context open. The eight-session result is
-not: the per-row share fell by 870 ns where the serial bench accounts for 190, and the `plain` floor
-and the `AES_DECRYPT` column did not move. Eight threads each creating and freeing an `EVP_CIPHER_CTX`
-per row contend inside OpenSSL 3's per-call setup — provider context allocation and reference
-counting, not the key schedule — and keeping the context per `UDF_INIT` removes the contention with
-the setup. The same shape was measured on MySQL 9.4 during the prototype (1.06 → 0.48 at one session,
-1.27 → 0.26 at eight). 32 sessions have not been measured with A11 yet; the CI `load` runs after
-this merges are the first numbers on the reference runner, and the nightly's own ratio is what will
-say whether the 1.10 gate's centre has moved.
+At one session the per-row difference falls from ~385 to ~120 ns, close to the bare kept-context
+open in the core benchmark. At eight sessions it falls by ~800–860 ns, much more than the ~190 ns the
+serial benchmark accounts for, while `plain_len` and the `AES_DECRYPT` column stay where they were.
+**The cause of that larger gain is not isolated by these measurements.** One hypothesis is
+contention among threads in OpenSSL 3's per-call context setup, which keeping the context would
+avoid; nothing here separates that from other explanations, and the observed gain is what this
+section reports. The same shape was seen on MySQL 9.4 during the prototype (1.06 → 0.48 at one
+session, 1.27 → 0.26 at eight). 32 sessions have not been measured with A11; the CI `load` runs are
+the reference-runner numbers, and the nightly's own ratio will say whether the 1.10 gate's centre
+has moved.
 
 **What a smaller value gains and a larger one does not.** On a 64 KiB value the kept context is
 inside the noise, because the cipher dominates and the setup was never a share of it. Everything in

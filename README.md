@@ -325,8 +325,9 @@ statement — and sets only the nonce when a row brings the same key; `gcm_encry
 derived nonce key the same way. The key copy that makes the decision is compared in constant time,
 replaced only when the key changes, forgotten on any cipher failure, and cleansed in `deinit`; nothing
 about the bytes written or accepted changes. On a developer machine, MySQL 8.4.11 over 100,000 rows,
-the `gcm_decrypt(col) LIKE` p95 went from 46.5 to 22.8 ms at one session and from 120.7 to 32.9 ms at
-eight, with the `AES_DECRYPT` baseline unchanged (ratio 0.94 → 0.49 and 0.94 → 0.24). The
+the `gcm_decrypt(col) LIKE` p95 went from 45.8–52.5 to 17.9–21.6 ms at one session and from
+110.2–113.7 to 26.5–43.0 ms at eight over three runs each, with the `AES_DECRYPT` baseline unchanged
+(ratio 0.80–0.98 → 0.39–0.47 and 0.86–0.88 → 0.19–0.25). The
 exposure that buys — a second copy of the key in the component's heap for the statement's duration —
 is stated in `docs/design.md` A11, and the CI numbers that replace the developer-machine ones land in
 `docs/perf.md` after the merge.

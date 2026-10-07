@@ -57,9 +57,8 @@
 >   untouched; its one sentence saying `nonce_key` is derived "per call" is corrected to "when the
 >   key changes within one `UDF_INIT`", which §7 allows without a version bump. The existing vector
 >   tests, run through the reusing paths, prove the outputs byte-identical.
-> - A row that rebuilds the context takes longer than a row that reuses it. That difference is
->   observable only inside one statement, by the caller, who supplied both keys; it reveals
->   nothing a caller does not already know, and is noted so that it is a stated non-issue.
+> - A row that rebuilds the context takes longer than a row that reuses it. What that difference can
+>   reveal, and to whom, depends on where the key comes from — see the threat model below.
 >
 > **Why.** The time is where the per-row setup is, not in the cipher:
 >
@@ -68,22 +67,50 @@
 > - SQL: `gcm_decrypt(col) LIKE` over 100,000 rows on MySQL 9.4. p95 at one session 49.6 → 23.2 ms,
 >   at eight sessions 126.4 → 27.2 ms; the ratio to `AES_DECRYPT` 1.06 → 0.48 and 1.27 → 0.26. The
 >   eight-session gain (about 1 µs per row) is far larger than the serial bench predicts (about
->   180 ns per row), which points at contention inside OpenSSL 3's per-call context setup, not only at
->   the key schedule.
+>   180 ns per row). One hypothesis is contention among threads in OpenSSL 3's per-call context
+>   setup; these measurements do not isolate the cause, and the observed gain is what this
+>   amendment relies on, not the explanation.
 > - Deterministic: one HMAC per row removed, about 0.75 µs per call measured server-side with
 >   `BENCHMARK()` on MySQL 8.0 (2.29 → 1.52 µs). It helps only a statement in which one function item
 >   is evaluated over many rows — `INSERT … SELECT`, `UPDATE`, a join. A multi-row `INSERT … VALUES`
 >   gains nothing, because each expression in it is its own `UDF_INIT`.
-> - A plaintext-column baseline added to the load runner shows that about 80% of a
->   `gcm_decrypt(col) LIKE` query is the UDF call plus decryption and only about 19% is the scan and
->   `LIKE` floor. That is why this is where the time is.
+> - Two control queries added to the load runner, with one predicate so they count the same rows,
+>   put the p95 difference between a scan and a scan that also calls `gcm_decrypt` at 73–85% of the
+>   `gcm_decrypt(col) LIKE` query's p95 on the laptop (384–391 ns per row, beside a ~280 ns bare
+>   open). These are differences between queries, not component timings; they say the decrypting
+>   call is most of the query, not exactly where inside it the time goes.
 >
-> **Exposure, stated honestly.** What changes is the *retention* of key material: a second copy of
-> the key, and derived key material, live in the component's heap for the lifetime of the UDF item
-> instead of for one operation. The server already holds the same key for that whole time, in the
-> statement's argument buffers (`UDF_ARGS`) and in the statement text — which §6 already lists as
-> reaching the general and slow logs. A core dump taken mid-statement therefore contains the key
-> either way; what this adds is a second location for it. The risks this amendment names:
+> **Exposure, stated honestly.** What changes is the *retention* of key material. Before A11 a key
+> copy and its derived material lived for one operation, one row. After it, the **last key used**
+> by a UDF item — its copy, its schedule in the context, and for the deterministic variant its
+> `nonce_key` — lives until a row brings a different key, a cipher operation fails, or the item's
+> `deinit` at the end of the execution. How much that adds depends on where the key comes from,
+> and the two cases are not the same:
+>
+> - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
+>   bound parameter. This is the usage the README documents. The server already holds that key for
+>   the whole execution, in the argument buffer and in the statement text that §6 lists as reaching
+>   the general and slow logs, and the caller already knows it. A11 adds a second in-memory
+>   location for the same duration; a core dump taken mid-statement contains the key either way.
+> - **A key computed per row** — read from a column, derived by an expression, or supplied by a
+>   view or a stored routine running with definer rights, where the caller may not be allowed to
+>   learn it. Here the server holds each row's key only while that row is evaluated, and A11 keeps
+>   the most recent one past its row, up to the end of the execution. That is an added retention
+>   of up to one key per UDF item per execution, which this amendment accepts — it is bounded by
+>   the statement, cleansed on every exit, and never shared — and names rather than hides.
+>
+> **Timing.** A row whose key matches the previous row's is faster than one that rebuilds the
+> context (on the measured hardware ~120 ns against ~300 ns at the core). In the first case above
+> the caller chose every key, so the difference tells them nothing. In the second, it is in
+> principle a signal of *whether consecutive rows used the same key* — never key bytes — to someone
+> who can time row evaluation. Only the whole statement's duration is visible to a SQL client, so
+> what is exposed in practice is at most an aggregate over the rows; no attack on it has been
+> demonstrated, and none is claimed. The threat model A11 accepts is therefore: **an attacker who
+> can already submit statements and observe their duration may learn about how often the key
+> changes between rows, not what any key is.** A deployment where even that matters — definer-rights
+> routines that pick keys per row for callers who must not learn their grouping — should not rely on
+> this amendment's acceptance and should keep such keys out of per-row expressions. The risks this
+> amendment also names:
 >
 > - The copy lives through the whole execution, including the idle time between the rows the
 >   function is evaluated on, not only while an operation is in flight.
@@ -1070,7 +1097,7 @@ forward compatibility.
 | `initid->max_length` is narrowed by the server with `min<uint32>(...)`, so it is **truncated to uint32 first** | `udf_handler::fix_fields` in `sql/item_func.cc`. Adding 29 to a LONGTEXT argument (4294967295) wraps to 28, truncating the envelope below its minimum length — measured on 8.4 as `ERROR 1406 Data too long`. `envelope_max_length()` in `udf_glue.h` prevents it with saturating arithmetic and `gcm_null_and_edge.test` pins it |
 | A component cannot include `mysql_com.h` | the `my_io.h` behind it raises `#error This header shall not be included in components`. It surfaced as a failure in the 9.4.0 build while 8.0 and 8.4 passed silently — only building all three catches it |
 | `component_sys_variable_register::register_variable` **copies** the `def_val` from the `*_CHECK_ARG` | `sql/server_component/component_sys_var_service.cc`: `sysvar_bool->def_val = bool_arg->def_val` (into a my_malloc'd struct). So passing a stack-local check-arg is safe |
-| **The per-call EVP context setup, not the cipher, is most of a small decryption**, and about 80% of a `gcm_decrypt(col) LIKE` query is the UDF call plus decryption against a ~19% scan-and-`LIKE` floor | amendment A11 — developer-machine prototypes: a 16-byte `open` 353 → 170 ns with a reused context; p95 over 100k rows on 9.4 49.6 → 23.2 ms (1 session) and 126.4 → 27.2 ms (8 sessions); the plaintext-column baseline in `tests/load`. CI numbers to follow in `docs/perf.md` |
+| **The per-call EVP context setup, not the cipher, is most of a small decryption**, and the p95 difference between a scan and a scan that also calls `gcm_decrypt` is 73–85% of a `gcm_decrypt(col) LIKE` query (a difference between queries, not a component timing) | amendment A11 — developer-machine prototypes: a 16-byte `open` 353 → 170 ns with a reused context; p95 over 100k rows on 9.4 49.6 → 23.2 ms (1 session) and 126.4 → 27.2 ms (8 sessions); the plaintext-column baseline in `tests/load`. CI numbers to follow in `docs/perf.md` |
 
 ### Open (to be answered in Phase S)
 

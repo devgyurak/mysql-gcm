@@ -17,19 +17,22 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   The one-call `decrypt()`, `encrypt_det()` and `derive_det_nonce()` are the same bodies with a
   session that lives for the call.
 
-  Why: a plaintext-column baseline in the load runner showed ~77% of a `gcm_decrypt(col) LIKE` query
-  was the UDF call plus decryption and only ~18% the scan, and the core bench put a 16-byte open at
-  ~300 ns of which nearly all was the per-call context setup. On a developer machine (MySQL 8.4.11,
-  100k rows) the query's p95 fell 46.5 → 22.8 ms at one session and 120.7 → 32.9 ms at eight, the
-  `AES_DECRYPT` baseline unchanged; the eight-session gain is contention inside OpenSSL 3's per-call
-  setup that the kept context removes. What this costs — key material retained in the component's
+  Why: matched-predicate control queries in the load runner put the p95 difference that calling
+  `gcm_decrypt` adds to a scan at 73–85% of a `gcm_decrypt(col) LIKE` query (a difference between
+  queries, not a component timing), and the core bench put a 16-byte open at ~300 ns, most of it the
+  per-call context setup. On a developer machine (MySQL 8.4.11, 100k rows, three runs each) the
+  query's p95 fell 45.8–52.5 → 17.9–21.6 ms at one session and 110.2–113.7 → 26.5–43.0 ms at eight, the
+  `AES_DECRYPT` baseline unchanged; why the eight-session gain exceeds what the serial
+  bench predicts is not isolated (one hypothesis is contention in OpenSSL 3's per-call setup). What this costs — key material retained in the component's
   heap for a statement rather than one operation — is stated in A11 with its invariants, and the
   `crypto-safety` and `architecture` rules carry the exception.
 - `tests/bench` gates the two reused paths (`open_session`, `seal_det_session`) against references
   that keep the same state, with provisional ceilings of 1.35 / 1.35 / 1.15 / 1.10 by size — the
   structure around a 120 ns open is a constant ~20 ns, so 1.10 is arithmetic it cannot meet — to be
-  set from three CI runs. `tests/load/run.py` measures `plain` and `gcm_nolike` alongside `gcm` and
-  `aes` and reports the decomposition; the nightly's query count doubles.
+  set from three CI runs. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
+  `gcm_len`, alongside `gcm` and `aes`, reports their p95 differences, and issues each session's
+  queries in a de Bruijn order so every query follows every other equally often; the nightly's query
+  count doubles and the gate's gcm/aes ratio is now measured under that order.
 - The adapter suite drives the real UDF entry points: two decrypt items own two states, a deinit
   releases only its own, and a value sealed by one item opens through another item's kept context
   twice.

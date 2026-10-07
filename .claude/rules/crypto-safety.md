@@ -20,8 +20,10 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   `OPENSSL_cleanse` — never return unauthenticated plaintext.
 
 ## Key handling (amendment A1: the key is a SQL argument)
-- The key arrives only as the UDF argument `key`, and is **exactly 32 bytes**. Anything else is an
-  error. Do not fold (XOR), hash or pad it to length — that weakness of `AES_ENCRYPT` is not to be
+- The key arrives only as the UDF argument `key`, and is **exactly 32, 24 or 16 bytes** — the length
+  selects AES-256, AES-192 or AES-128 and nothing else does (amendment A10), and the two encryption
+  functions additionally refuse anything below `gcm.min_key_bytes` (default 32). Any other length is
+  an error. Do not fold (XOR), hash or pad it to length — that weakness of `AES_ENCRYPT` is not to be
   reproduced.
 - Reference the buffers `UDF_ARGS` provides for the key and the plaintext directly, and if you make a
   copy, `OPENSSL_cleanse` it immediately after use. Do not put either in a `std::string`, which leaves
@@ -78,5 +80,6 @@ Scope is C++ under `src/`. The Python `hmac.HMAC` in the internal vector generat
 library and therefore out of scope — per-language checks are step 3 of the `code-review` skill.
 
 `EVP_aes_`, `HMAC(`, `rand(`, `srand(`, `printf.*key`, `LogErr.*(key|plain)`, `std::string key`, a
-hardcoded key literal, any branch that accepts a key length other than 32, any branch that turns a tag
+hardcoded key literal, any branch that accepts a key length outside {16, 24, 32} or skips the
+`gcm.min_key_bytes` check on encryption, any branch that turns a tag
 failure into NULL without consulting strict, and an unchecked `EVP_DecryptFinal_ex` return value.

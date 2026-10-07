@@ -1,7 +1,8 @@
 # mysql-gcm — AGENTS.md
 
-An open-source project that adds AES-256-GCM encryption and decryption functions to MySQL 8.0+ as a
-server **component**. Codex, Cursor and OpenCode read this file directly; Claude Code reads it through
+An open-source project that adds AES-GCM encryption and decryption functions to MySQL 8.0+ as a
+server **component** — AES-256 by default, with AES-192 and AES-128 selected by key length behind
+`gcm.min_key_bytes` (amendment A10). Codex, Cursor and OpenCode read this file directly; Claude Code reads it through
 the import in `CLAUDE.md`. The full rationale is `docs/design.md` (including amendment A1).
 **To change the design, amend that document first and then change the code.**
 
@@ -118,7 +119,9 @@ different build method on your own.
   `OPENSSL_cleanse` the key and plaintext buffers.
 - A tag verification failure is an error when `gcm.strict=ON`. Do not swallow it as NULL. Never return
   unauthenticated plaintext.
-- The key length is exactly 32 bytes. Do not make it fit by folding, padding or hashing.
+- The key length is 32, 24 or 16 bytes and selects the suite (amendment A10); the two encryption
+  functions also refuse anything below `gcm.min_key_bytes`. Do not make a key fit by folding, padding
+  or hashing.
 - Do not put a key in a repository file, a configuration file, an environment variable or a test
   fixture (the spec vectors excepted).
 

@@ -12,8 +12,9 @@ paths:
 - File responsibilities, dependency direction and resource lifetimes follow
   `.agents/rules/architecture.md`.
 - Argument contract: `plaintext`, `ciphertext`, `key` and `aad` are all forced to `STRING_RESULT`
-  (`args->arg_type[i] = STRING_RESULT` in init). `key` is checked for `args->lengths[1] == 32` **on
-  every call**, because at init time it need not be a constant.
+  (`args->arg_type[i] = STRING_RESULT` in init). `key` is checked for `args->lengths[1]` in {32, 24, 16} **on
+  every call**, because at init time it need not be a constant; the length selects the suite
+  (amendment A10), and the two encryption functions also refuse anything below `gcm.min_key_bytes`.
 - `gcm_decrypt`'s result charset: in init, call
   `mysql_service_mysql_udf_metadata->result_set(initid, "charset", "utf8mb4")`. For the plaintext
   argument, use `argument_set(args, "charset", 0, "utf8mb4")` so the server does the conversion. No

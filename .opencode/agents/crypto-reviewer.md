@@ -45,7 +45,8 @@ Review in this order, leaving a file:line citation for each item:
 3. **Envelope** — offsets and minimum lengths (29 for random, 17 for det, or whatever the spec says);
    does the `default` arm of the version switch error; is there an underflow on truncated input
    (`len - 16` in unsigned arithmetic).
-4. **Keys** — is length 32 checked on every call; are copies cleansed; does the nonce_key derivation
+4. **Keys** — is the length checked against {32, 24, 16} on every call, with the suite following from
+   it and nothing else, and does encryption refuse anything below `gcm.min_key_bytes`; are copies cleansed; does the nonce_key derivation
    use the label constant rather than the encryption key directly as an HMAC key.
 5. **Determinism** — does the det variant really produce the same output for the same input; is AAD or
    session state mixed into the nonce calculation; and **where does decryption get the nonce from for a

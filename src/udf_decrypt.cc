@@ -41,7 +41,11 @@ bool gcm_decrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
      requested as `binary`, so the server hands it over byte for byte, and a plaintext
      is always shorter than the envelope it came from. */
   initid->max_length = args->lengths[0];
-  return gcm::init_state(initid, message);
+  if (gcm::init_state(initid, message)) return true;
+  /* design A11: one EVP context and key schedule per UDF item instead of per row.
+     On failure the glue releases the state allocated above, since the server skips
+     deinit after a failed init. */
+  return gcm::init_decrypt_session(initid, message);
 }
 
 char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *length,
@@ -70,11 +74,12 @@ char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *l
   }
 
   size_t out_len = 0;
-  const Error err = gcm::decrypt(key, envelope, aad, state->out, &out_len);
+  const Error err =
+      gcm::decrypt_with_session(state->decrypt, key, envelope, aad, state->out, &out_len);
 
-  /* The only failure gcm.strict governs. gcm::decrypt has already wiped the
-     output buffer, so no unauthenticated plaintext can leave either way
-     (spec/envelope.md §4 rule 1). */
+  /* The only failure gcm.strict governs. The core has already wiped the output
+     buffer and forgotten the key, so no unauthenticated plaintext can leave either
+     way (spec/envelope.md §4 rule 1). */
   if (err == Error::bad_tag && !state->strict) {
     *is_null = 1;
     return nullptr;

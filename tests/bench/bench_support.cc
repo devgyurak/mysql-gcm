@@ -145,6 +145,54 @@ bool reference_open(gcm::Bytes key, const unsigned char *nonce, const unsigned c
   return ok;
 }
 
+ReferenceOpenCtx *reference_open_ctx_new(gcm::Bytes key) {
+  const EVP_CIPHER *cipher = cipher_for(key.size);
+  if (cipher == nullptr) return nullptr;
+  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+  if (ctx == nullptr) return nullptr;
+  const bool ok = EVP_DecryptInit_ex(ctx, cipher, nullptr, nullptr, nullptr) == 1 &&
+                  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN,
+                                      static_cast<int>(gcm::kNonceLen), nullptr) == 1 &&
+                  EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data, nullptr) == 1;
+  if (!ok) {
+    EVP_CIPHER_CTX_free(ctx);
+    return nullptr;
+  }
+  return ctx;
+}
+
+void reference_open_ctx_free(ReferenceOpenCtx *ctx) { EVP_CIPHER_CTX_free(ctx); }
+
+bool reference_open_reuse(ReferenceOpenCtx *ctx, const unsigned char *nonce,
+                          const unsigned char *ciphertext, size_t ciphertext_len,
+                          const unsigned char *tag, unsigned char *out) {
+  /* Key NULL: the schedule set in reference_open_ctx_new stays, only the nonce moves. */
+  bool ok = EVP_DecryptInit_ex(ctx, nullptr, nullptr, nullptr, nonce) == 1;
+  int written = 0;
+  ok = ok &&
+       EVP_DecryptUpdate(ctx, out, &written, ciphertext, static_cast<int>(ciphertext_len)) == 1;
+  ok = ok && EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, static_cast<int>(gcm::kTagLen),
+                                 const_cast<unsigned char *>(tag)) == 1;
+  int final_written = 0;
+  ok = ok && EVP_DecryptFinal_ex(ctx, out + written, &final_written) == 1;
+  return ok;
+}
+
+bool reference_nonce_key(gcm::Bytes key, unsigned char *nonce_key) {
+  return reference_hmac(key.data, key.size,
+                        reinterpret_cast<const unsigned char *>(gcm::kDetNonceLabel),
+                        gcm::kDetNonceLabelLen, nonce_key);
+}
+
+bool reference_seal_det_cached(gcm::Bytes key, const unsigned char *nonce_key,
+                               const unsigned char *plaintext, size_t plaintext_len,
+                               unsigned char *out, unsigned char *tag) {
+  unsigned char mac[gcm::kHmacLen];
+  const bool ok = reference_hmac(nonce_key, gcm::kHmacLen, plaintext, plaintext_len, mac) &&
+                  reference_seal(key, mac, plaintext, plaintext_len, out, tag);
+  return ok;
+}
+
 bool reference_seal_random(gcm::Bytes key, const unsigned char *plaintext, size_t plaintext_len,
                            unsigned char *out, unsigned char *tag) {
   unsigned char nonce[gcm::kNonceLen];

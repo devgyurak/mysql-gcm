@@ -23,7 +23,10 @@ from typing import Any
 # The three suites, in the order the tables report them. The key length selects the suite and
 # nothing else does (design A10); the benchmark names carry these labels.
 SUITES = ("aes256", "aes192", "aes128")
-GATED_CASES = ("seal_random", "seal_det", "open")
+# `open_session` and `seal_det_session` are the per-UDF_INIT paths of design A11 — what
+# gcm_decrypt and gcm_encrypt_det run row after row — gated against references that keep
+# the same state across calls. `open` and `seal_det` remain the one-call paths.
+GATED_CASES = ("seal_random", "seal_det", "seal_det_session", "open", "open_session")
 
 # Gated: each case divided by a reference that performs the *same work mix* with the *same
 # cipher*. An earlier version divided all three encrypt cases by a bare seal, and three runs on
@@ -46,7 +49,22 @@ RATIO_PAIRS = {
 # `*_vs_aes256`: AES-192 and AES-128 against AES-256 on the *gcm* side, so a reader can see what
 # the smaller suites buy at the core. The difference depends on the hardware, provider and
 # workload; it must be measured rather than inferred from hardware AES support alone.
+#
+# `open_session_vs_open` and `seal_det_session_vs_seal_det`: what design A11's reuse saves over
+# the one-call path, per suite — the number the amendment is justified by, and one that moves
+# with the OpenSSL build's per-call context cost, so it is reported rather than gated.
 INFORMATIONAL_PAIRS = {
+    **{
+        f"open_session_vs_open/{suite}": (f"gcm/open_session/{suite}", f"gcm/open/{suite}")
+        for suite in SUITES
+    },
+    **{
+        f"seal_det_session_vs_seal_det/{suite}": (
+            f"gcm/seal_det_session/{suite}",
+            f"gcm/seal_det/{suite}",
+        )
+        for suite in SUITES
+    },
     **{
         f"seal_random_vs_plain/{suite}": (f"gcm/seal_random/{suite}", f"ref/seal/{suite}")
         for suite in SUITES

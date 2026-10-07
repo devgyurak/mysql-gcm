@@ -45,6 +45,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <openssl/evp.h>
+
 #include "envelope.h"
 
 namespace gcm_bench {
@@ -94,6 +96,29 @@ bool reference_seal_det(gcm::Bytes key, const unsigned char *plaintext, size_t p
                         unsigned char *out, unsigned char *tag);
 bool reference_open(gcm::Bytes key, const unsigned char *nonce, const unsigned char *ciphertext,
                     size_t ciphertext_len, const unsigned char *tag, unsigned char *out);
+
+/* The work-matched references for the two per-UDF_INIT paths of design A11. The
+   case they pair with keeps a scheduled context, or a derived nonce_key, across
+   rows; so does the reference, and what remains in the ratio is again this
+   project's structure — the key comparison, the forget-on-error bookkeeping, the
+   envelope — over the algorithm with the setup already paid. */
+
+/* A context scheduled once for `key` (cipher by key length, IV length set). Per call:
+   nonce only, then update, tag, final — exactly the hit path of a decrypt session. */
+using ReferenceOpenCtx = EVP_CIPHER_CTX;
+ReferenceOpenCtx *reference_open_ctx_new(gcm::Bytes key);
+void reference_open_ctx_free(ReferenceOpenCtx *ctx);
+bool reference_open_reuse(ReferenceOpenCtx *ctx, const unsigned char *nonce,
+                          const unsigned char *ciphertext, size_t ciphertext_len,
+                          const unsigned char *tag, unsigned char *out);
+
+/* The hit path of a deterministic session: the nonce_key is already derived, so one
+   HMAC(nonce_key, plaintext) and a seal. `nonce_key` is kHmacLen bytes the caller
+   derived once with reference_nonce_key(). */
+bool reference_nonce_key(gcm::Bytes key, unsigned char *nonce_key);
+bool reference_seal_det_cached(gcm::Bytes key, const unsigned char *nonce_key,
+                               const unsigned char *plaintext, size_t plaintext_len,
+                               unsigned char *out, unsigned char *tag);
 
 }  // namespace gcm_bench
 

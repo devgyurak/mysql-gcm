@@ -46,6 +46,7 @@ add_executable(gcm_unit
   envelope_test.cc
   nonce_test.cc
   gcm_test.cc
+  det_session_test.cc
 )
 target_include_directories(gcm_unit PRIVATE ${GCM_REPO_ROOT}/third_party)
 target_compile_definitions(gcm_unit PRIVATE GCM_REPO_ROOT="${GCM_REPO_ROOT}")

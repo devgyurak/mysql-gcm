@@ -30,7 +30,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   The adapter suite's "are the algorithms still live" probe used a 32-byte key only, so **deleting the
   AES-192 release pair passed all 35 cases** — and the AES-128 pair was equally invisible, which
   follows from the same cause and had been true since that suite landed. The probe takes a key length
-  now; each deletion fails 53 cases. And the integration case only exercised the floor against
+  now; each deletion is detected (26 of the 35 adapter cases fail). And the integration case only exercised the floor against
   AES-128, so a policy applied to 16-byte keys alone would have passed; it now covers both encryption
   functions at floor 32, the middle setting of 24 where AES-192 and AES-256 pass and AES-128 does not,
   and a raise back to 32 with existing AES-192 data still decrypting.

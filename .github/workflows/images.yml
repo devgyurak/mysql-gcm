@@ -1,0 +1,116 @@
+name: images
+# Builds the container images the expensive jobs depend on and pushes them to GHCR.
+#
+# Why this exists: `mtr` spent 49-63 minutes per run compiling a MySQL server from
+# source, and the suite itself takes about 16 seconds. Nothing cached the result, so
+# every run paid for it again. stack-ci-docker has prescribed GHCR layers for this
+# since the rules were written; this is the job that finally does it.
+#
+# Two images per entry in docker/versions.json:
+#
+#   mysql-gcm-build   a *configured* MySQL source tree. What build-in-docker.sh,
+#                     smoke and adapter need.
+#   mysql-gcm-mtr     the same plus a *compiled* server. Only `mtr` needs this, and
+#                     only for 8.4, because the .result files are recorded there.
+#
+# The tag carries a hash of build.Dockerfile, build-component.sh and that major's
+# versions.json entry (scripts/image-ref.sh), so changing any of them produces a tag
+# that does not exist yet and every consumer falls back to building locally. A stale
+# image can never be served for changed inputs; the cost of a miss is the hour this
+# job exists to avoid, paid once, by the PR that changed the input.
+on:
+  workflow_dispatch: {}
+  schedule: [{ cron: "0 20 * * 0" }]   # 05:00 KST Monday, after the nightly jobs
+  push:
+    branches: [main, develop]
+    paths:
+      - "docker/**"
+      - "scripts/image-ref.sh"
+      - ".github/workflows/images.yml"
+permissions: { contents: read, packages: write }
+# No cancel-in-progress: a half-pushed image is worse than a duplicated build, and
+# these runs are rare.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+jobs:
+  build-image:
+    strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the tag
+        id: ref
+        env:
+          GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
+          GCM_IMAGE_REF_ONLY: "1"
+        run: echo "ref=$(scripts/image-ref.sh '${{ matrix.mysql }}' build)" >> "$GITHUB_OUTPUT"
+      # Idempotent: a tag that exists was built from these exact inputs, so rebuilding
+      # it would push identical content under the same name for no reason.
+      - name: Skip if the tag is already published
+        id: exists
+        run: |
+          if docker manifest inspect '${{ steps.ref.outputs.ref }}' >/dev/null 2>&1; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push
+        if: steps.exists.outputs.found == '0'
+        env:
+          GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
+        run: |
+          local_ref="$(scripts/image-ref.sh '${{ matrix.mysql }}' build)"
+          docker tag "$local_ref" '${{ steps.ref.outputs.ref }}'
+          docker push '${{ steps.ref.outputs.ref }}'
+
+  mtr-image:
+    # 8.4 only. The committed .result files are recorded against it and scripts/mtr.sh
+    # warns on any other major, so a compiled 8.0 or 9 server would never be pulled.
+    needs: build-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the tag
+        id: ref
+        env:
+          GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
+          GCM_IMAGE_REF_ONLY: "1"
+        run: echo "ref=$(scripts/image-ref.sh 8.4 mtr)" >> "$GITHUB_OUTPUT"
+      - name: Skip if the tag is already published
+        id: exists
+        run: |
+          if docker manifest inspect '${{ steps.ref.outputs.ref }}' >/dev/null 2>&1; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compile the server and push
+        if: steps.exists.outputs.found == '0'
+        env:
+          GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          base="$(scripts/image-ref.sh 8.4 build)"
+          docker run -d --name mtr-image-build --entrypoint sleep "$base" infinity
+          # WITHOUT_GROUP_REPLICATION matches scripts/mtr.sh: its xcom sources need a
+          # generated XDR header that is expensive to produce and the gcm suite never
+          # touches it.
+          docker exec mtr-image-build sh -c '
+            set -eu
+            cmake -S "${MYSQL_SRC}" -B "${MYSQL_BUILD}" -DWITHOUT_GROUP_REPLICATION=1 >/dev/null
+            cmake --build "${MYSQL_BUILD}" -- -j "$(nproc)"
+          '
+          docker commit mtr-image-build '${{ steps.ref.outputs.ref }}'
+          docker push '${{ steps.ref.outputs.ref }}'

@@ -86,7 +86,7 @@ docker/                        build.Dockerfile (a configured server source tree
 docs/perf.md                   Accumulated load measurements — replacing design §1.2's estimates with measured numbers
 CHANGELOG.md                   Changes per release. An envelope change comes with a compatibility note
 .github/workflows/             CI (lint · unit · build matrix · integration (smoke) · mtr and adapter (path-filtered)
-                               · e2e · load (nightly) · bench (on merges) · release (on tags))
+                               · e2e · load (nightly) · bench (on merges) · images (GHCR) · release (on tags))
 ```
 
 ## 4. Build and verification commands (the skills hold the detail)

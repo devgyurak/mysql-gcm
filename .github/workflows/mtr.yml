@@ -33,7 +33,7 @@ on:
   push:
     branches: [main, develop]
     paths: *mtr_paths
-permissions: { contents: read }
+permissions: { contents: read, packages: read }
 # A new push supersedes the run before it. Without this, every push to a PR started another
 # hour-long server build while the superseded ones kept going — four pushes meant four concurrent
 # builds competing for runners. A push to main or develop is never cancelled: it is the gate on that
@@ -44,12 +44,27 @@ concurrency:
 jobs:
   mtr:
     runs-on: ubuntu-24.04
+    # Still generous: a published mtr image makes this a pull plus a component build,
+    # but a PR that changes docker/** has no image to pull and compiles the server.
     timeout-minutes: 180
+    env:
+      # images.yml publishes these; a miss falls back to building locally, so this is
+      # a cache and never a dependency.
+      GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: scripts/build-in-docker.sh 8.4
-      # 8.4 only: the .result files are recorded against it (scripts/mtr.sh says so), and recording
-      # them per major would mean three of these.
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # scripts/build-in-docker.sh is deliberately not run first. It produced a .so this
+      # job never used -- mtr.sh copies src/ into the MTR container and builds the
+      # component there -- and with the images published it would mean pulling the 2.6 GB
+      # configured-tree image on top of the one that already contains a compiled server.
+      #
+      # 8.4 only: the .result files are recorded against it (scripts/mtr.sh says so), and
+      # recording them per major would mean three of these.
       - run: scripts/mtr.sh 8.4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

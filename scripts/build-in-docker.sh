@@ -14,34 +14,10 @@ usage() {
 ver="$1"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-versions="${root}/docker/versions.json"
 
-# versions.json is the single source of truth for the patch version, the source
-# tarball checksum and the compiler the server tree expects (stack-ci-docker).
-read -r src_version src_sha256 toolset <<<"$(
-  python3 - "${versions}" "${ver}" <<'PY'
-import json, sys
-
-path, major = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    versions = json.load(fh)
-if major not in versions:
-    sys.exit(f"unknown MySQL major {major!r}; known: {', '.join(versions)}")
-print(versions[major]["source"], versions[major]["source_sha256"], versions[major]["rhel9_toolset"])
-PY
-)"
-
-image="mysql-gcm-build:${ver}-${src_version}"
-if ! docker image inspect "${image}" >/dev/null 2>&1; then
-  echo "building ${image} (configures the MySQL ${src_version} source tree; slow, cached afterwards)" >&2
-  docker build \
-    -f "${root}/docker/build.Dockerfile" \
-    --build-arg "MYSQL_VERSION=${src_version}" \
-    --build-arg "MYSQL_SOURCE_SHA256=${src_sha256}" \
-    --build-arg "RHEL9_TOOLSET=${toolset}" \
-    -t "${image}" \
-    "${root}/docker"
-fi
+# Resolving the image -- local, registry, or build -- lives in one place so that
+# this script and scripts/mtr.sh cannot disagree about which image a tag names.
+image="$(GCM_IMAGE_REF_ONLY=0 "${root}/scripts/image-ref.sh" "${ver}" build)"
 
 out="${root}/build/${ver}"
 mkdir -p "${out}"

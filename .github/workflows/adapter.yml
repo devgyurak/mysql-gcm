@@ -38,7 +38,7 @@ on:
   push:
     branches: [main, develop]
     paths: *adapter_paths
-permissions: { contents: read }
+permissions: { contents: read, packages: read }
 # A new push supersedes the run before it; see integration.yml for why. Pushes to main and
 # develop are never cancelled — they are the gate on the branch, not a preview of it.
 concurrency:
@@ -48,8 +48,15 @@ jobs:
   lifecycle:
     strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
     runs-on: ubuntu-24.04
+    env:
+      GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       # adapter-tests.sh deliberately refuses to build the image, the same split mtr.sh uses:
       # building it is expensive and build-in-docker.sh owns it.
       - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"

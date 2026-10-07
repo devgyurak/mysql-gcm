@@ -6,6 +6,33 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **CI stops rebuilding a MySQL server on every MTR run.** `images.yml` publishes two images per
+  major to GHCR — `mysql-gcm-build` (a configured source tree) and `mysql-gcm-mtr` (that plus a
+  compiled server, 8.4 only) — and `scripts/image-ref.sh` resolves local → registry → build for every
+  consumer.
+
+  The measurement that prompted it: `mtr` ran 49–63 minutes, of which the suite itself is **16
+  seconds**. `scripts/mtr.sh` called `cmake --build` with no `--target`, so it compiled the whole tree,
+  3,441 object files. Pruning targets was checked and rejected: by object count the tree is 26% bundled
+  third-party, 24% storage engines, 20% `sql/`, and the router — the one clearly droppable piece — is
+  **8%**. There is no target list that makes a server build cheap.
+
+  **The tag carries a hash of the inputs**, not just the MySQL version: `build.Dockerfile`,
+  `build-component.sh` and that major's `versions.json` entry. Before this the tag was
+  `<major>-<patch>`, so editing the Dockerfile produced a byte-different image under a name that was
+  already cached — harmless while every run built its own, and a correctness hole the moment a run can
+  pull one somebody else built. A changed input yields a tag that does not exist and every consumer
+  falls back to building, so a stale image can never be served.
+
+  A published image is a **cache, never a dependency**: the scripts work with no network and no
+  registry. Only amd64 jobs opt in, because the images are built on `ubuntu-24.04` and an emulated pull
+  on `build.yml`'s arm64 half would be slower than the build it replaced. The `mtr` job also stops
+  running `build-in-docker.sh` first: it produced a `.so` the job never used, since `mtr.sh` builds the
+  component inside the MTR container.
+
+  The figures above for the published path are projections from image sizes and typical GHCR pull
+  rates, not measurements. They go in `docs/perf.md` once real runs exist.
+
 - **AES-192-GCM**, completing amendment A10. Envelope versions `0x06` (random) and `0x07`
   (deterministic), byte-for-byte the layout of the other four. All three suites now ship, selected by
   key length and nothing else: 32 → AES-256, 24 → AES-192, 16 → AES-128. `spec/envelope.md` is at v3.

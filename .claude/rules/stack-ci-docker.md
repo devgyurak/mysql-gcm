@@ -18,9 +18,21 @@ paths:
   the same job, using an actionlint image pinned by digest.
 - Build matrix axes: MySQL `8.0.x / 8.4.x / 9.x` (the exact patch versions live in one place,
   `docker/versions.json`) × `amd64 / arm64`. OpenSSL is whatever each server image ships.
-- Configuring and building a MySQL source tree is expensive. Push the build image
-  (`docker/build.Dockerfile`) to GHCR and cache it by the `versions.json` hash. Do not rebuild it when
-  nothing in the source changed.
+- Configuring and building a MySQL source tree is expensive, and `images.yml` is what stops CI paying
+  for it per run. It publishes two images per major to GHCR: `mysql-gcm-build` (a configured tree) and
+  `mysql-gcm-mtr` (that plus a compiled server, 8.4 only, since the `.result` files are recorded
+  there). `mtr` spent 49–63 minutes compiling a server whose test suite takes 16 seconds.
+- **The tag carries a hash of the inputs, not just the MySQL version**: `build.Dockerfile`,
+  `build-component.sh` and that major's `versions.json` entry (`scripts/image-ref.sh`). Change any of
+  them and the tag does not exist yet, so every consumer falls back to building locally. A stale image
+  can never be served for changed inputs, and the cost of a miss is paid once, by the PR that changed
+  the input.
+- **A published image is a cache, never a dependency.** `image-ref.sh` resolves local → registry →
+  build, so the scripts work with no network and no registry. Set `GCM_REGISTRY` to opt a job in;
+  leave it unset locally, where building once and keeping the image beats a 2 GB pull.
+- Only amd64 jobs may pull. `images.yml` runs on `ubuntu-24.04`, so the images are amd64, and
+  `build.yml`'s arm64 half deliberately does not set `GCM_REGISTRY` — an emulated pull would be slower
+  than the build it replaced.
 - Integration and E2E `docker cp` the `.so` into the official `mysql:<ver>` image. **Tests do not use a
   custom server image** — that way a component bug cannot be mistaken for an image build problem.
 - There is exactly one exception, the **release server image**: `docker/server.Dockerfile` layers the

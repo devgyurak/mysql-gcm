@@ -11,7 +11,7 @@
  * fetched by name. Each suite is gated against a reference running that same cipher, so the
  * gated ratio is still "this project's structure over the algorithm" and says nothing about
  * what AES-128 costs relative to AES-256. That number is reported separately by gate.py and
- * is a property of the machine — with AES-NI the extra rounds are nearly free. */
+ * depends on the hardware, provider and workload. */
 
 #include <vector>
 

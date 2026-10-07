@@ -35,8 +35,7 @@
  * both sides (design A10), so each suite's ratio divides by a reference running the same
  * cipher, and the gated number stays a property of this code's structure rather than of how
  * many rounds the suite runs. What the suites cost relative to *each other* is reported, not
- * gated, for the same reason the determinism cost is: with AES-NI the round count is close to
- * free and without it it is not, and that is a property of the machine.
+ * gated, because the effect of key size depends on the hardware, provider and workload.
  */
 
 #ifndef MYSQL_GCM_BENCH_SUPPORT_H

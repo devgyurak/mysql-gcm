@@ -44,8 +44,8 @@ RATIO_PAIRS = {
 # and it is exactly the number that moves with the machine — useful to read, useless to gate.
 #
 # `*_vs_aes256`: AES-192 and AES-128 against AES-256 on the *gcm* side, so a reader can see what
-# the smaller suites buy at the core. Machine-dependent for the same reason: with AES-NI the
-# extra rounds are nearly free, and without it they are not.
+# the smaller suites buy at the core. The difference depends on the hardware, provider and
+# workload; it must be measured rather than inferred from hardware AES support alone.
 INFORMATIONAL_PAIRS = {
     **{
         f"seal_random_vs_plain/{suite}": (f"gcm/seal_random/{suite}", f"ref/seal/{suite}")

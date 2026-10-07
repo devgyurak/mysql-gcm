@@ -325,7 +325,9 @@ def decompose(rows: int, concurrency: int, by_variant: dict[str, Measurement]) -
     These are differences between queries, not the execution time of components: a p95
     is a rank statistic of each query's own distribution, and the difference of two is
     not the p95 of anything. They bracket where the time goes; they do not attribute it.
-    A negative difference means the gap is inside the noise.
+    A negative difference is a result, not an error: it can be noise, or the minuend query
+    can really be cheaper (a LIKE that stops early may cost less than a length check that
+    walks the whole string). The sign alone does not say which.
     """
     plain_len = by_variant["plain_len"].p95_ms
     gcm_len = by_variant["gcm_len"].p95_ms

@@ -275,8 +275,8 @@ inside 1.10 there.
 (bare 64 KiB seal 3,237 ns against ~17,000) and there three values broke their ceilings:
 `open_session/aes256/4096` 1.224, and two one-call cases whose code path this change does not alter
 in kind, `seal_det/aes256/256` 1.118 and `open/aes192/4096` 1.126. The cause is not isolated. No
-ceiling was widened to absorb them, so a run on that runner class can fail this gate; whether it
-should is a decision for after more runs on it, not one these three can make.
+ceiling was widened to absorb them, so a run on that runner class can fail this gate; the decision is
+deferred explicitly to #24, which lists what has to be measured to make it.
 
 The first container run on the laptop, before any of this, had measured `open_session` at
 1.04–1.40 and put two one-call cases over 1.10; those numbers set nothing.
@@ -294,8 +294,13 @@ the three runs; the host was running other containers throughout, recorded per r
 
 At one session the per-row difference falls from ~385 to ~120 ns, close to the bare kept-context
 open in the core benchmark. At eight sessions it falls by ~800–860 ns, much more than the ~190 ns the
-serial benchmark accounts for, while `plain_len` and the `AES_DECRYPT` column stay where they were.
-**The cause of that larger gain is not isolated by these measurements.** One hypothesis is
+serial benchmark accounts for. The other columns did **not** stay where they were at eight sessions:
+in the after runs `plain_len` rose from 9.9–10.4 to 11.5–18.8 ms and `AES_DECRYPT` from 126.7–130.3
+to 143.2–171.0 ms, on a host whose load differed between the runs (recorded per run). Part of the
+eight-session ratio's fall therefore comes from its denominator rising; the GCM query's own p95
+falling from 110.2–113.7 to 26.5–43.0 ms does not depend on that. At one session `AES_DECRYPT`
+measured 49.0–61.0 ms before and 41.3–53.5 ms after, overlapping.
+**The cause of the larger eight-session gain is not isolated by these measurements.** One hypothesis is
 contention among threads in OpenSSL 3's per-call context setup, which keeping the context would
 avoid; nothing here separates that from other explanations, and the observed gain is what this
 section reports. The same shape was seen on MySQL 9.4 during the prototype (1.06 → 0.48 at one
@@ -303,8 +308,10 @@ session, 1.27 → 0.26 at eight). 32 sessions have not been measured with A11; t
 the reference-runner numbers, and the nightly's own ratio will say whether the 1.10 gate's centre
 has moved.
 
-**What a smaller value gains and a larger one does not.** On a 64 KiB value the kept context is
-inside the noise, because the cipher dominates and the setup was never a share of it. Everything in
+**What a smaller value gains and a larger one does not.** On a 64 KiB value the kept context
+measured 0.99 against a fresh one in the CI runs and 1.16 in one laptop run; with the setup a small
+share of a cipher-dominated call, no gain is expected there, and whether the laptop's 1.16 is noise
+or a regression is not established by one run. Everything in
 this section is about values the size of a name, which is what the load fixture and the project's
 reason to exist are.
 

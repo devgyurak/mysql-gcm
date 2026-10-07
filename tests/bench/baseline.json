@@ -33,7 +33,7 @@
     "about five times faster than the usual class (bare 64 KiB seal 3,237 ns) and there",
     "open_session/aes256/4096 measured 1.224, as did two unchanged one-call cases (seal_det/aes256/256",
     "1.118, open/aes192/4096 1.126). The cause is not isolated; no ceiling was widened to absorb it,",
-    "so a run on that runner class can fail this gate. docs/perf.md records the runs.",
+    "so a run on that runner class can fail this gate. Deferred to issue #24; docs/perf.md records the runs.",
     "",
     "That this is gateable at all is a property of the references. An earlier version divided all",
     "three encrypt cases by a bare seal, which spread seal_det by 2.69x across identical runners \u2014",

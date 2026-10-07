@@ -21,8 +21,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   `gcm_decrypt` adds to a scan at 73–85% of a `gcm_decrypt(col) LIKE` query (a difference between
   queries, not a component timing), and the core bench put a 16-byte open at ~300 ns, most of it the
   per-call context setup. On a developer machine (MySQL 8.4.11, 100k rows, three runs each) the
-  query's p95 fell 45.8–52.5 → 17.9–21.6 ms at one session and 110.2–113.7 → 26.5–43.0 ms at eight, the
-  `AES_DECRYPT` baseline unchanged; why the eight-session gain exceeds what the serial
+  query's p95 fell 45.8–52.5 → 17.9–21.6 ms at one session and 110.2–113.7 → 26.5–43.0 ms at eight
+  (the `AES_DECRYPT` baseline overlapped at one session but rose at eight, so the eight-session ratio
+  overstates the change); why the eight-session gain exceeds what the serial
   bench predicts is not isolated (one hypothesis is contention in OpenSSL 3's per-call setup). What this costs — key material retained in the component's
   heap for a statement rather than one operation — is stated in A11 with its invariants, and the
   `crypto-safety` and `architecture` rules carry the exception.
@@ -31,7 +32,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   size (measured up to 1.193 at 16 B — the same structure is a larger ratio over a cheaper reference),
   `seal_det_session` 1.15 / 1.15 / 1.15 / 1.10 (measured up to 1.093). One run on a runner five
   times faster than the usual class broke three ceilings, two of them one-call cases; the cause is not
-  isolated and nothing was widened to absorb it. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
+  isolated, nothing was widened to absorb it, and #24 tracks it. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
   `gcm_len`, alongside `gcm` and `aes`, reports their p95 differences, and issues each session's
   queries in a de Bruijn order so every query follows every other equally often; the nightly's query
   count doubles and the gate's gcm/aes ratio is now measured under that order.

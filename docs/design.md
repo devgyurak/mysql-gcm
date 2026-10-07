@@ -83,8 +83,12 @@
 > **Exposure, stated honestly.** What changes is the *retention* of key material. Before A11 a key
 > copy and its derived material lived for one operation, one row. After it, the **last key used**
 > by a UDF item — its copy, its schedule in the context, and for the deterministic variant its
-> `nonce_key` — lives until a row brings a different key, a cipher operation fails, or the item's
-> `deinit` at the end of the execution. How much that adds depends on where the key comes from,
+> `nonce_key` — lives until a row reaches the cipher with a different key or suite, a cipher
+> operation fails, or the item's `deinit` at the end of the execution. Rows that never reach the
+> cipher do not replace it: a NULL argument, an over-long one, a malformed envelope, a key length no
+> suite has, and a legacy `0x01` envelope (which never uses the session) all leave the previous key
+> in place. The bound is unchanged — nothing outlives the execution — but "the next row" is not
+> always what ends it. How much that adds depends on where the key comes from,
 > and the two cases are not the same:
 >
 > - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
@@ -103,11 +107,20 @@
 > context (on the measured hardware ~120 ns against ~300 ns at the core). In the first case above
 > the caller chose every key, so the difference tells them nothing. In the second, it is in
 > principle a signal of *whether consecutive rows used the same key* — never key bytes — to someone
-> who can time row evaluation. Only the whole statement's duration is visible to a SQL client, so
-> what is exposed in practice is at most an aggregate over the rows; no attack on it has been
-> demonstrated, and none is claimed. The threat model A11 accepts is therefore: **an attacker who
-> can already submit statements and observe their duration may learn about how often the key
-> changes between rows, not what any key is.** A deployment where even that matters — definer-rights
+> who can time row evaluation. A client does not see only the statement's total duration: a
+> streaming result (`mysql_use_result`, or a server-side cursor) delivers rows as they are produced,
+> so the arrival time of each row is observable, and with it, in principle, a per-row difference.
+> How precisely depends on the execution plan, on buffering in the server and the network, and on
+> the driver; a filter that returns few rows, or a sort or aggregate, hides most of it. No attack
+> that distinguishes the hit and miss times has been demonstrated, and none is claimed. The threat
+> model A11 accepts is therefore: **an attacker who can already submit statements and observe their
+> results as they arrive may learn whether consecutive evaluated rows used the same key, not what
+> any key is.** That includes rows the attacker chooses to place next to each other: with `WHERE`
+> and `ORDER BY` over a view whose key differs per row, a caller decides which two rows are
+> evaluated consecutively, and a per-row clock such as `SYSDATE(6)` in the select list, or row
+> arrival times, gives a per-row duration to average over repeated queries. So the signal is not
+> only "how often keys change" but, in principle, **whether two rows the attacker picks share a
+> key**. This is a hypothesis about what could be measured, not a measured result. A deployment where even that matters — definer-rights
 > routines that pick keys per row for callers who must not learn their grouping — should not rely on
 > this amendment's acceptance and should keep such keys out of per-row expressions. The risks this
 > amendment also names:

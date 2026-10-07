@@ -51,12 +51,30 @@ SELECT '# When: it is used to encrypt';
 SELECT gcm_encrypt('홍길동', UNHEX('000102030405060708090a0b0c0d0e0f10111213141516')) AS short_key;
 SELECT '# Then: an error — never rounded to a neighbouring suite (errors below)';
 
-SELECT '# Scenario 6 — Given: the floor back at its default';
+SELECT '# Scenario 6 — Given: the floor back at its default of 32';
 SET GLOBAL gcm.min_key_bytes = DEFAULT;
 SELECT @@global.gcm.min_key_bytes AS floor_default;
-SELECT '# When: a 16-byte key is used to encrypt';
-SELECT gcm_encrypt('홍길동', @k128) AS below_floor;
-SELECT '# Then: refused by policy — the feature is opt-in (errors below)';
+SELECT '# When: each smaller suite is used to encrypt, through both functions';
+SELECT gcm_encrypt('홍길동', @k128) AS random_128_below_floor;
+SELECT gcm_encrypt_det('홍길동', @k128) AS det_128_below_floor;
+SELECT gcm_encrypt('홍길동', @k192) AS random_192_below_floor;
+SELECT gcm_encrypt_det('홍길동', @k192) AS det_192_below_floor;
+SELECT '# Then: all four refused — the floor is a length, not a list of one suite (errors below)';
+
+SELECT '# Scenario 6b — Given: the floor at 24, the middle setting';
+SET GLOBAL gcm.min_key_bytes = 24;
+SELECT '# When: each suite is used to encrypt';
+SELECT LENGTH(gcm_encrypt('홍길동', @k)) AS random_256_allowed,
+       LENGTH(gcm_encrypt_det('홍길동', @k192)) AS det_192_allowed;
+SELECT gcm_encrypt('홍길동', @k128) AS random_128_still_refused;
+SELECT '# Then: 38 and 38 — AES-256 and AES-192 pass, AES-128 does not (above and below)';
+
+SELECT '# Scenario 6c — Given: AES-192 data written at 24, and the floor raised back to 32';
+SET @e192_at_24 = gcm_encrypt_det('홍길동', @k192);
+SET GLOBAL gcm.min_key_bytes = DEFAULT;
+SELECT '# When: that data is decrypted';
+SELECT gcm_decrypt(@e192_at_24, @k192) AS decrypt_after_raise;
+SELECT '# Then: the plaintext — the migration contract holds for every suite (above)';
 
 SELECT '# Scenario 7 — Given: a tampered AES-192 envelope and strict ON';
 SET @bad192 = CONCAT(LEFT(@e192, LENGTH(@e192)-1),

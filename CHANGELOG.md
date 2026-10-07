@@ -26,6 +26,15 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   from the suite table rather than written out, after a hardcoded tuple went stale the moment this
   suite was added and the generator's own verifier was what caught it.
 
+  Review then found two gaps in the coverage this added, both confirmed by mutation before fixing.
+  The adapter suite's "are the algorithms still live" probe used a 32-byte key only, so **deleting the
+  AES-192 release pair passed all 35 cases** — and the AES-128 pair was equally invisible, which
+  follows from the same cause and had been true since that suite landed. The probe takes a key length
+  now; each deletion fails 53 cases. And the integration case only exercised the floor against
+  AES-128, so a policy applied to 16-byte keys alone would have passed; it now covers both encryption
+  functions at floor 32, the middle setting of 24 where AES-192 and AES-256 pass and AES-128 does not,
+  and a raise back to 32 with existing AES-192 data still decrypting.
+
   Two latent test defects surfaced while writing this. The tamper fixture appended a constant `0xFF`
   to replace the last tag byte, which is a **no-op when the tag already ends in `0xFF`** — the AES-192
   envelope did, so the case decrypted successfully and claimed to be testing a tag failure. It now

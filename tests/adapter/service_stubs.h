@@ -104,7 +104,9 @@ bool min_key_bytes_is_registered();
    Three, not one: `seal` only ever checks the GCM handle (src/gcm.cc), so a probe built on
    encrypt_random alone cannot see the HMAC or CBC handles being leaked — which it could not,
    and a mutation removing mac_deinit() passed the suite before these were split out. */
-gcm::Error probe_gcm();  // g_aes_gcm, via encrypt_random
+/* One per GCM handle: the key length selects the suite (design A10), so a probe fixed at
+   32 bytes cannot see the other two handles leak. */
+gcm::Error probe_gcm(size_t key_len);
 gcm::Error probe_mac();  // g_hmac, via encrypt_det's nonce derivation
 gcm::Error probe_cbc();  // g_aes_cbc, via decrypting a v1 envelope
 

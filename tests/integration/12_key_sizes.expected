@@ -17,10 +17,18 @@
 # Scenario 5 — Given: a 23-byte key, one short of AES-192
 # When: it is used to encrypt
 # Then: an error — never rounded to a neighbouring suite (errors below)
-# Scenario 6 — Given: the floor back at its default
+# Scenario 6 — Given: the floor back at its default of 32
 32
-# When: a 16-byte key is used to encrypt
-# Then: refused by policy — the feature is opt-in (errors below)
+# When: each smaller suite is used to encrypt, through both functions
+# Then: all four refused — the floor is a length, not a list of one suite (errors below)
+# Scenario 6b — Given: the floor at 24, the middle setting
+# When: each suite is used to encrypt
+38	38
+# Then: 38 and 38 — AES-256 and AES-192 pass, AES-128 does not (above and below)
+# Scenario 6c — Given: AES-192 data written at 24, and the floor raised back to 32
+# When: that data is decrypted
+홍길동
+# Then: the plaintext — the migration contract holds for every suite (above)
 # Scenario 7 — Given: a tampered AES-192 envelope and strict ON
 # When: it is decrypted
 # Then: an error — tag verification is not suite-specific (errors below)
@@ -35,4 +43,8 @@ ERROR 3200 (HY000) at line 45: gcm_decrypt UDF failed; key must be 32 bytes (AES
 ERROR 3200 (HY000) at line 46: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 24
 ERROR 3200 (HY000) at line 51: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 23
 ERROR 3200 (HY000) at line 58: gcm_encrypt UDF failed; key of 16 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
-ERROR 3200 (HY000) at line 69: gcm_decrypt UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 59: gcm_encrypt_det UDF failed; key of 16 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 60: gcm_encrypt UDF failed; key of 24 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 61: gcm_encrypt_det UDF failed; key of 24 bytes is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 69: gcm_encrypt UDF failed; key of 16 bytes is below gcm.min_key_bytes = 24; decryption of existing data is unaffected
+ERROR 3200 (HY000) at line 87: gcm_decrypt UDF failed; authentication tag verification failed

@@ -303,10 +303,11 @@ same for either variant.
 
 ### Does a smaller suite buy anything?
 
-Not on a value the size of a name, and a little on a large one. Over four CI core runs, AES-192 and
-AES-128 are within about 2% of AES-256 at 16 and 256 bytes; the difference grows with the value until
-AES-128 decryption is 7–14% cheaper at 64 KiB, the wider end on the fastest runner. The deterministic
-variant is flat at every size, because its cost is HMAC, which the key length does not touch.
+Little on a small value, and somewhat more on a large one. Over four CI core runs, the AES-192 and
+AES-128 ratios to AES-256 ranged 0.978–1.022 at 16 bytes and 0.961–1.009 at 256 bytes; the advantage
+grows with the value until AES-128 decryption is 7–14% cheaper at 64 KiB, the widest value observed on
+the fastest runner, for a cause these runs did not isolate. The deterministic variant stays close to
+1.0 at every size, consistent with a cost dominated by HMAC, which the key length does not touch.
 
 At the SQL level, three CI runs per suite over 300,000 rows put every suite's `gcm_decrypt(col) LIKE`
 p95 at 0.84–0.93 of `AES_DECRYPT` at 8 and 32 sessions and 0.75–0.96 at one, with the three suites'

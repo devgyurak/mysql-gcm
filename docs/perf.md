@@ -174,8 +174,8 @@ derived `ratios.json`.
 | `seal_det` | 0.993–1.023 | 1.001–1.026 | 0.982–1.024 |
 
 All 144 observations fall between **0.978 and 1.044** — the band the twelve AES-256 ratios occupied
-over the original three baseline runs (0.986–1.029), widened by about 0.015 on each side with twelve
-times the observations. The fourth run is the one that landed on a fast runner (bare 64 KiB seal
+over the original three baseline runs (0.986–1.029), widened by 0.008 at the bottom and 0.015 at the
+top with four times the observations (144 against 12 cases × 3 runs = 36). The fourth run is the one that landed on a fast runner (bare 64 KiB seal
 6,529 ns against 17,070–17,080 ns for the other three) and its ratios sit inside the same band, which
 is the cross-fleet confirmation the reference baseline above was waiting for.
 
@@ -190,13 +190,14 @@ The un-gated suite-to-AES-256 ratios, over the same four runs (min–max):
 | `seal_det/aes192` | 1.000–1.001 | 0.997–1.008 | 0.992–0.997 | 0.990–1.014 |
 | `seal_det/aes128` | 0.999–1.003 | 0.995–1.000 | 0.982–0.992 | 0.978–0.982 |
 
-The shape repeats in every run: at 16 and 256 bytes the suites are within about 2% of each other,
-and the difference grows with the size until AES-128 `open` is 7–14% cheaper than AES-256 at 64 KiB.
-The 64 KiB column is also where the runs disagree most, and the widest value (0.864) is the fast
-runner's — the round count is a larger share of the cipher's cost when the per-call setup around it
-is cheaper. `seal_det` is flat at every size, because what dominates it is HMAC-SHA256, which the key
-length does not touch. On the values this project's fixture rows have (a Korean name is 9 bytes), the
-suite does not change the core cost measurably; on a 64 KiB value it does, by up to a seventh.
+Across all six rows, the observed range by size is **0.978–1.022 at 16 B, 0.961–1.009 at 256 B,
+0.911–1.007 at 4 KiB and 0.864–1.014 at 64 KiB**: the smaller suites' advantage, where there is one,
+grows with the size, and AES-128 `open` is 7–14% cheaper than AES-256 at 64 KiB. The 64 KiB column is
+also where the runs disagree most, and the widest value (0.864) was observed on the fast runner; these
+runs do not separate per-call setup from block processing, so the cause of that difference is not
+established. `seal_det` stays within 0.978–1.014 at every size, consistent with a cost dominated by
+HMAC-SHA256, which the key length does not touch. The smallest size measured is 16 bytes; a Korean
+name in the load fixture is 9, which these benchmarks did not measure directly.
 
 A subsequent local review run at `e420a5b` plus the review fixes used the standard
 `scripts/bench.sh --gate` settings (0.5 seconds per case, one repetition). It failed three of the
@@ -372,7 +373,7 @@ tables. Three values per cell, in run order; the links are the runs.
 What the nine runs establish, and what they do not:
 
 * **Every suite is under the gate in every run.** The 27 ratios span 0.751–0.960, the worst being
-  AES-256 at one session; nothing is within 14% of the 1.10 ceiling.
+  AES-256 at one session — a ratio difference of 0.140 below the 1.10 ceiling.
 * **The milliseconds are the runner, not the suite.** The same suite's one-session GCM p95 ranges
   from 120 to 264 ms (AES-256) and from 140 to 238 ms (AES-128) across its three runs, because each
   run lands on whichever machine the fleet provides, and the `AES_DECRYPT` column moves with it. A

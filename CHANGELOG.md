@@ -18,8 +18,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   144 gated core ratios fall between 0.978 and 1.044, the band the AES-256 baseline occupied; one of
   the four runs landed on a runner 2.6x faster than the others and its ratios stayed in the band,
   which is the first cross-fleet confirmation of the work-matched references. Against AES-256 the
-  smaller suites are within about 2% at 16 and 256 bytes and AES-128 decryption is 7–14% cheaper at
-  64 KiB. At the SQL level all 27 load ratios are 0.751–0.960 and pass the gate; at 8 and 32 sessions
+  smaller suites' ratios range 0.978–1.022 at 16 bytes and 0.961–1.009 at 256 bytes, and AES-128
+  decryption is 7–14% cheaper at 64 KiB; the widest value was observed on the fast runner, for a
+  cause these runs did not isolate. At the SQL level all 27 load ratios are 0.751–0.960 and pass the gate; at 8 and 32 sessions
   the three suites' ranges overlap, so the runs bound the spread without ranking the suites or
   separating scan cost from decryption. `docs/perf.md` has every run.
 - `envelope/parse` for the four A10 version bytes is recorded alongside v1–v3: 1.5–2.1 ns against

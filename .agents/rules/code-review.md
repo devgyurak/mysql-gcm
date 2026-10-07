@@ -30,7 +30,8 @@ Style comes last.
 **Correctness (P1)**
 - [ ] Envelope offsets and length arithmetic match `spec/envelope.md` (off-by-one, the version byte)
 - [ ] The tag-failure path discards the output buffer and honours the strict semantics
-- [ ] The 32-byte key check runs on every call
+- [ ] The key-length check (32, 24 or 16 bytes, selecting the suite) runs on every call, and
+      `gcm.min_key_bytes` on every encryption
 - [ ] NULL, empty-string and maximum-length arguments are handled
 - [ ] Result charset tagging (`gcm_decrypt`) / BLOB (`gcm_encrypt*`)
 - [ ] A session sysvar is actually read as the session value

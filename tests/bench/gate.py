@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 from typing import Any
 
@@ -83,22 +84,28 @@ INFORMATIONAL_PAIRS = {
 
 
 def load_results(path: str) -> dict[str, float]:
-    """Maps benchmark name to cpu_time in nanoseconds."""
+    """Maps benchmark name to cpu_time in nanoseconds — the median over repetitions.
+
+    With --benchmark_repetitions every repetition is a separate "iteration" entry under the
+    same name. An earlier version assigned each into one dict slot, so the *last* repetition
+    silently won and asking for more repetitions bought no stability at all. The median of
+    the repetitions is used instead; with one repetition it is that measurement. Aggregate
+    entries (mean/median/stddev rows Google Benchmark adds) are skipped, and the median is
+    computed here so the result does not depend on whether aggregates were requested.
+    """
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    results: dict[str, float] = {}
+    samples: dict[str, list[float]] = {}
     for entry in doc.get("benchmarks", []):
-        # An aggregate (mean/median/stddev) repeats a name with a suffix; skip those and keep
-        # the single measurement, so --benchmark_repetitions does not double-count.
         if entry.get("run_type") == "aggregate":
             continue
         if entry.get("error_occurred"):
             name, why = entry["name"], entry.get("error_message")
             raise SystemExit(f"benchmark {name} reported an error: {why}")
-        results[entry["name"]] = float(entry["cpu_time"])
-    if not results:
+        samples.setdefault(entry["name"], []).append(float(entry["cpu_time"]))
+    if not samples:
         raise SystemExit(f"{path} contains no benchmark results")
-    return results
+    return {name: statistics.median(values) for name, values in samples.items()}
 
 
 def sizes_for(results: dict[str, float], prefix: str) -> list[int]:

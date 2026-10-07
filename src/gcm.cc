@@ -158,7 +158,7 @@ Error open_gcm(DecryptSession *s, Bytes key, Bytes nonce, Bytes ciphertext, Byte
   if (nonce.size != kNonceLen) return Error::bad_envelope;
 
   if (s->retain && session_has_key(s, key, cipher)) {
-    if (EVP_DecryptInit_ex2(s->ctx, nullptr, nullptr, nonce.data, nullptr) != 1) {
+    if (EVP_DecryptInit_ex2(s->ctx, nullptr, nullptr, nonce.data, nullptr) != 1 || fault(4)) {
       return session_fail(s, Error::openssl);
     }
   } else {

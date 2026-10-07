@@ -54,6 +54,16 @@ def check(root: Path) -> list[str]:
                     problems.append(
                         f"{path.relative_to(root)}:{number}: test seam in server adapter: {seam}"
                     )
+    # The fault seam must only ever be compiled into tests/unit. Defining the macro anywhere
+    # the component is built from would ship an injection point in the .so.
+    for path in [*sorted((root / "src").rglob("*")), *sorted((root / "docker").rglob("*"))]:
+        if not path.is_file() or path.suffix in {".png"}:
+            continue
+        if "GCM_FAULT_INJECTION" in path.read_text(errors="ignore") and path.suffix not in {
+            ".h",
+            ".cc",
+        }:
+            problems.append(f"{path.relative_to(root)}: defines GCM_FAULT_INJECTION outside tests")
     return problems
 
 

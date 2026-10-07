@@ -63,8 +63,10 @@ Error decrypt(Bytes key, Bytes envelope, Bytes aad, unsigned char *out, size_t *
    takes the per-row cost of gcm_decrypt from the context setup to the cipher.
 
    The key copy is compared with CRYPTO_memcmp and wiped whenever it is replaced,
-   whenever a call fails (bad_tag included, so a context that just reported an
-   error is never trusted for the next row), and on free. Never shared between
+   whenever the cipher operation fails (bad_tag included, so a context that just
+   reported an error is never trusted for the next row), and on free. A call
+   rejected by the pre-checks (key length, envelope) or a legacy 0x01 envelope
+   does not reach the session and leaves it as it was (design A11). Never shared between
    UDF_INITs; never retained beyond the owner's deinit.
 
    Semantics are those of decrypt(): same checks in the same order, same errors,
@@ -87,8 +89,9 @@ bool decrypt_session_has_key(const DecryptSession *session);
 
 #ifdef GCM_FAULT_INJECTION
 /* Test seam, compiled only into tests/unit (GCM_FAULT_INJECTION): the next context
-   rebuild fails at step 1 (cipher), 2 (IV length) or 3 (key and nonce), after the real
-   OpenSSL call has succeeded. Listed in scripts/check-architecture.py. */
+   rebuild fails at step 1 (cipher), 2 (IV length) or 3 (key and nonce), or the next
+   reuse fails at step 4 (nonce-only init), after the real OpenSSL call has succeeded. Listed in
+   scripts/check-architecture.py. */
 void fault_inject_decrypt_init(int step);
 #endif
 

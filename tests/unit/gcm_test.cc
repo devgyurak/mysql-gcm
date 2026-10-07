@@ -1083,8 +1083,10 @@ TEST_P(RebuildFault, GivenWarmSessionAndAKeyChange_WhenRebuildFailsAtStep_ThenNo
 
 INSTANTIATE_TEST_SUITE_P(Steps, RebuildFault, ::testing::Values(1, 2, 3));
 
-TEST(RebuildFault, GivenARebuildThatFailedAfterSchedulingTheKey_WhenTheNextRowArrives_ThenItOpens) {
-  // Given: a first open whose key-and-nonce step fails after scheduling the key
+TEST(RebuildFault, GivenOneFailedRebuild_WhenTheNextRowArrives_ThenTheSessionStillWorks) {
+  // Given: a first open whose key-and-nonce step fails after scheduling the key. This pins that
+  //        one fault does not break the session; that the fault leaves no key material is the
+  //        parameterised case above.
   const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
   const Sealed sealed = seal_random(key, kSessionTextOne, {});
   ASSERT_EQ(sealed.err, Error::ok);
@@ -1100,6 +1102,28 @@ TEST(RebuildFault, GivenARebuildThatFailedAfterSchedulingTheKey_WhenTheNextRowAr
   EXPECT_EQ(err, Error::ok);
   EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), kSessionTextOne);
   EXPECT_TRUE(gcm::decrypt_session_has_key(session.get()));
+}
+
+}  // namespace
+
+namespace {
+
+TEST(RebuildFault, GivenWarmSession_WhenTheNonceOnlyReinitFails_ThenNothingIsRetained) {
+  // Given: a session holding key A's schedule, and the next same-key row's nonce-only init
+  //        failing after the real call succeeded
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed first = seal_random(key, kSessionTextOne, {});
+  const Sealed second = seal_random(key, kSessionTextTwo, {});
+  ASSERT_EQ(first.err, Error::ok);
+  ASSERT_EQ(second.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, first, {}), Error::ok);
+  gcm::fault_inject_decrypt_init(4);
+  // When
+  const Error err = warm(session.get(), key, second, {});
+  // Then
+  EXPECT_EQ(err, Error::openssl);
+  EXPECT_FALSE(gcm::decrypt_session_has_key(session.get()));
 }
 
 }  // namespace

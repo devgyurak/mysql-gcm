@@ -643,7 +643,8 @@ TEST_F(Lifecycle, GivenAValueSealedByOneItem_WhenAnotherItemOpensItTwice_ThenBot
   unsigned long first_len = 0;
   const char *first =
       gcm_decrypt_udf(&opener, &open_args.args, nullptr, &first_len, &is_null, &error);
-  const std::string first_plain(first != nullptr ? first : "", first != nullptr ? first_len : 0);
+  ASSERT_NE(first, nullptr);
+  const std::string first_plain(first, first_len);
   unsigned long second_len = 0;
   const char *second =
       gcm_decrypt_udf(&opener, &open_args.args, nullptr, &second_len, &is_null, &error);
@@ -694,10 +695,12 @@ TEST_F(Lifecycle, GivenStrictOffAndOneItem_WhenRowsAreGoodBadGood_ThenPlainNullP
   unsigned char null1 = 0, null2 = 0, null3 = 0;
   unsigned char err1 = 0, err2 = 0, err3 = 0;
   const char *r1 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len1, &null1, &err1);
-  const std::string first(r1 != nullptr ? r1 : "", r1 != nullptr ? len1 : 0);
+  ASSERT_NE(r1, nullptr);
+  const std::string first(r1, len1);
   const char *r2 = gcm_decrypt_udf(&opener, &bad_row.args, nullptr, &len2, &null2, &err2);
   const char *r3 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len3, &null3, &err3);
-  const std::string third(r3 != nullptr ? r3 : "", r3 != nullptr ? len3 : 0);
+  ASSERT_NE(r3, nullptr);
+  const std::string third(r3, len3);
 
   // Then: plaintext, NULL without an error, plaintext
   EXPECT_EQ(first, name);

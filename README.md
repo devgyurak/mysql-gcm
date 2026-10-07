@@ -318,6 +318,19 @@ Keep AES-256 as the default recommendation. Use a smaller suite when the securit
 requirements permit it, and measure the intended workload before making a performance trade-off.
 Repeated CI measurements remain open in #18. Run links and the full tables are in `docs/perf.md`.
 
+### Per-statement reuse of the decrypt context (amendment A11)
+
+`gcm_decrypt` keeps its cipher context, with the key schedule, for the lifetime of one UDF item — one
+statement — and sets only the nonce when a row brings the same key; `gcm_encrypt_det` keeps the
+derived nonce key the same way. The key copy that makes the decision is compared in constant time,
+replaced only when the key changes, forgotten on any cipher failure, and cleansed in `deinit`; nothing
+about the bytes written or accepted changes. On a developer machine, MySQL 8.4.11 over 100,000 rows,
+the `gcm_decrypt(col) LIKE` p95 went from 46.5 to 22.8 ms at one session and from 120.7 to 32.9 ms at
+eight, with the `AES_DECRYPT` baseline unchanged (ratio 0.94 → 0.49 and 0.94 → 0.24). The
+exposure that buys — a second copy of the key in the component's heap for the statement's duration —
+is stated in `docs/design.md` A11, and the CI numbers that replace the developer-machine ones land in
+`docs/perf.md` after the merge.
+
 Both gates, the original three-run baseline, and the newer per-suite measurements are in
 [`docs/perf.md`](docs/perf.md).
 

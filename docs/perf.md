@@ -107,12 +107,13 @@ almost exactly. The absolute HMAC numbers over those same runs held to 1.15x, so
 measured code was moving: the quotient was reporting how that CPU's SHA throughput compares to its
 AES throughput. Matching each reference to its case's work mix collapsed the spread to 1.025x.
 
-One limit worth stating rather than glossing: all four runs with the new references landed on the
-slower end of the fleet (implied bare seal 17,065–18,937 ns), so the work-matched metric has not yet
-been *observed* across that 3.7x spread. The arm64 cross-check below is what currently stands in for
-it — different instruction sets, absolute times 2.2x apart, ratios within 0.965–1.029 — and a run
-that lands on a fast runner will either confirm it or be the most interesting bench failure this
-project has had.
+A limit this file used to state: every run with the new references had landed on the slower end of
+the fleet (implied bare seal 17,065–18,937 ns), so the work-matched metric had not been *observed*
+across that 3.7x spread, and only the arm64 cross-check below stood in for it. That changed on
+2026-10-07: [run 37576902281](https://github.com/devgyurak/mysql-gcm/actions/runs/37576902281)
+landed on a fast runner — bare 64 KiB seal **6,529 ns**, 2.6x faster than the three runs beside it at
+17,070–17,080 ns — and its thirty-six gated ratios stayed within **1.001–1.034**. The quotient did
+not move with the machine, which is the property the references were redesigned to have.
 
 ### Per suite (amendment A10)
 
@@ -156,22 +157,47 @@ The deterministic construction performs the same two HMAC operations for every s
 relative cost of that work and the cipher still depends on the machine and input size. These core
 measurements do not determine SQL query latency.
 
-#### First CI per-suite core run
+#### CI per-suite core runs
 
-[Run 37572643103](https://github.com/devgyurak/mysql-gcm/actions/runs/37572643103), 2026-10-07,
-commit `e420a5b`, on the `ubuntu-24.04` reference runner passed all 36 ceilings. The run artifact
-contains the raw `results.json` and derived `ratios.json`.
+Four `bench` runs on the `ubuntu-24.04` reference runner on 2026-10-07, all on the same benchmark
+code: [37572643103](https://github.com/devgyurak/mysql-gcm/actions/runs/37572643103) (`e420a5b`),
+[37574295361](https://github.com/devgyurak/mysql-gcm/actions/runs/37574295361) (`fd4dfb0`),
+[37576703159](https://github.com/devgyurak/mysql-gcm/actions/runs/37576703159) (the merge of #20)
+and [37576902281](https://github.com/devgyurak/mysql-gcm/actions/runs/37576902281) (dispatched on
+`develop`). Every run passed all 36 ceilings. Each artifact holds the raw `results.json` and the
+derived `ratios.json`.
 
-| Gated ratio, min–max over the four sizes | `aes256` | `aes192` | `aes128` |
+| Gated ratio, min–max over four sizes × four runs | `aes256` | `aes192` | `aes128` |
 |---|---|---|---|
-| `open` | 1.003–1.028 | 1.005–1.038 | 0.995–1.026 |
-| `seal_random` | 1.004–1.011 | 0.998–1.016 | 0.997–1.006 |
-| `seal_det` | 1.003–1.017 | 1.003–1.016 | 1.001–1.019 |
+| `open` | 0.998–1.030 | 1.001–1.044 | 0.978–1.037 |
+| `seal_random` | 1.000–1.014 | 0.998–1.016 | 0.997–1.019 |
+| `seal_det` | 0.993–1.023 | 1.001–1.026 | 0.982–1.024 |
 
-The un-gated suite-to-AES-256 ratios in this run range from 0.919 to 1.012. At 64 KiB, AES-128
-`open` took 0.919 times the AES-256 time and `seal_random` took 0.931 times it. This is evidence
-against a blanket claim that smaller suites never save time on hardware with AES acceleration.
-It is one run, not a repeatability estimate; the remaining repeated measurements are tracked in #18.
+All 144 observations fall between **0.978 and 1.044** — the band the twelve AES-256 ratios occupied
+over the original three baseline runs (0.986–1.029), widened by 0.008 at the bottom and 0.015 at the
+top with four times the observations (144 against 12 cases × 3 runs = 36). The fourth run is the one that landed on a fast runner (bare 64 KiB seal
+6,529 ns against 17,070–17,080 ns for the other three) and its ratios sit inside the same band, which
+is the cross-fleet confirmation the reference baseline above was waiting for.
+
+The un-gated suite-to-AES-256 ratios, over the same four runs (min–max):
+
+| vs `aes256` | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open/aes192` | 0.979–1.022 | 0.976–1.009 | 0.961–1.007 | 0.933–0.969 |
+| `open/aes128` | 0.978–0.998 | 0.961–0.988 | 0.911–0.951 | 0.864–0.931 |
+| `seal_random/aes192` | 0.992–1.009 | 0.995–1.007 | 0.979–0.984 | 0.943–0.969 |
+| `seal_random/aes128` | 0.995–0.999 | 0.994–1.001 | 0.962–0.966 | 0.890–0.947 |
+| `seal_det/aes192` | 1.000–1.001 | 0.997–1.008 | 0.992–0.997 | 0.990–1.014 |
+| `seal_det/aes128` | 0.999–1.003 | 0.995–1.000 | 0.982–0.992 | 0.978–0.982 |
+
+Across all six rows, the observed range by size is **0.978–1.022 at 16 B, 0.961–1.009 at 256 B,
+0.911–1.007 at 4 KiB and 0.864–1.014 at 64 KiB**: the smaller suites' advantage, where there is one,
+grows with the size, and AES-128 `open` is 7–14% cheaper than AES-256 at 64 KiB. The 64 KiB column is
+also where the runs disagree most, and the widest value (0.864) was observed on the fast runner; these
+runs do not separate per-call setup from block processing, so the cause of that difference is not
+established. `seal_det` stays within 0.978–1.014 at every size, consistent with a cost dominated by
+HMAC-SHA256, which the key length does not touch. The smallest size measured is 16 bytes; a Korean
+name in the load fixture is 9, which these benchmarks did not measure directly.
 
 A subsequent local review run at `e420a5b` plus the review fixes used the standard
 `scripts/bench.sh --gate` settings (0.5 seconds per case, one repetition). It failed three of the
@@ -324,25 +350,45 @@ One run per suite gives no estimate of this host's run-to-run variation. The old
 an uncertainty bound for these laptop measurements, and neither table isolates row-scan cost from
 cryptographic work. Profiling or an experiment that separates those costs is needed for that claim.
 
-### First CI per-suite SQL runs
+### CI per-suite SQL runs — three per suite
 
-On 2026-10-07, commit `e420a5b`, each suite completed one `load.yml` dispatch on a separate
-GitHub-hosted `ubuntu-24.04` runner: MySQL 8.4.11, 300,000 rows, 29,918 matches, 40 measured iterations
-per session after three warm-ups. All three passed the unchanged load gate, and each reported zero
-additional disk temporary tables. The separate machines mean absolute times cannot rank the suites.
+On 2026-10-07 each suite completed three `load.yml` dispatches, each on its own GitHub-hosted
+`ubuntu-24.04` runner: MySQL 8.4.11, 300,000 rows, 29,918 matches, 40 measured iterations per session
+after three warm-ups, the first run on commit `e420a5b` and the other two on `develop` after #20
+merged. All nine passed the unchanged load gate, and every run reported zero additional disk temporary
+tables. Three values per cell, in run order; the links are the runs.
 
-| Suite / run | Sessions | GCM p95 (ms) | AES-256-CBC p95 (ms) | p95 ratio |
-|---|---:|---:|---:|---:|
-| [aes256](https://github.com/devgyurak/mysql-gcm/actions/runs/37572651145) | 1 | 120.472 | 160.354 | 0.751 |
-| aes256 | 8 | 522.388 | 599.893 | 0.871 |
-| aes256 | 32 | 1950.099 | 2185.321 | 0.892 |
-| [aes192](https://github.com/devgyurak/mysql-gcm/actions/runs/37572645828) | 1 | 236.918 | 269.222 | 0.880 |
-| aes192 | 8 | 1094.004 | 1185.938 | 0.922 |
-| aes192 | 32 | 4310.471 | 4661.917 | 0.925 |
-| [aes128](https://github.com/devgyurak/mysql-gcm/actions/runs/37572648637) | 1 | 139.712 | 167.183 | 0.836 |
-| aes128 | 8 | 563.286 | 618.817 | 0.910 |
-| aes128 | 32 | 2081.892 | 2337.002 | 0.891 |
+| Suite | Sessions | GCM p95 (ms) | AES-256-CBC p95 (ms) | p95 ratio | ratio spread |
+|---|---:|---:|---:|---:|---:|
+| `aes256` [1](https://github.com/devgyurak/mysql-gcm/actions/runs/37572651145) [2](https://github.com/devgyurak/mysql-gcm/actions/runs/37576805707) [3](https://github.com/devgyurak/mysql-gcm/actions/runs/37576899175) | 1 | 120 / 247 / 264 | 160 / 273 / 275 | 0.751 / 0.905 / 0.960 | 1.28x |
+| `aes256` | 8 | 522 / 1,010 / 1,022 | 600 / 1,143 / 1,146 | 0.871 / 0.884 / 0.891 | 1.02x |
+| `aes256` | 32 | 1,950 / 3,887 / 3,900 | 2,185 / 4,393 / 4,402 | 0.892 / 0.885 / 0.886 | 1.01x |
+| `aes192` [1](https://github.com/devgyurak/mysql-gcm/actions/runs/37572645828) [2](https://github.com/devgyurak/mysql-gcm/actions/runs/37576799151) [3](https://github.com/devgyurak/mysql-gcm/actions/runs/37576837466) | 1 | 237 / 235 / 183 | 269 / 286 / 223 | 0.880 / 0.823 / 0.820 | 1.07x |
+| `aes192` | 8 | 1,094 / 986 / 817 | 1,186 / 1,096 / 945 | 0.922 / 0.900 / 0.865 | 1.07x |
+| `aes192` | 32 | 4,310 / 3,845 / 3,271 | 4,662 / 4,302 / 3,720 | 0.925 / 0.894 / 0.879 | 1.05x |
+| `aes128` [1](https://github.com/devgyurak/mysql-gcm/actions/runs/37572648637) [2](https://github.com/devgyurak/mysql-gcm/actions/runs/37576802634) [3](https://github.com/devgyurak/mysql-gcm/actions/runs/37576868446) | 1 | 140 / 164 / 238 | 167 / 197 / 290 | 0.836 / 0.832 / 0.821 | 1.02x |
+| `aes128` | 8 | 563 / 727 / 983 | 619 / 870 / 1,137 | 0.910 / 0.835 / 0.864 | 1.09x |
+| `aes128` | 32 | 2,082 / 2,936 / 3,799 | 2,337 / 3,411 / 4,460 | 0.891 / 0.861 / 0.852 | 1.05x |
 
-Repeated runs for all three suites remain necessary to characterize variability; #18 tracks that
-work. Reproduce with `gh workflow run load.yml -f suite=aes192` (or `aes128` / `aes256`). A smaller
-suite does not get a looser gate: every run is checked against the existing 1.10 CBC-relative p95 ceiling.
+What the nine runs establish, and what they do not:
+
+* **Every suite is under the gate in every run.** The 27 ratios span 0.751–0.960, the worst being
+  AES-256 at one session — a ratio difference of 0.140 below the 1.10 ceiling.
+* **The milliseconds are the runner, not the suite.** The same suite's one-session GCM p95 ranges
+  from 120 to 264 ms (AES-256) and from 140 to 238 ms (AES-128) across its three runs, because each
+  run lands on whichever machine the fleet provides, and the `AES_DECRYPT` column moves with it. A
+  ranking of the suites by p95 would change order from run to run; a ranking by ratio does not
+  separate them.
+* **The ratio spreads match what the AES-256 baseline already showed**: wide at one session (40
+  samples), narrow at 8 and 32 (320 and 1,280). AES-256's one-session spread here, 1.28x, is wider
+  than the 1.19x of the 0.1.0 baseline, driven by the first run's 0.751 on a fast machine.
+* **At 8 and 32 sessions the three suites overlap**: AES-256 0.871–0.892, AES-192 0.865–0.925,
+  AES-128 0.835–0.910. AES-128 is the lowest on average and AES-192 the highest, but every suite's
+  range contains values from the others', so these runs do not rank the suites. Three runs per suite
+  is the same sample this file accepts for the release baseline and no more; they bound the spread,
+  they do not prove the suites equal.
+* **Nothing here separates scanning from decrypting.** That decomposition needs a plaintext column
+  measured in the same run, which `tests/load/run.py` does not do yet.
+
+Reproduce with `gh workflow run load.yml -f suite=aes192` (or `aes128` / `aes256`). A smaller suite
+does not get a looser gate: every run is checked against the existing 1.10 CBC-relative p95 ceiling.

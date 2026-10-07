@@ -14,13 +14,15 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   `suite` input measure the SQL path with a 24- or 16-byte key, lowering `gcm.min_key_bytes` only
   while the rows are written and against the same `aes-256-cbc` baseline so the ratios share a
   denominator.
-- **Initial observations, with the limits of the measurements.** The developer-machine core ratios
-  against AES-256 range from 0.81 to 1.16; the first CI core run ranges from 0.919 to 1.012 and passes
-  all 36 overhead ceilings. The developer SQL p95 spread is 7.3% at one session and 11.8% at eight;
-  the spread of the CBC-normalized ratios is a different quantity. One CI load run per suite also
-  passes, on separate hosted runners. `docs/perf.md` records the artifacts and exact values. These
-  observations do not establish equal performance, a consistent SQL suite ranking or row-scan
-  dominance. Repeated measurements remain open in #18.
+- **Four CI core runs and three CI load runs per suite, with the limits of what they show.** All
+  144 gated core ratios fall between 0.978 and 1.044, the band the AES-256 baseline occupied; one of
+  the four runs landed on a runner 2.6x faster than the others and its ratios stayed in the band,
+  which is the first cross-fleet confirmation of the work-matched references. Against AES-256 the
+  smaller suites' ratios range 0.978–1.022 at 16 bytes and 0.961–1.009 at 256 bytes, and AES-128
+  decryption is 7–14% cheaper at 64 KiB; the widest value was observed on the fast runner, for a
+  cause these runs did not isolate. At the SQL level all 27 load ratios are 0.751–0.960 and pass the gate; at 8 and 32 sessions
+  the three suites' ranges overlap, so the runs bound the spread without ranking the suites or
+  separating scan cost from decryption. `docs/perf.md` has every run.
 - `envelope/parse` for the four A10 version bytes is recorded alongside v1–v3: 1.5–2.1 ns against
   1.3–1.4 on the developer machine; the measurement does not isolate lookup cost.
 - **Review fixes:** benchmark fixtures preserve unsupported key lengths instead of silently clamping

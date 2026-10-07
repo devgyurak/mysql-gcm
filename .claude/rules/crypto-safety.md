@@ -27,7 +27,13 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   reproduced.
 - Reference the buffers `UDF_ARGS` provides for the key and the plaintext directly, and if you make a
   copy, `OPENSSL_cleanse` it immediately after use. Do not put either in a `std::string`, which leaves
-  copies behind when it reallocates.
+  copies behind when it reallocates. The one exception is amendment A11: a `UDF_INIT` may keep a copy
+  of the key (at most 32 bytes) beside `gcm_decrypt`'s scheduled EVP context or beside
+  `gcm_encrypt_det`'s derived nonce key, on these conditions and no others — the copy is compared
+  with the incoming key by `CRYPTO_memcmp`; it is replaced only when the bytes or the suite differ,
+  and cleansed before replacement; it is cleansed and forgotten on any failure of the cipher operation, `bad_tag`
+  included, and the context is reset with it; it is cleansed in `deinit`; and it is never shared
+  across threads.
 - Derive the deterministic nonce key as `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`. Never use the
   encryption key directly as an HMAC key (domain separation). The label string is a single constant in
   `nonce.h`.
@@ -82,4 +88,6 @@ library and therefore out of scope — per-language checks are step 3 of the `co
 `EVP_aes_`, `HMAC(`, `rand(`, `srand(`, `printf.*key`, `LogErr.*(key|plain)`, `std::string key`, a
 hardcoded key literal, any branch that accepts a key length outside {16, 24, 32} or skips the
 `gcm.min_key_bytes` check on encryption, any branch that turns a tag
-failure into NULL without consulting strict, and an unchecked `EVP_DecryptFinal_ex` return value.
+failure into NULL without consulting strict, an unchecked `EVP_DecryptFinal_ex` return value, a key
+copy that outlives its `UDF_INIT`, and a cross-row cache keyed on anything but the full key bytes
+(amendment A11).

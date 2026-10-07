@@ -237,19 +237,109 @@ exists to hold: parsing reads a version byte and computes offsets, and must neve
 body. It is recorded rather than ratio-gated — there is no OpenSSL operation to divide it by, and an
 absolute ceiling of a few nanoseconds on a shared runner would be a coin toss, not a gate.
 
-### An optimisation this found, and why it is not taken here
+### Per-statement reuse (amendment A11): what the context and the nonce key cost per row
 
-`derive_nonce_key` — `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` — measures 830–1120 ns on the
-reference runner and depends on **nothing but the key**, yet `encrypt_det` recomputes it on every
-call: roughly half of deterministic nonce derivation at small sizes, and around 40% of `seal_det`.
-Caching it per `UDF_INIT` is a real saving on the deterministic encrypt path.
+The first version of this file recorded an optimisation and declined to take it: `derive_nonce_key`
+depends on nothing but the key yet `encrypt_det` recomputed it on every row, and caching it meant
+holding a copy of the key across rows, which `crypto-safety.md` did not allow without an amendment.
+Amendment A11 is that amendment. It also covers the larger case the same reasoning had hidden:
+`gcm_decrypt` built an `EVP_CIPHER_CTX` and ran the key schedule on every row, and at the size of a
+name that setup *was* the cost.
 
-It is deliberately not done. The key arrives as a per-row SQL argument, so a cache must also hold a
-copy of the key to know whether it is still valid — and keeping derived key material plus a key copy
-alive across rows is precisely what `crypto-safety.md` pushes against. That is a design decision with
-a security dimension, so per `AGENTS.md` §9 it belongs in `docs/design.md` as an amendment before it
-belongs in `src/`. Recording the measurement is the useful half; this is where the argument would
-start.
+**Where the time was.** Two control queries were added to the load runner, both with the predicate
+`CHAR_LENGTH(x) > 0`, which is true for every row, so both count the same rows: `plain_len` over a
+plaintext utf8mb4 column and `gcm_len` over `gcm_decrypt(...)`. The queries run in an order where
+every query is preceded by every other equally often. Their differences are **differences of p95
+between queries**, not execution times of components, and they bracket rather than attribute.
+
+On the laptop, 100,000 rows, one session, three runs with the pre-A11 component: `plain_len` p95
+6.7–11.5 ms (13–24% of the `gcm` query's p95), `gcm_len − plain_len` 38.4–39.0 ms (73–85%), and
+`gcm − gcm_len` −1.8 to 7.4 ms, i.e. not distinguishable from zero. Divided over the rows, the
+`gcm_len − plain_len` difference is 384–391 ns per row, beside a bare 16-byte `open` of about 280 ns
+in the same container. That is consistent with the per-call cipher setup being most of what the
+decrypting call adds, and it is what made the context worth keeping; it does not by itself prove
+where inside the call the time goes.
+
+**Core, container on the laptop, one run** (the reference for each reused path keeps the same state
+across calls, so the gated ratio stays structure over algorithm; `*_vs_*` is what the reuse saves):
+
+| aes256 | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open` (fresh context per call) | 333 ns | 325 ns | 843 ns | 8,547 ns |
+| `open_session` (context kept) | 143 ns | 165 ns | 742 ns | 9,882 ns |
+| `open_session` / `open` | **0.43** | 0.51 | 0.88 | 1.16 (one run; not established whether noise or a regression) |
+| `seal_det` (nonce key per call) | 1,599 ns | 1,689 ns | 3,636 ns | 32,734 ns |
+| `seal_det_session` (nonce key kept) | 1,051 ns | 1,123 ns | 3,022 ns | 32,472 ns |
+| `seal_det_session` / `seal_det` | **0.66** | 0.67 | 0.83 | 0.99 |
+
+AES-192 and AES-128 show the same shape (`open_session`/`open` 0.38–0.45 at 16 B). The saving is
+the per-call setup, so it is a constant: around 190 ns on a decrypt and around 550 ns on a
+deterministic seal, dominant on a name and invisible on 64 KiB.
+
+**The gate, and why `open_session` has a wider ceiling at the small sizes.** The structure around
+one open — the envelope parse, the suite lookups, the constant-time compare of the key copy — costs
+the same few tens of nanoseconds whether the algorithm under it costs ~600 ns (a fresh context, on
+the CI runner) or ~200 ns (a kept one), so the same structure is a larger ratio over the cheaper
+reference. Three CI `bench` runs on 2026-10-07 (commit `1aa0ba7`;
+[37582494590](https://github.com/devgyurak/mysql-gcm/actions/runs/37582494590),
+[37582537352](https://github.com/devgyurak/mysql-gcm/actions/runs/37582537352),
+[37583117389](https://github.com/devgyurak/mysql-gcm/actions/runs/37583117389)) set the ceilings:
+
+| Gated ratio, min–max over three suites × three runs | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open_session` | 1.114–1.193 | 1.081–1.162 | 1.007–1.224 | 0.914–1.007 |
+| `seal_det_session` | 1.016–1.053 | 1.025–1.067 | 0.960–1.093 | 0.939–1.006 |
+| `open` (one call, for comparison) | 1.030–1.044 | 0.987–1.061 | 1.008–1.126 | 0.975–1.016 |
+
+`open_session` is 1.30 at 16 and 256 B — the ~9% headroom over the worst observation that the 1.10
+ceilings have over theirs — and 1.15 at 4 KiB; `seal_det_session` never exceeded 1.093 and is 1.15
+up to 4 KiB; both are 1.10 at 64 KiB. The one-call `open`, which an earlier version of this PR had
+pushed to 1.11–1.13 at 16 and 256 B with a heap session and two context resets per call, is back
+inside 1.10 there.
+
+**Not absorbed.** The third run landed on a runner about five times faster than the usual class
+(bare 64 KiB seal 3,237 ns against ~17,000) and there three values broke their ceilings:
+`open_session/aes256/4096` 1.224, and two one-call cases whose code path this change does not alter
+in kind, `seal_det/aes256/256` 1.118 and `open/aes192/4096` 1.126. The cause is not isolated. No
+ceiling was widened to absorb them, so a run on that runner class can fail this gate; the decision is
+deferred explicitly to #24, which lists what has to be measured to make it.
+
+The first container run on the laptop, before any of this, had measured `open_session` at
+1.04–1.40 and put two one-call cases over 1.10; those numbers set nothing.
+
+**SQL, MySQL 8.4.11 on the laptop, 100,000 rows, three runs each way** — the same server, the same
+load runner with the balanced order, the `develop` component and then the A11 component. Ranges over
+the three runs; the host was running other containers throughout, recorded per run in the artifacts:
+
+| | Sessions | gcm p95 | `AES_DECRYPT` p95 | p95 ratio | `gcm_len − plain_len` per row |
+|---|---:|---:|---:|---:|---:|
+| before | 1 | 45.8–52.5 ms | 49.0–61.0 ms | 0.800–0.975 | 384–391 ns |
+| after | 1 | 17.9–21.6 ms | 41.3–53.5 ms | **0.393–0.473** | 114–123 ns |
+| before | 8 | 110.2–113.7 ms | 126.7–130.3 ms | 0.864–0.881 | 1,010–1,017 ns |
+| after | 8 | 26.5–43.0 ms | 143.2–171.0 ms | **0.185–0.252** | 154–223 ns |
+
+At one session the per-row difference falls from ~385 to ~120 ns, close to the bare kept-context
+open in the core benchmark. At eight sessions it falls by ~800–860 ns, much more than the ~190 ns the
+serial benchmark accounts for. The other columns did **not** stay where they were at eight sessions:
+in the after runs `plain_len` rose from 9.9–10.4 to 11.5–18.8 ms and `AES_DECRYPT` from 126.7–130.3
+to 143.2–171.0 ms, on a host whose load differed between the runs (recorded per run). Part of the
+eight-session ratio's fall therefore comes from its denominator rising; the GCM query's own p95
+falling from 110.2–113.7 to 26.5–43.0 ms does not depend on that. At one session `AES_DECRYPT`
+measured 49.0–61.0 ms before and 41.3–53.5 ms after, overlapping.
+**The cause of the larger eight-session gain is not isolated by these measurements.** One hypothesis is
+contention among threads in OpenSSL 3's per-call context setup, which keeping the context would
+avoid; nothing here separates that from other explanations, and the observed gain is what this
+section reports. The same shape was seen on MySQL 9.4 during the prototype (1.06 → 0.48 at one
+session, 1.27 → 0.26 at eight). 32 sessions have not been measured with A11; the CI `load` runs are
+the reference-runner numbers, and the nightly's own ratio will say whether the 1.10 gate's centre
+has moved.
+
+**What a smaller value gains and a larger one does not.** On a 64 KiB value the kept context
+measured 0.99 against a fresh one in the CI runs and 1.16 in one laptop run; with the setup a small
+share of a cipher-dominated call, no gain is expected there, and whether the laptop's 1.16 is noise
+or a regression is not established by one run. Everything in
+this section is about values the size of a name, which is what the load fixture and the project's
+reason to exist are.
 
 ## Results
 

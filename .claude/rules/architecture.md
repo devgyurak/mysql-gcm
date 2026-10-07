@@ -54,8 +54,8 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 | Lifetime | Resource and responsibility |
 |---|---|
 | component | The fetched algorithm handles, the sysvar storage, the registration state. Prepared in init and released in a safe deinit |
-| `UDF_INIT` | That UDF instance's result buffer and strict snapshot. Managed by init/deinit and not equated with a whole session |
-| operation | The EVP operation context, derived keys, transient secrets. Cleaned up when the operation ends and on every error path |
+| `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session |
+| operation | The EVP *operation* (the init with the nonce through Final), derived per-row values and transient secrets — the nonce, the MAC output, a scratch copy. Cleaned up when the operation ends and on every error path. The decrypt context *object* is `UDF_INIT`-lifetime (A11); the operation run in it is not |
 
 - Input bytes are borrowed from a buffer the caller owns. Do not retain a pointer beyond that
   ownership. Cleansing a copied secret is the responsibility of whoever made the copy.
@@ -82,12 +82,19 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
   overflow and the range of OpenSSL's integer arguments, and translates a failure into a SQL error.
 - No optimisation omits authentication, the key length check or the cleansing of secrets. A change in
   per-row cost is confirmed with the load tests.
+- Reuse across rows is confined to what amendment A11 allows — `gcm_decrypt`'s scheduled context and
+  `gcm_encrypt_det`'s nonce key, each inside one `UDF_INIT` — and is keyed on the full key bytes,
+  compared in constant time. Nothing else is carried from one row to the next.
 
 ## 6. Test boundaries and verification
 
 - `encrypt_with_nonce` is an internal entry point for the vector tests. Do not reference it from a
   server adapter and do not register it in SQL. The same constraint applies to any new test entry
   point.
+- `decrypt_session_has_key` (amendment A11) is a core test seam under the same constraint.
+  `fault_inject_decrypt_init` is compiled only when `GCM_FAULT_INJECTION` is defined, which
+  `tests/unit` does and the component build never does, so the shipped `.so` contains no injection
+  point. Both are listed in `scripts/check-architecture.py`.
 - Do not ship experimental code that skips encryption or returns plaintext as a successful result under
   an environment variable or a debug option. Experiments belong in a target that is not shipped.
 - `python3 scripts/check-architecture.py` checks the core's explicit include dependencies and

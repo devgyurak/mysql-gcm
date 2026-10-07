@@ -34,17 +34,23 @@ The `.so` named by `GCM_SO` (default `build/8.4/...`) is mounted read-only into 
 
 ## Load — `tests/load`
 `run.py --rows {10000,100000,300000} --concurrency 1,8,32 --baseline aes [--suite aes256|aes192|aes128] --out result.json`
-1. Given: N rows in `patients(id, name_gcm VARBINARY, name_cbc VARBINARY)` from a seeded Korean-name
-   generator, with the **same plaintext** in both columns. The CBC column is written with the builtin
-   `AES_ENCRYPT` under `block_encryption_mode = 'aes-256-cbc'` — that is the baseline being compared
-   against.
+1. Given: N rows in `patients(id, name_gcm VARBINARY, name_cbc VARBINARY, name_plain VARCHAR utf8mb4)`
+   from a seeded Korean-name generator, with the **same plaintext** in all three columns. The CBC
+   column is written with the builtin `AES_ENCRYPT` under `block_encryption_mode = 'aes-256-cbc'` —
+   that is the baseline being compared against.
 2. When: `gcm_decrypt(name_gcm,@k) LIKE '%김%'` and `AES_DECRYPT(name_cbc,@k,@iv) LIKE '%김%'`, after 3
    warm-ups, 40 measured iterations, with one thread per concurrent session and a connection per
-   thread. The two variants are **interleaved per iteration**, with the order within the pair
-   alternating — measuring all of one and then all of the other attributes drift to the variant.
-3. Then: p50/p95/max in ms, the `gcm/aes` ratio, and the increase in `Created_tmp_disk_tables`, as JSON
-   on stdout with a human summary on stderr. With `--gate tests/load/baseline.json`, exceeding a
-   threshold exits 1.
+   thread. Two controls bracket the cost with one predicate so they count the same rows:
+   `plain_len` (`CHAR_LENGTH(name_plain) > 0`) and `gcm_len` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`).
+   All variants are **interleaved** in a de Bruijn order (`query_schedule`): every variant is preceded
+   by every variant equally often, so what one query warms or evicts lands evenly — measuring all of
+   one and then all of the other attributes drift to the variant.
+3. Then: p50/p95/max in ms per variant, the `gcm/aes` ratio, a `decomposition` per concurrency — the
+   `plain_len` p95, the p95 difference `gcm_len − plain_len` and `gcm − gcm_len`, each in ms and as a
+   percentage of `gcm`, plus the first per row in ns. These are **differences between queries' p95**,
+   not component timings; read them as brackets, not attributions — and the increase in `Created_tmp_disk_tables`, as JSON on stdout with a human summary on
+   stderr. With `--gate tests/load/baseline.json`, exceeding a threshold exits 1; the gate reads
+   `gcm` against `aes` only.
 
 `--suite` selects the key length for the GCM column (32, 24 or 16 bytes of the fixture key); the
 `AES_DECRYPT` baseline stays `aes-256-cbc` so the suites' ratios share a denominator. The runner lowers

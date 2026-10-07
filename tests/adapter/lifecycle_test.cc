@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <mysql/udf_registration_types.h>
+
 #include "envelope.h"
 #include "service_stubs.h"
 #include "sysvar.h"
@@ -542,5 +544,175 @@ TEST_F(Lifecycle, GivenTheReaderIsUsed_WhenTheFloorIsRead_ThenItAsksForGlobalSco
   EXPECT_EQ(gcm_adapter::extra_for("variable_reader_get"), "GLOBAL");
 }
 #endif
+
+}  // namespace
+
+/* ---- design A11: the per-UDF_INIT crypto sessions ------------------------------------
+ *
+ * The amendment rests on one `UDF_INIT` owning one state that nothing else touches. These
+ * cases drive the real UDF entry points through the stub services and pin that: two items
+ * get two states, an item's state goes away in its deinit, and a value sealed by one item
+ * opens through another item's reused context, twice, byte for byte. */
+
+extern "C" {
+bool gcm_encrypt_det_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_encrypt_det_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                          unsigned char *is_null, unsigned char *error);
+void gcm_encrypt_det_deinit(UDF_INIT *initid);
+bool gcm_decrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                      unsigned char *is_null, unsigned char *error);
+void gcm_decrypt_deinit(UDF_INIT *initid);
+}
+
+namespace {
+
+/* A two-argument call (value, key) with the fixture key: enough for init and one row. */
+struct TwoArgs {
+  UDF_ARGS args{};
+  Item_result types[2] = {STRING_RESULT, STRING_RESULT};
+  char *values[2] = {nullptr, nullptr};
+  unsigned long lengths[2] = {0, 0};
+  char maybe_null[2] = {0, 0};
+
+  TwoArgs(const void *value, size_t value_len, const void *key, size_t key_len) {
+    args.arg_count = 2;
+    args.arg_type = types;
+    args.args = values;
+    args.lengths = lengths;
+    args.maybe_null = maybe_null;
+    values[0] = const_cast<char *>(static_cast<const char *>(value));
+    lengths[0] = static_cast<unsigned long>(value_len);
+    values[1] = const_cast<char *>(static_cast<const char *>(key));
+    lengths[1] = static_cast<unsigned long>(key_len);
+  }
+};
+
+const unsigned char kA11Key[gcm::kKeyLen256] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
+const char kA11Name[] = "\xed\x99\x8d\xea\xb8\xb8\xeb\x8f\x99";  // 홍길동
+
+TEST_F(Lifecycle, GivenTwoDecryptItems_WhenBothInit_ThenEachOwnsItsOwnStateUntilItsDeinit) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  TwoArgs args(kA11Name, sizeof(kA11Name) - 1, kA11Key, sizeof(kA11Key));
+  char message[512] = {};
+  UDF_INIT first{};
+  UDF_INIT second{};
+
+  // When
+  const bool first_failed = gcm_decrypt_init(&first, &args.args, message);
+  const bool second_failed = gcm_decrypt_init(&second, &args.args, message);
+
+  // Then: two items, two states, and a deinit releases only its own
+  EXPECT_FALSE(first_failed) << message;
+  EXPECT_FALSE(second_failed) << message;
+  EXPECT_NE(first.ptr, nullptr);
+  EXPECT_NE(second.ptr, nullptr);
+  EXPECT_NE(first.ptr, second.ptr);
+  gcm_decrypt_deinit(&first);
+  EXPECT_EQ(first.ptr, nullptr);
+  EXPECT_NE(second.ptr, nullptr);
+  gcm_decrypt_deinit(&second);
+  EXPECT_EQ(second.ptr, nullptr);
+}
+
+TEST_F(Lifecycle, GivenAValueSealedByOneItem_WhenAnotherItemOpensItTwice_ThenBothOpensMatch) {
+  // Given: one deterministic item seals the name, one decrypt item will open it
+  ASSERT_EQ(component_init(), 0);
+  char message[512] = {};
+  TwoArgs seal_args(kA11Name, sizeof(kA11Name) - 1, kA11Key, sizeof(kA11Key));
+  UDF_INIT sealer{};
+  ASSERT_FALSE(gcm_encrypt_det_init(&sealer, &seal_args.args, message)) << message;
+  unsigned long envelope_len = 0;
+  unsigned char is_null = 0;
+  unsigned char error = 0;
+  const char *envelope =
+      gcm_encrypt_det_udf(&sealer, &seal_args.args, nullptr, &envelope_len, &is_null, &error);
+  ASSERT_NE(envelope, nullptr);
+  ASSERT_EQ(error, 0);
+  const std::string sealed(envelope, envelope_len);
+  gcm_encrypt_det_deinit(&sealer);
+
+  TwoArgs open_args(sealed.data(), sealed.size(), kA11Key, sizeof(kA11Key));
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_init(&opener, &open_args.args, message)) << message;
+
+  // When: the same item opens the same envelope twice — the second call is the reused path
+  unsigned long first_len = 0;
+  const char *first =
+      gcm_decrypt_udf(&opener, &open_args.args, nullptr, &first_len, &is_null, &error);
+  ASSERT_NE(first, nullptr);
+  const std::string first_plain(first, first_len);
+  unsigned long second_len = 0;
+  const char *second =
+      gcm_decrypt_udf(&opener, &open_args.args, nullptr, &second_len, &is_null, &error);
+
+  // Then
+  EXPECT_EQ(error, 0);
+  EXPECT_EQ(is_null, 0);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(first_plain, std::string(kA11Name, sizeof(kA11Name) - 1));
+  EXPECT_EQ(std::string(second, second_len), first_plain);
+  gcm_decrypt_deinit(&opener);
+}
+
+}  // namespace
+
+namespace {
+
+/* One gcm_decrypt item over three rows: good, tampered, good. Under strict=OFF the server
+   gets plaintext, NULL, plaintext from the same UDF_INIT — the reused context must recover
+   from the bad tag on the row after it (design A11). */
+TEST_F(Lifecycle, GivenStrictOffAndOneItem_WhenRowsAreGoodBadGood_ThenPlainNullPlain) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::set_sysvar_value("gcm.strict", "OFF");
+  char message[512] = {};
+  TwoArgs seal_args(kA11Name, sizeof(kA11Name) - 1, kA11Key, sizeof(kA11Key));
+  UDF_INIT sealer{};
+  ASSERT_FALSE(gcm_encrypt_det_init(&sealer, &seal_args.args, message)) << message;
+  unsigned long envelope_len = 0;
+  unsigned char is_null = 0;
+  unsigned char error = 0;
+  const char *envelope =
+      gcm_encrypt_det_udf(&sealer, &seal_args.args, nullptr, &envelope_len, &is_null, &error);
+  ASSERT_NE(envelope, nullptr);
+  const std::string good(envelope, envelope_len);
+  gcm_encrypt_det_deinit(&sealer);
+  std::string bad = good;
+  bad.back() = static_cast<char>(bad.back() ^ 0x01);
+
+  TwoArgs good_row(good.data(), good.size(), kA11Key, sizeof(kA11Key));
+  TwoArgs bad_row(bad.data(), bad.size(), kA11Key, sizeof(kA11Key));
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_init(&opener, &good_row.args, message)) << message;
+  const std::string name(kA11Name, sizeof(kA11Name) - 1);
+
+  // When: three rows through the one item
+  unsigned long len1 = 0, len2 = 0, len3 = 0;
+  unsigned char null1 = 0, null2 = 0, null3 = 0;
+  unsigned char err1 = 0, err2 = 0, err3 = 0;
+  const char *r1 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len1, &null1, &err1);
+  ASSERT_NE(r1, nullptr);
+  const std::string first(r1, len1);
+  const char *r2 = gcm_decrypt_udf(&opener, &bad_row.args, nullptr, &len2, &null2, &err2);
+  const char *r3 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len3, &null3, &err3);
+  ASSERT_NE(r3, nullptr);
+  const std::string third(r3, len3);
+
+  // Then: plaintext, NULL without an error, plaintext
+  EXPECT_EQ(first, name);
+  EXPECT_EQ(null1, 0);
+  EXPECT_EQ(err1, 0);
+  EXPECT_EQ(r2, nullptr);
+  EXPECT_EQ(null2, 1);
+  EXPECT_EQ(err2, 0);
+  EXPECT_EQ(third, name);
+  EXPECT_EQ(null3, 0);
+  EXPECT_EQ(err3, 0);
+  gcm_decrypt_deinit(&opener);
+}
 
 }  // namespace

@@ -5,6 +5,41 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Changed
+- **`gcm_decrypt` keeps its cipher context per statement, and `gcm_encrypt_det` its nonce key**
+  (`docs/design.md` amendment A11). One `UDF_INIT` — one UDF item, one statement — now owns an
+  `EVP_CIPHER_CTX` with the key schedule set and a copy of the key it was scheduled for; a row that
+  brings the same key bytes for the same suite sets only the nonce. The deterministic variant keeps
+  the derived `nonce_key` the same way. The copy is compared with `CRYPTO_memcmp`, replaced only on a
+  key change (cleansed first), forgotten on any cipher failure including a bad tag, and cleansed in
+  `deinit`; the pre-checks (`bad_key_len`, `bad_envelope`) leave it alone. Nothing on the wire
+  changes: `spec/envelope.md` is untouched and every vector now also runs through the reusing paths.
+  The one-call `decrypt()`, `encrypt_det()` and `derive_det_nonce()` are the same bodies with a
+  session that lives for the call.
+
+  Why: matched-predicate control queries in the load runner put the p95 difference that calling
+  `gcm_decrypt` adds to a scan at 73–85% of a `gcm_decrypt(col) LIKE` query (a difference between
+  queries, not a component timing), and the core bench put a 16-byte open at ~300 ns, most of it the
+  per-call context setup. On a developer machine (MySQL 8.4.11, 100k rows, three runs each) the
+  query's p95 fell 45.8–52.5 → 17.9–21.6 ms at one session and 110.2–113.7 → 26.5–43.0 ms at eight
+  (the `AES_DECRYPT` baseline overlapped at one session but rose at eight, so the eight-session ratio
+  overstates the change); why the eight-session gain exceeds what the serial
+  bench predicts is not isolated (one hypothesis is contention in OpenSSL 3's per-call setup). What this costs — key material retained in the component's
+  heap for a statement rather than one operation — is stated in A11 with its invariants, and the
+  `crypto-safety` and `architecture` rules carry the exception.
+- `tests/bench` gates the two reused paths (`open_session`, `seal_det_session`) against references
+  that keep the same state. Ceilings from three CI runs: `open_session` 1.30 / 1.30 / 1.15 / 1.10 by
+  size (measured up to 1.193 at 16 B — the same structure is a larger ratio over a cheaper reference),
+  `seal_det_session` 1.15 / 1.15 / 1.15 / 1.10 (measured up to 1.093). One run on a runner five
+  times faster than the usual class broke three ceilings, two of them one-call cases; the cause is not
+  isolated, nothing was widened to absorb it, and #24 tracks it. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
+  `gcm_len`, alongside `gcm` and `aes`, reports their p95 differences, and issues each session's
+  queries in a de Bruijn order so every query follows every other equally often; the nightly's query
+  count doubles and the gate's gcm/aes ratio is now measured under that order.
+- The adapter suite drives the real UDF entry points: two decrypt items own two states, a deinit
+  releases only its own, and a value sealed by one item opens through another item's kept context
+  twice.
+
 ### Measured
 - **The two smaller suites, at the core and at the SQL level.** `tests/bench` now runs every gated
   case once per suite, each against a reference running the same cipher, so the 1.10 ceiling applies

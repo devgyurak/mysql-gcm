@@ -81,13 +81,28 @@ bool init_state(UDF_INIT *initid, char *msg) {
   return false;
 }
 
+bool init_decrypt_session(UDF_INIT *initid, char *msg) {
+  auto *state = reinterpret_cast<UdfState *>(initid->ptr);
+  state->decrypt = decrypt_session_new();
+  if (state->decrypt == nullptr) {
+    /* The server does not call deinit for an init that failed (udf_handler::fix_fields
+       returns before `initialized` is set), so the state has to go here. */
+    free_state(initid);
+    snprintf(msg, kInitMsgLen, "out of memory");
+    return true;
+  }
+  return false;
+}
+
 void free_state(UDF_INIT *initid) {
   auto *state = reinterpret_cast<UdfState *>(initid->ptr);
   if (state == nullptr) return;
+  decrypt_session_free(state->decrypt);  // wipes its key copy; nullptr for the encrypt UDFs
   if (state->out != nullptr) {
     wipe(state->out, state->capacity);  // the last plaintext lives here
     std::free(state->out);
   }
+  det_session_clear(&state->det);  // the key copy and the derived nonce_key
   std::free(state);
   initid->ptr = nullptr;
 }

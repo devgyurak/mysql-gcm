@@ -64,22 +64,53 @@ Error derive_nonce_key(Bytes key, unsigned char *out) {
 }
 
 Error derive_det_nonce(Bytes key, Bytes plaintext, unsigned char *out) {
-  unsigned char nonce_key[kHmacLen];
-  Error err = derive_nonce_key(key, nonce_key);
-  if (err != Error::ok) {
-    OPENSSL_cleanse(nonce_key, sizeof(nonce_key));
-    return err;
+  /* One derivation body (derive_det_nonce_cached) and a session that lives for this
+     call only, so the per-call path cannot drift from the cached one. */
+  DetSession session{};
+  const Error err = derive_det_nonce_cached(&session, key, plaintext, out);
+  det_session_clear(&session);
+  return err;
+}
+
+void det_session_clear(DetSession *session) {
+  OPENSSL_cleanse(session->key, sizeof(session->key));
+  OPENSSL_cleanse(session->nonce_key, sizeof(session->nonce_key));
+  session->key_len = 0;
+}
+
+Error derive_det_nonce_cached(DetSession *session, Bytes key, Bytes plaintext, unsigned char *out) {
+  /* The same length check derive_nonce_key performs, so a wrong length is
+     reported before the cache is consulted or touched. */
+  if (suite_for_key_len(key.size) == nullptr) return Error::bad_key_len;
+
+  /* Constant-time compare of the key bytes (crypto-safety): a cache hit must not
+     leak how many leading key bytes matched. The length check short-circuits
+     only on a public quantity. */
+  const bool hit =
+      session->key_len == key.size && CRYPTO_memcmp(session->key, key.data, key.size) == 0;
+  if (!hit) {
+    det_session_clear(session);  // the previous key and its nonce_key go first
+    const Error derived = derive_nonce_key(key, session->nonce_key);
+    if (derived != Error::ok) {
+      det_session_clear(session);
+      return derived;
+    }
+    std::memcpy(session->key, key.data, key.size);
+    session->key_len = key.size;
   }
 
   unsigned char mac[kHmacLen];
-  err = hmac_sha256(Bytes{nonce_key, sizeof(nonce_key)}, plaintext, mac);
-  OPENSSL_cleanse(nonce_key, sizeof(nonce_key));  // derived key material
+  const Error err =
+      hmac_sha256(Bytes{session->nonce_key, sizeof(session->nonce_key)}, plaintext, mac);
   if (err != Error::ok) {
+    /* An OpenSSL failure forgets the cache, as the decrypt session forgets its
+       context: the next row re-derives rather than trusting state from a call that
+       failed. The pre-check above (bad_key_len) returns before the cache is touched. */
     OPENSSL_cleanse(mac, sizeof(mac));
+    det_session_clear(session);
     return err;
   }
-
-  std::memcpy(out, mac, kNonceLen);  // first 12 bytes of the MAC
+  std::memcpy(out, mac, kNonceLen);  // first 12 bytes of the MAC (spec/envelope.md §3)
   OPENSSL_cleanse(mac, sizeof(mac));
   return Error::ok;
 }

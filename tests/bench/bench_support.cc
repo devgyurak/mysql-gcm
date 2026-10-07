@@ -67,9 +67,9 @@ const unsigned char kFixtureKey[gcm::kKeyLen256] = {
 }  // namespace
 
 const gcm::Bytes fixture_key(size_t key_len) {
-  /* A length longer than the fixture would read past it; clamp rather than trust the caller,
-     and let the suite lookup downstream report the length as the error it is. */
-  return gcm::Bytes{kFixtureKey, key_len <= sizeof(kFixtureKey) ? key_len : sizeof(kFixtureKey)};
+  /* Preserve invalid lengths for the downstream suite check: clamping an oversized key to
+     32 would silently turn a bad benchmark argument into a valid AES-256 measurement. */
+  return gcm::Bytes{key_len <= sizeof(kFixtureKey) ? kFixtureKey : nullptr, key_len};
 }
 
 std::vector<unsigned char> filler(size_t len, uint64_t seed) {

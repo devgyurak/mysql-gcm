@@ -24,7 +24,9 @@ import random
 import statistics
 import sys
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 
 import pymysql
@@ -98,16 +100,20 @@ def suite_key_hex(suite: str) -> str:
     return FIXTURE_KEY_HEX[: SUITES[suite] * 2]
 
 
-def set_min_key_bytes(conn: Connection, key_bytes: int) -> int:
-    """Lowers gcm.min_key_bytes far enough for the suite and returns the previous value.
+@contextmanager
+def encryption_floor(conn: Connection, key_bytes: int) -> Iterator[None]:
+    """Temporarily lowers the write policy and restores it even if loading fails.
 
     Only the two encryption functions consult it, so this is needed to *write* the
     AES-192 or AES-128 column; decryption, which is what the measurement times, ignores
     it. GLOBAL on every supported major, so the caller restores the previous value.
     """
     previous = int(str(scalar(conn, "SELECT @@GLOBAL.gcm.min_key_bytes")))
-    execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (key_bytes,))
-    return previous
+    execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (min(previous, key_bytes),))
+    try:
+        yield
+    finally:
+        execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (previous,))
 
 
 def load_rows(conn: Connection, rows: int, seed: int, suite: str) -> None:
@@ -291,16 +297,13 @@ def main() -> int:
     concurrencies = [int(c) for c in args.concurrency.split(",")]
 
     setup = connect()
-    previous_min_key_bytes: int | None = None
     try:
         disk_before = status_value(setup, "Created_tmp_disk_tables")
         # Lowered only for as long as the rows are being written: the measured path is
         # decryption, which ignores the setting, and a server left at 16 after the run
         # would be a weaker server than the one the run found.
-        previous_min_key_bytes = set_min_key_bytes(setup, SUITES[args.suite])
-        load_rows(setup, args.rows, args.seed, args.suite)
-        set_min_key_bytes(setup, previous_min_key_bytes)
-        previous_min_key_bytes = None
+        with encryption_floor(setup, SUITES[args.suite]):
+            load_rows(setup, args.rows, args.seed, args.suite)
         matching = int(str(scalar(setup, QUERIES["gcm"], query_args("gcm", args.suite))))
 
         measurements: list[Measurement] = []
@@ -310,8 +313,6 @@ def main() -> int:
         disk_after = status_value(setup, "Created_tmp_disk_tables")
         version = str(scalar(setup, "SELECT VERSION()"))
     finally:
-        if previous_min_key_bytes is not None:
-            set_min_key_bytes(setup, previous_min_key_bytes)
         setup.close()
 
     comparisons: list[dict[str, object]] = []

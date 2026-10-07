@@ -303,20 +303,19 @@ same for either variant.
 
 ### Does a smaller suite buy anything?
 
-The first measurements do not establish a consistent SQL speed advantage. In one developer-machine
-core run, AES-192 and AES-128 took 0.81–1.16 times the AES-256 time, depending on operation and size.
-The first CI core run put those ratios at 0.919–1.012; its 64 KiB AES-128 decrypt was 8.1% faster.
-These are observations from individual runs, not a bound for other machines or proof of equal cost.
+Not on a value the size of a name, and a little on a large one. Over four CI core runs, AES-192 and
+AES-128 are within about 2% of AES-256 at 16 and 256 bytes; the difference grows with the value until
+AES-128 decryption is 7–14% cheaper at 64 KiB, the wider end on the fastest runner. The deterministic
+variant is flat at every size, because its cost is HMAC, which the key length does not touch.
 
-At the SQL level, the developer-machine GCM p95 times were 42.7–45.8 ms at one session and
-110.7–123.8 ms at eight. The corresponding ratios against each run's AES-256-CBC baseline were
-0.933–1.053 and 0.773–0.795; those are different quantities. The first CI load run for each suite
-passed the existing gate, but the runs used separate hosted runners and cannot establish a suite
-ranking or identify how much time was spent scanning versus decrypting.
+At the SQL level, three CI runs per suite over 300,000 rows put every suite's `gcm_decrypt(col) LIKE`
+p95 at 0.84–0.93 of `AES_DECRYPT` at 8 and 32 sessions and 0.75–0.96 at one, with the three suites'
+ranges overlapping. The runs each land on a different hosted machine, so the milliseconds rank the
+runners rather than the suites, and three runs bound the spread without proving the suites equal.
 
 Keep AES-256 as the default recommendation. Use a smaller suite when the security and interoperability
 requirements permit it, and measure the intended workload before making a performance trade-off.
-Repeated CI measurements remain open in #18. Run links and the full tables are in `docs/perf.md`.
+Run links and the full tables are in `docs/perf.md`.
 
 Both gates, the original three-run baseline, and the newer per-suite measurements are in
 [`docs/perf.md`](docs/perf.md).

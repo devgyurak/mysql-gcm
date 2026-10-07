@@ -44,7 +44,10 @@
 >   constraint. Cost: none in code; relies on every deployment honouring it.
 > - **(b) Separate the suites in the derivation.** Make the suite an input — a per-suite label, or the
 >   version byte in the HMAC message. Cost: a `spec/envelope.md` version bump and new deterministic
->   version bytes, because existing `0x05` and `0x07` data must keep decrypting; and deterministic
+>   version bytes. Not for decryption — an existing envelope stores its nonce and decrypts whatever
+>   the label becomes — but because `spec/envelope.md` §7 freezes the derivation label and the version
+>   bytes, so a new derivation is a new version, never a redefinition of `0x05` or `0x07`; and because
+>   the version byte is how a reader tells which derivation reproduces a value. And deterministic
 >   continuity breaks — a value sealed before and after the change no longer compares equal, so every
 >   join and `UNIQUE` column under AES-128 or AES-192 has to be re-encrypted on both sides together.
 >   `0x03` could keep today's label and lose nothing.
@@ -52,16 +55,34 @@
 >   bytes make it a zero-extension of a shorter suite's key — a 24-byte key ending in eight zero
 >   bytes, or a 32-byte key ending in eight or sixteen — is refused by the two encryption functions,
 >   with its own error, the way a key below `gcm.min_key_bytes` is. Decryption is unaffected, so data
->   already written stays readable, as with the floor. Cost: a few lines in the UDF layer and a
->   constant-time check of at most 16 bytes per row; it refuses keys a CSPRNG produces with
->   probability about 2⁻⁶⁴, and it removes the linkage whatever the deployment does. No spec change,
->   no continuity break.
+>   already written stays readable, as with the floor.
+>
+>   *What it guarantees.* No two keys the policy **accepts from then on** stand in a zero-extension
+>   relation, so writes made after it cannot be linked to each other across suites. It does not undo a
+>   relation that already exists in stored data: if rows were written under `K32 = K16 ‖ 0¹⁶` before
+>   the policy, and `K16` is still accepted afterwards, new writes under `K16` produce the same nonces
+>   as those old rows — the equality follows from HMAC's key normalisation (RFC 2104 §2), not from when
+>   the row was written. So existing long-key data stays linkable to new short-key writes, not only to
+>   other existing data.
+>
+>   *What it costs a deployment already using such a key.* No envelope byte and no derivation changes,
+>   but the deterministic *workload* under that key stops: `WHERE col = gcm_encrypt_det(?, key)`,
+>   every new join value and every new `UNIQUE` insert under it become errors. Decryptability is not
+>   the same as continuing deterministic operation. Moving off the refused key is a key change, with
+>   the migration of every column that has to compare equal (A8). Implementation cost: a few lines in
+>   the UDF layer and a constant-time check of at most 16 bytes per row; it refuses keys a CSPRNG
+>   produces with probability about 2⁻⁶⁴. The new refusal and its dedicated error are a behaviour
+>   contract and go into `spec/envelope.md` in the implementing PR, under §7's rules for a
+>   documentation change that adds a failure condition without touching the byte layout.
 >
 > **Recommendation: (c), with (a)'s assumption written into `docs/ops-constraints.md` as well.** It is
-> the only option that closes the linkage without either trusting every deployment or breaking
-> deterministic continuity. Open for the reviewer: whether refusing on encryption only is enough, given
-> that data already written under a zero-extended pair stays linkable; and whether the check belongs
-> in the UDF layer (SQL policy, like the floor) or the core (a key-validity rule).
+> the only option that stops new zero-extension pairs from forming without trusting every deployment
+> or changing the derivation. It is not free for a deployment already using a zero-tailed key (above),
+> and it does not unlink data already written under one. Open for the reviewer: whether that residual
+> linkage, between existing long-key data and new writes under its short form, is acceptable or calls
+> for refusing the short form too when a zero-extended form is known to have been used — which the
+> component cannot know, so it would be an operational rule; and whether the check belongs in the UDF
+> layer (SQL policy, like the floor) or the core (a key-validity rule).
 >
 > ### Question 2 — whether `gcm_encrypt_det` should accept a 128-bit key
 >

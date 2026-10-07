@@ -6,6 +6,108 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A12 (2026-10-07) — Cross-suite nonce-key linkage, and deterministic AES-128: analysis for review
+>
+> **Status: proposed — awaiting the independent review that issue #22 requires.** Written by the author
+> of A10 and A11, so it is *input* to that review, not the review. Nothing below takes effect, and no
+> code changes, until a reviewer other than the author records a decision and its conditions in the
+> "Decision" block at the end. Each recommendation is the author's and can be overruled.
+>
+> ### Question 1 — the suites share one nonce-key derivation
+>
+> **What is exposed, exactly.** `nonce_key = HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")` for every
+> suite. HMAC zero-pads a key shorter than its 64-byte block ([RFC 2104 §2](https://www.rfc-editor.org/rfc/rfc2104.html#section-2)),
+> so a key `K` and `K ‖ 0ᵐ` are one HMAC key. Where both are suite lengths — 16 and 24, 16 and 32,
+> 24 and 32 — they derive the same `nonce_key` and so the same deterministic nonce for a given
+> plaintext. `tests/unit/nonce_test.cc` (`CrossSuiteZeroExtension`) pins this for all three pairs:
+> the stored nonces are equal and the ciphertext and tag differ.
+>
+> Consequence: anyone who can read a column sealed under `K` and a column sealed under `K ‖ 0ᵐ` can
+> see which rows hold equal plaintexts *across the two columns*. That is the equality leakage the
+> deterministic variant already accepts under one key, extended to a second key. It is **not** GCM's
+> catastrophic case — the two AES keys differ, so no keystream or authentication key is shared — and
+> it reveals equality, not plaintext or key bytes.
+>
+> **When it can occur.** Only when one key is a zero-extension of the other. Two keys generated
+> independently by a CSPRNG stand in that relation with probability 2⁻⁶⁴ (the last eight bytes of
+> the longer key being zero) or less. Truncation — the failure A10's floor guards against — does not
+> produce it: truncating a 32-byte key gives its *prefix*, and the prefix's zero-extension is a
+> different key unless the dropped bytes were zero. What does produce it is an application that
+> fits a short key to a longer suite by padding with zeros — exactly the folding and padding that
+> `crypto-safety.md` forbids inside the component, but which the component cannot stop a caller
+> from doing before the call.
+>
+> **Options.**
+>
+> - **(a) Accept, under a stated key-generation assumption.** Keys for different suites are generated
+>   independently; no key is ever derived from another by padding. Document it as an operational
+>   constraint. Cost: none in code; relies on every deployment honouring it.
+> - **(b) Separate the suites in the derivation.** Make the suite an input — a per-suite label, or the
+>   version byte in the HMAC message. Cost: a `spec/envelope.md` version bump and new deterministic
+>   version bytes, because existing `0x05` and `0x07` data must keep decrypting; and deterministic
+>   continuity breaks — a value sealed before and after the change no longer compares equal, so every
+>   join and `UNIQUE` column under AES-128 or AES-192 has to be re-encrypted on both sides together.
+>   `0x03` could keep today's label and lose nothing.
+> - **(c) Refuse zero-tailed keys on encryption.** A key whose length is a suite's and whose trailing
+>   bytes make it a zero-extension of a shorter suite's key — a 24-byte key ending in eight zero
+>   bytes, or a 32-byte key ending in eight or sixteen — is refused by the two encryption functions,
+>   with its own error, the way a key below `gcm.min_key_bytes` is. Decryption is unaffected, so data
+>   already written stays readable, as with the floor. Cost: a few lines in the UDF layer and a
+>   constant-time check of at most 16 bytes per row; it refuses keys a CSPRNG produces with
+>   probability about 2⁻⁶⁴, and it removes the linkage whatever the deployment does. No spec change,
+>   no continuity break.
+>
+> **Recommendation: (c), with (a)'s assumption written into `docs/ops-constraints.md` as well.** It is
+> the only option that closes the linkage without either trusting every deployment or breaking
+> deterministic continuity. Open for the reviewer: whether refusing on encryption only is enough, given
+> that data already written under a zero-extended pair stays linkable; and whether the check belongs
+> in the UDF layer (SQL policy, like the floor) or the core (a key-validity rule).
+>
+> ### Question 2 — whether `gcm_encrypt_det` should accept a 128-bit key
+>
+> **What does not depend on key size.** The deterministic nonce is HMAC-SHA256 truncated to 96 bits,
+> so the probability that two *distinct* plaintexts under one key get the same nonce — the
+> catastrophic case, which exposes GHASH's authentication key and allows forgery under that key — is
+> about n²/2⁹⁷ for n distinct plaintexts whatever the suite. §5.2's calculation is unchanged.
+> The construction fits neither IV construction of [NIST SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
+> §8.2 exactly: it is not the deterministic (fixed field + invocation counter) construction and not
+> the RBG-based one, so §8's uniqueness requirement holds only probabilistically and §8.3's
+> invocation limits do not transfer directly. That is true for AES-256 as much as for AES-128, and
+> a usage budget per key is owed in either case (A8).
+>
+> **What does depend on it.** The margin of the key itself: AES-128 has 128-bit classical strength
+> and less margin than AES-256 against multi-target attacks across many keys and against
+> long-horizon threats. No practical attack on AES-128 is known and none is claimed. What makes the
+> question sharper *for the deterministic variant* is lifetime: deterministic keys back joins and
+> `UNIQUE` columns, so rotating one means re-encrypting every column that has to compare equal, at
+> once. Deterministic keys therefore tend to live longer and seal more than random-nonce keys, which
+> is exactly where a smaller margin matters most.
+>
+> **Options.** (i) Offer it as today, behind `gcm.min_key_bytes`; (ii) offer it with stated
+> conditions; (iii) refuse `gcm_encrypt_det` with a 16-byte key (decryption of existing `0x05`
+> unaffected).
+>
+> **Recommendation: (ii).** Keep it available — interoperability with a peer that mandates AES-128 is
+> a real need, and no ground was found that requires removing it — with these conditions recorded in
+> the README and `docs/ops-constraints.md`: one fixed AAD convention per key (A8); a per-key usage
+> budget summed across every writer, and a retention period, both set by the deployment's security
+> review — no number is proposed here, because A8 forbids presenting one as universal; a rotation plan
+> that covers re-encrypting both sides of every join; and AES-256 as the recommended suite for any
+> deterministic column whose retention is long or open-ended. `gcm.min_key_bytes = 32` stays the
+> default; it is an admission policy, not a usage limit, and the conditions above do not depend on it.
+>
+> ### Decision — to be filled in by the independent reviewer
+>
+> | | Decision | Conditions | Reviewer | Date |
+> |---|---|---|---|---|
+> | Q1 | *open* | | | |
+> | Q2 | *open* | | | |
+>
+> Implementation follows the decision in its own PR: for Q1 (c), the check, its error, unit and SQL
+> tests, and the ops constraint; for Q1 (b), a spec version and new version bytes; for Q2 (ii), the
+> documentation; for Q2 (iii), the refusal and its tests. README constraint 13 then says which of the
+> two questions an independent reviewer has covered.
+
 > ## Amendment A11 (2026-10-07) — Per-statement reuse of the decrypt context and the deterministic nonce key
 >
 > **Status: proposed — implemented behind this PR; takes effect on merge.** The numbers below are
@@ -381,11 +483,13 @@
 > - **Whether the new suites need explicit domain separation in the nonce derivation.** The label is
 >   shared across all three, and the zero-padding property above means a short key and its zero-extension
 >   derive the same nonce key. No attack follows from that pair on its own, but the question belongs to
->   the same security review rather than to an implementation PR.
+>   the same security review rather than to an implementation PR. *Analysed in A12, pending the
+>   independent review of issue #22.*
 > - Whether `gcm_encrypt_det` should be offered at all for AES-128. The deterministic nonce is
 >   HMAC-SHA256 truncated to 96 bits regardless of suite, so the collision bound in §5.2 is unchanged by
 >   key size — but the argument for using a 128-bit key in a construction whose whole point is long-term
->   stored ciphertext deserves to be made explicitly rather than inherited.
+>   stored ciphertext deserves to be made explicitly rather than inherited. *Analysed in A12, pending
+>   the independent review of issue #22.*
 > - Whether to expose the suite in SQL at all, for example a `gcm_envelope_version(ciphertext)` helper.
 >   That is a new public function and belongs to its own amendment.
 

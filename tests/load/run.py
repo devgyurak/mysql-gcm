@@ -109,7 +109,12 @@ def encryption_floor(conn: Connection, key_bytes: int) -> Iterator[None]:
     it. GLOBAL on every supported major, so the caller restores the previous value.
     """
     previous = int(str(scalar(conn, "SELECT @@GLOBAL.gcm.min_key_bytes")))
-    execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (min(previous, key_bytes),))
+    if previous <= key_bytes:
+        # Already permitted by the administrator: nothing to lower, so nothing to
+        # restore. Writing the same value twice would only add two statements.
+        yield
+        return
+    execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (key_bytes,))
     try:
         yield
     finally:

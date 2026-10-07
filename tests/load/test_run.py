@@ -46,7 +46,7 @@ class EncryptionFloor(unittest.TestCase):
                 ],
             )
 
-    def test_given_floor_16_when_loading_aes256_then_do_not_raise_the_floor(self) -> None:
+    def test_given_floor_16_when_loading_aes256_then_touch_nothing(self) -> None:
         # Given: AES-128 is already permitted by the administrator.
         conn = MagicMock()
         with (
@@ -56,11 +56,5 @@ class EncryptionFloor(unittest.TestCase):
             # When: this run needs only AES-256.
             with load_runner.encryption_floor(conn, 32):
                 pass
-            # Then: both the temporary and restored policy remain 16.
-            self.assertEqual(
-                execute.call_args_list,
-                [
-                    call(conn, "SET GLOBAL gcm.min_key_bytes = %s", (16,)),
-                    call(conn, "SET GLOBAL gcm.min_key_bytes = %s", (16,)),
-                ],
-            )
+            # Then: the policy is neither lowered nor rewritten; no SET is issued at all.
+            self.assertEqual(execute.call_args_list, [])

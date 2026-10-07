@@ -1,6 +1,6 @@
 <p align="center">
   <img src="docs/assets/banner.png" width="720"
-       alt="mysql-gcm — AES-256-GCM for MySQL (AES-192 and AES-128 selected by key length), as a server component, with server-side LIKE on the plaintext. AEAD. Open source.">
+       alt="mysql-gcm — AES-GCM for MySQL, as a server component, with server-side LIKE on the plaintext. AEAD. Open source.">
 </p>
 
 <p align="center">

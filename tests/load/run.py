@@ -31,8 +31,11 @@ import pymysql
 from pymysql.connections import Connection
 
 # Public fixture key from spec/test-vectors.json — never a real key, and the load
-# rows are generated names, never PHI (testing rule).
+# rows are generated names, never PHI (testing rule). The shorter suites take its
+# first 24 or 16 bytes: the key length selects the suite and nothing else does
+# (design A10), so a suite here is a key length and a gcm.min_key_bytes setting.
 FIXTURE_KEY_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+SUITES = {"aes256": 32, "aes192": 24, "aes128": 16}
 SCHEMA = "gcm_load"
 TABLE = "patients"
 IV_HEX = "101112131415161718191a1b1c1d1e1f"
@@ -91,11 +94,30 @@ def generated_names(count: int, seed: int) -> list[str]:
     return [f"{rng.choice(SURNAMES)}{rng.choice(GIVEN)}" for _ in range(count)]
 
 
-def load_rows(conn: Connection, rows: int, seed: int) -> None:
+def suite_key_hex(suite: str) -> str:
+    return FIXTURE_KEY_HEX[: SUITES[suite] * 2]
+
+
+def set_min_key_bytes(conn: Connection, key_bytes: int) -> int:
+    """Lowers gcm.min_key_bytes far enough for the suite and returns the previous value.
+
+    Only the two encryption functions consult it, so this is needed to *write* the
+    AES-192 or AES-128 column; decryption, which is what the measurement times, ignores
+    it. GLOBAL on every supported major, so the caller restores the previous value.
+    """
+    previous = int(str(scalar(conn, "SELECT @@GLOBAL.gcm.min_key_bytes")))
+    execute(conn, "SET GLOBAL gcm.min_key_bytes = %s", (key_bytes,))
+    return previous
+
+
+def load_rows(conn: Connection, rows: int, seed: int, suite: str) -> None:
     """Fills the table with the same plaintext in a GCM and a CBC column.
 
-    The CBC column is written with the builtin AES_ENCRYPT, which is exactly the
-    baseline this component has to stay close to.
+    The CBC column is written with the builtin AES_ENCRYPT under aes-256-cbc, which
+    is exactly the baseline this component has to stay close to. It stays AES-256
+    whatever the GCM suite: the question is what each suite costs against the
+    builtin a deployment uses today, and keeping the denominator fixed is what makes
+    the three suites' ratios comparable with each other.
     """
     execute(conn, f"CREATE DATABASE IF NOT EXISTS {SCHEMA}")
     execute(conn, f"DROP TABLE IF EXISTS {SCHEMA}.{TABLE}")
@@ -110,13 +132,14 @@ def load_rows(conn: Connection, rows: int, seed: int) -> None:
     execute(conn, "SET SESSION block_encryption_mode = 'aes-256-cbc'")
 
     names = generated_names(rows, seed)
+    key_hex = suite_key_hex(suite)
     placeholder = "(gcm_encrypt_det(%s, UNHEX(%s)), AES_ENCRYPT(%s, UNHEX(%s), UNHEX(%s)))"
     for start in range(0, rows, INSERT_BATCH):
         batch = names[start : start + INSERT_BATCH]
         values = ", ".join([placeholder] * len(batch))
         args: list[object] = []
         for name in batch:
-            args += [name, FIXTURE_KEY_HEX, name, FIXTURE_KEY_HEX, IV_HEX]
+            args += [name, key_hex, name, FIXTURE_KEY_HEX, IV_HEX]
         execute(
             conn,
             f"INSERT INTO {SCHEMA}.{TABLE} (name_gcm, name_cbc) VALUES {values}",
@@ -135,13 +158,13 @@ QUERIES = {
 }
 
 
-def query_args(variant: str) -> tuple[object, ...]:
+def query_args(variant: str, suite: str) -> tuple[object, ...]:
     if variant == "gcm":
-        return (FIXTURE_KEY_HEX, f"%{NEEDLE}%")
+        return (suite_key_hex(suite), f"%{NEEDLE}%")
     return (FIXTURE_KEY_HEX, IV_HEX, f"%{NEEDLE}%")
 
 
-def time_one_session(runs: int) -> dict[str, list[float]]:
+def time_one_session(runs: int, suite: str) -> dict[str, list[float]]:
     """Times both variants on one connection, alternating between them.
 
     Interleaved on purpose. Running every GCM session and then every AES session
@@ -156,7 +179,7 @@ def time_one_session(runs: int) -> dict[str, list[float]]:
         execute(conn, "SET SESSION block_encryption_mode = 'aes-256-cbc'")
         for variant in QUERIES:
             for _ in range(WARMUP_RUNS):
-                scalar(conn, QUERIES[variant], query_args(variant))
+                scalar(conn, QUERIES[variant], query_args(variant, suite))
 
         timings: dict[str, list[float]] = {variant: [] for variant in QUERIES}
         variants = list(QUERIES)
@@ -167,7 +190,7 @@ def time_one_session(runs: int) -> dict[str, list[float]]:
             order = variants if index % 2 == 0 else variants[::-1]
             for variant in order:
                 started = time.perf_counter()
-                scalar(conn, QUERIES[variant], query_args(variant))
+                scalar(conn, QUERIES[variant], query_args(variant, suite))
                 timings[variant].append((time.perf_counter() - started) * 1000.0)
         return timings
     finally:
@@ -198,10 +221,10 @@ def summarise(rows: int, concurrency: int, variant: str, timings: list[float]) -
     )
 
 
-def measure(rows: int, concurrency: int) -> list[Measurement]:
+def measure(rows: int, concurrency: int, suite: str) -> list[Measurement]:
     """One run at this concurrency, producing a Measurement per variant."""
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(time_one_session, MEASURED_RUNS) for _ in range(concurrency)]
+        futures = [pool.submit(time_one_session, MEASURED_RUNS, suite) for _ in range(concurrency)]
         per_session = [future.result() for future in futures]
 
     merged: dict[str, list[float]] = {variant: [] for variant in QUERIES}
@@ -254,6 +277,12 @@ def main() -> int:
     parser.add_argument("--rows", type=int, default=10000)
     parser.add_argument("--concurrency", default="1", help="comma separated session counts")
     parser.add_argument("--baseline", choices=["aes"], default="aes")
+    parser.add_argument(
+        "--suite",
+        choices=sorted(SUITES),
+        default="aes256",
+        help="GCM suite for the encrypted column; the AES_DECRYPT baseline stays aes-256-cbc",
+    )
     parser.add_argument("--gate", help="path to baseline.json; exit 1 when exceeded")
     parser.add_argument("--out", help="write the JSON result here as well as stdout")
     parser.add_argument("--seed", type=int, default=20260928)
@@ -262,18 +291,27 @@ def main() -> int:
     concurrencies = [int(c) for c in args.concurrency.split(",")]
 
     setup = connect()
+    previous_min_key_bytes: int | None = None
     try:
         disk_before = status_value(setup, "Created_tmp_disk_tables")
-        load_rows(setup, args.rows, args.seed)
-        matching = int(str(scalar(setup, QUERIES["gcm"], query_args("gcm"))))
+        # Lowered only for as long as the rows are being written: the measured path is
+        # decryption, which ignores the setting, and a server left at 16 after the run
+        # would be a weaker server than the one the run found.
+        previous_min_key_bytes = set_min_key_bytes(setup, SUITES[args.suite])
+        load_rows(setup, args.rows, args.seed, args.suite)
+        set_min_key_bytes(setup, previous_min_key_bytes)
+        previous_min_key_bytes = None
+        matching = int(str(scalar(setup, QUERIES["gcm"], query_args("gcm", args.suite))))
 
         measurements: list[Measurement] = []
         for concurrency in concurrencies:
-            measurements += measure(args.rows, concurrency)
+            measurements += measure(args.rows, concurrency, args.suite)
 
         disk_after = status_value(setup, "Created_tmp_disk_tables")
         version = str(scalar(setup, "SELECT VERSION()"))
     finally:
+        if previous_min_key_bytes is not None:
+            set_min_key_bytes(setup, previous_min_key_bytes)
         setup.close()
 
     comparisons: list[dict[str, object]] = []
@@ -294,6 +332,8 @@ def main() -> int:
 
     result: dict[str, object] = {
         "server_version": version,
+        "suite": args.suite,
+        "key_bytes": SUITES[args.suite],
         "rows": args.rows,
         "seed": args.seed,
         "needle": NEEDLE,
@@ -310,7 +350,7 @@ def main() -> int:
 
     for entry in comparisons:
         print(
-            f"rows={entry['rows']} c={entry['concurrency']} "
+            f"{args.suite} rows={entry['rows']} c={entry['concurrency']} "
             f"gcm p95={entry['gcm_p95_ms']}ms aes p95={entry['aes_p95_ms']}ms "
             f"ratio={entry['p95_ratio']}",
             file=sys.stderr,

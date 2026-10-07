@@ -114,6 +114,56 @@ it — different instruction sets, absolute times 2.2x apart, ratios within 0.96
 that lands on a fast runner will either confirm it or be the most interesting bench failure this
 project has had.
 
+### Per suite (amendment A10)
+
+Every gated case runs once per suite — `aes256`, `aes192`, `aes128` — and each divides by a reference
+running the **same cipher**, so the gated ratio stays what it was: this project's structure over a
+straight-line implementation of the same algorithm. The ceiling is 1.10 for all three, because the
+claim is the same; the suites share every line of code except the fetched cipher. What the suites cost
+*relative to each other* is a separate, un-gated number (`*_vs_aes256` in `ratios.json`).
+
+**The CI reference runs for the two smaller suites do not exist yet.** `bench.yml` runs on the merge
+to `develop`, so the first three runs after this lands are what will fill in the table below. Until
+then the only numbers are from a developer machine, and the way to read them is as a rehearsal of the
+gate, not as the baseline: a 2.2x-faster arm64 laptop running the reference container, with other
+containers resident, two consecutive runs. The first run put four cases over the gate, **three of
+them AES-256** (`seal_det/aes256/256` at 1.553 with its reference unchanged), which is the shape of a
+busy host rather than of the code. The second run, on a quieter machine:
+
+| Gated ratio, min–max over the four sizes | `aes256` | `aes192` | `aes128` |
+|---|---|---|---|
+| `open` | 0.918–0.976 | 0.947–1.031 | 0.837–1.028 |
+| `seal_random` | 0.975–1.049 | 0.953–1.013 | 0.951–1.002 |
+| `seal_det` | 0.877–1.123 | 0.858–0.956 | 0.971–1.065 |
+
+The one breach, `seal_det/aes256/16` at 1.123, is again on the suite that had already measured
+0.986–1.029 on CI; the two new suites sit inside the band. The run-to-run noise on this host is wider
+than CI's 1.025x, which is the reason the baseline is filled from CI and not from here.
+
+**What a smaller suite buys at the core, on this machine: nothing measurable.** The `gcm` side of
+AES-192 and AES-128 divided by AES-256, second run:
+
+| vs `aes256` | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open/aes192` | 1.07 | 1.00 | 1.00 | 0.97 |
+| `open/aes128` | 1.05 | 0.99 | 1.00 | 1.06 |
+| `seal_random/aes192` | 1.01 | 0.99 | 1.06 | 1.16 |
+| `seal_random/aes128` | 1.05 | 0.99 | 1.02 | 1.05 |
+| `seal_det/aes192` | 0.85 | 0.98 | 0.96 | 0.98 |
+| `seal_det/aes128` | 0.81 | 1.03 | 0.99 | 0.99 |
+
+With hardware AES the extra four or six rounds of AES-256 are inside the noise at every size, and the
+deterministic variant's cost is HMAC-SHA256, which does not change with the key length at all. This is
+a property of the machine: a CPU without AES acceleration would show the round count, and the number
+is reported rather than gated for exactly that reason. The durable statement is that **on hardware
+with AES acceleration, the suite is a security choice and not a performance one** — the reason to run
+AES-128 is interoperability or a compliance profile that names it, never speed.
+
+`envelope/parse` for the four A10 versions measured 1.5–2.1 ns against 1.3–1.4 ns for v2 and v3 on
+this run: the suite table is walked in order, and the later rows are the later versions. Half a
+nanosecond on a path whose cheapest operation is a 280 ns decrypt, recorded here so that it is a known
+shape rather than a surprise if a future change moves it.
+
 ### What determinism costs
 
 Reported, never gated: each encrypt variant against a **plain** seal. This is the number to read when
@@ -227,3 +277,35 @@ Three values per cell, one per run, in run order. What the runs establish:
 
 Reproduce with `gh workflow run load.yml -f rows=300000`, or locally with
 `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json`.
+
+### Per suite — developer-machine run (indicative only, NOT a baseline)
+
+The same question one layer up: does the suite change what `gcm_decrypt(col) LIKE` costs? Docker on an
+arm64 macOS laptop, MySQL 8.4.11, the component from `develop` after #17, 100,000 rows of which 9,928
+match `'%김%'`, 40 measured iterations per session after 3 warm-ups, one run per suite. Each suite's
+`AES_DECRYPT` baseline is `aes-256-cbc` whatever the suite — the question is what each costs against the
+builtin a deployment uses today, and a fixed denominator is what lets the three rows be read against
+each other.
+
+| Suite | Sessions | gcm p50 | gcm p95 | aes p50 | aes p95 | p95 ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| `aes256` | 1 | 41.6 ms | 44.5 ms | 38.3 ms | 42.2 ms | 1.053 |
+| `aes192` | 1 | 37.6 ms | 45.8 ms | 39.1 ms | 45.4 ms | 1.010 |
+| `aes128` | 1 | 36.0 ms | 42.7 ms | 36.9 ms | 45.8 ms | 0.933 |
+| `aes256` | 8 | 98.4 ms | 123.8 ms | 127.5 ms | 155.7 ms | 0.795 |
+| `aes192` | 8 | 91.3 ms | 110.7 ms | 126.6 ms | 143.1 ms | 0.773 |
+| `aes128` | 8 | 98.3 ms | 111.5 ms | 125.3 ms | 140.7 ms | 0.792 |
+
+`Created_tmp_disk_tables` did not move for any suite.
+
+The three suites are within 12% of each other at one session and within 3% at eight, on a host whose
+one-session spread for a *single* suite was measured at 1.19x on CI. **That is no difference at all at
+the resolution this harness has**: the row scan is the cost, every suite pays the same one, and the
+cipher's share of a 44 ms query over 100,000 rows is the ~300 ns per row the micro-benchmarks put it
+at. The core table above says the same thing from the other side.
+
+What is still owed is the CI version of this table: `gh workflow run load.yml -f suite=aes192` and
+`-f suite=aes128` on the reference runner, 300,000 rows, three runs each, beside the nightly's
+`aes256`. The gate is the same for every suite — the 1.10 p95 ratio is about the structure, and the
+structure is shared — so a smaller suite does not get a looser one.
+

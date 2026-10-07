@@ -5,6 +5,23 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Measured
+- **The two smaller suites, at the core and at the SQL level.** `tests/bench` now runs every gated
+  case once per suite, each against a reference running the same cipher, so the 1.10 ceiling applies
+  to AES-192 and AES-128 as it does to AES-256 — the claim is the same, and the suites share every line
+  of code except the fetched cipher. `gate.py` additionally reports each suite against AES-256, un-gated,
+  because that number is a property of the machine. `tests/load/run.py --suite` and `load.yml`'s
+  `suite` input measure the SQL path with a 24- or 16-byte key, lowering `gcm.min_key_bytes` only
+  while the rows are written and against the same `aes-256-cbc` baseline so the ratios share a
+  denominator.
+- **What they found, on a developer machine with hardware AES: nothing to buy.** The core is within a
+  few percent of AES-256 at every size, and the three suites' `gcm_decrypt(col) LIKE` p95 sit within
+  12% at one session and 3% at eight, inside the spread of a single suite. The suite is a security
+  choice and not a performance one, which both READMEs now say. The CI reference runs for AES-192 and
+  AES-128 are the open item on #18; the first `bench` run after this merge produces the first of them.
+- `envelope/parse` for the four A10 version bytes is recorded alongside v1–v3: 1.5–2.1 ns against
+  1.3–1.4, the order the suite table is walked in.
+
 ### Changed
 - **CI stops rebuilding a MySQL server on every MTR run.** `images.yml` publishes two images per
   major to GHCR — `mysql-gcm-build` (a configured source tree) and `mysql-gcm-mtr` (that plus a

@@ -302,6 +302,19 @@ amortise the same way. **Whether that ratio rises or falls with size depends on 
 fall from 4.9 to 3.6, and a runner with faster AES went the other way, 5.6 to 9.7. Decryption costs the
 same for either variant.
 
+### Does a smaller suite buy anything?
+
+Not speed, on the hardware measured so far. With AES-192 or AES-128 selected by key length
+(`gcm.min_key_bytes` lowered to allow it), the core micro-benchmarks put each suite within a few
+percent of AES-256 at every size — AES-GCM is hardware-accelerated nearly everywhere, so the extra
+rounds are inside the noise — and the deterministic variant's extra cost is HMAC, which the key length
+does not change. At the SQL level the three suites' `gcm_decrypt(col) LIKE` p95 landed within 12% of
+each other at one session and within 3% at eight, which is inside the spread of a single suite
+measured twice. **The suite is a security choice, not a performance one**: run AES-128 or AES-192 when
+interoperability or a compliance profile asks for it by name, and otherwise leave the default. Those
+numbers are from a developer machine; the CI reference runs for the two smaller suites are the open
+item on #18.
+
 Both gates, the three runs behind every number, and the micro-benchmark results are in
 [`docs/perf.md`](docs/perf.md).
 

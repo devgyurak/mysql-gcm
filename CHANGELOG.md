@@ -5,6 +5,20 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Documented
+- **Amendment A12: the two questions A10 left open, analysed and decided** (issue #22). A key and
+  its zero-extension derive one nonce key (RFC 2104 §2), which links equal plaintexts across two
+  suites' columns; `CrossSuiteZeroExtension` now pins this for all three suite pairs. Decided by a
+  scoped AI design review separate from the proposal author: the shared derivation is **accepted
+  under independent key generation** — full-length CSPRNG keys per suite and security domain, never
+  resized from another key, and both forms stopped and migrated together if related keys were used —
+  and **deterministic AES-128 stays available** under stated conditions: fixed AAD per key, a
+  numerical usage budget across every writer, a finite encryption-use period and retention horizon,
+  rotation before either runs out, AES-256 preferred for long retention. No code, envelope or SQL
+  error changes; the default `gcm.min_key_bytes = 32` stays and enforces none of the conditions.
+  This is not a human cryptographic audit, and the full construction, A11's retention and timing and
+  any deployment remain unreviewed (constraint 13).
+
 ### Changed
 - **`gcm_decrypt` keeps its cipher context per statement, and `gcm_encrypt_det` its nonce key**
   (`docs/design.md` amendment A11). One `UDF_INIT` — one UDF item, one statement — now owns an

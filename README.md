@@ -26,8 +26,8 @@ the result depends on the hardware, suite and workload. See [Performance](#perfo
 > (`spec/envelope.md`), the load gate is set from three measured runs on CI hardware, and the release
 > pipeline has been dry-run end to end — six artifacts, all three server images started and queried,
 > checksums signed and the signature verified independently. **Nothing is published yet**: no tag, so
-> no GitHub Release and no Docker Hub tags. The standing caveat is unchanged — **no independent
-> cryptographic review** (constraint 13).
+> no GitHub Release and no Docker Hub tags. A12 records a scoped AI design review of two questions;
+> a **full independent cryptographic audit remains outstanding** (constraint 13).
 
 ## Read this first — operational constraints
 
@@ -87,6 +87,13 @@ Full text and rationale: `docs/ops-constraints.md` and `docs/design.md` §6 with
     nonce mode, message sizes and acceptable risk; this project has not established a universal
     safe usage limit. The component does not track usage or rotate keys. Rotation changes
     deterministic ciphertexts, so plan JOIN/UNIQUE migrations and retain access to keys needed by backups.
+    A12 requires independent CSPRNG keys per suite/domain: never resize another key. If related
+    keys were used, stop encryption under both and migrate together; old copies remain linkable.
+    Before enabling deterministic AES-128, approve a numerical budget, finite encryption-use period
+    and retention horizon including backups. Fix AAD per key; use separate keys for random mode
+    unless cross-mode risk is separately reviewed. Rotate before budget/period expiry; stop on key,
+    nonce, AAD or usage-history incidents. Prefer AES-256 for long/open-ended retention. The default
+    floor stays 32; it enforces none of these conditions. See [A12](docs/design.md) for full conditions.
 12. **Treat retries and recovery as part of nonce management.** Copying or restoring an existing
     envelope is not a new encryption. Calling `gcm_encrypt` again creates a fresh random nonce;
     deterministic retries reproduce the result only with the same key, plaintext and AAD. Never
@@ -100,7 +107,10 @@ Full text and rationale: `docs/ops-constraints.md` and `docs/design.md` §6 with
     Development guard hooks restrict agent commands; they do not monitor production encryption.
     Deterministic encryption leaks equality, frequency and length; passing vectors or sampled
     collision tests is not a security proof. Review this construction and its deployment assumptions
-    independently before production use. See [NIST SP 800-38D, §8 and Appendices A/B](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
+    independently before production use. On 2026-10-07, Codex recorded an AI design review of
+    #22/A12: Q1 accepts shared derivation with independent keys; Q2 retains deterministic AES-128
+    conditionally. This covers those decisions only, not the full construction, implementation,
+    A11 retention/timing or a deployment; it is not a human cryptographic audit. See [NIST SP 800-38D, §8 and Appendices A/B](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
 14. **Installing the component is not replicated.** `INSTALL COMPONENT` writes to one server's
     `mysql.component` and nowhere else. Install it on every server that answers decryption queries
     and on every replica that could be promoted, and make sure the application can supply the key

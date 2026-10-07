@@ -11,13 +11,12 @@ name: adapter
 # changes with it.
 #
 # It runs in the build image because these sources include server headers, so it needs a
-# configured MySQL tree. Nothing caches that image between runs — build-in-docker.sh is
-# `docker image inspect || docker build`, and no workflow pushes it to a registry — so every run
-# builds it. That is the same path `smoke` and `mtr` take, and it is measured rather than assumed:
+# configured MySQL tree. build-in-docker.sh resolves that image through scripts/image-ref.sh:
+# local, then a GHCR pull when images.yml has published the tag, then a local build. The local
+# build is the path a PR that changes docker/** takes, and it is measured rather than assumed:
 # the `smoke` jobs, which do image build plus component build plus a server round trip, took
 # 2m52s to 3m27s on 2026-10-02. This job is that minus the server and plus a few seconds of
-# tests. Publishing the image to GHCR would cut it further and is a pre-existing gap, not one
-# this introduces.
+# tests.
 #
 # Deliberately **not** a required check, and not a candidate for becoming one while it is
 # path-filtered. A required check that does not report blocks the merge button indefinitely, and a

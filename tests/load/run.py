@@ -5,6 +5,13 @@ The question this answers is the one docs/design.md §1.2 raises with estimates
 rather than measurements: is a server-side partial match over encrypted names fast
 enough, and how much does GCM cost over the CBC builtin the system uses today.
 
+Two further variants say where the GCM query's time goes. `plain` runs the same
+LIKE over a plaintext utf8mb4 column — the floor: table scan plus collation-aware
+LIKE, no UDF call, no crypto. `gcm_nolike` decrypts through the UDF but only checks
+the result's length, so `gcm_nolike - plain` is the UDF call, the decrypt and the
+charset tagging, and `gcm - gcm_nolike` is the LIKE over a UDF result. The gate
+compares `gcm` with `aes` only; the two extra variants are measured, not gated.
+
 Everything cryptographic happens in the server through SQL. This script only
 issues statements, times them, and compares against tests/load/baseline.json
 (stack-python rule: JSON on stdout, human summary on stderr, gate via exit code).
@@ -60,7 +67,7 @@ INSERT_BATCH = 1000
 class Measurement:
     rows: int
     concurrency: int
-    variant: str  # gcm | aes
+    variant: str  # plain | gcm_nolike | gcm | aes
     p50_ms: float
     p95_ms: float
     max_ms: float
@@ -122,13 +129,17 @@ def encryption_floor(conn: Connection, key_bytes: int) -> Iterator[None]:
 
 
 def load_rows(conn: Connection, rows: int, seed: int, suite: str) -> None:
-    """Fills the table with the same plaintext in a GCM and a CBC column.
+    """Fills the table with the same plaintext in a GCM, a CBC and a plaintext column.
 
     The CBC column is written with the builtin AES_ENCRYPT under aes-256-cbc, which
     is exactly the baseline this component has to stay close to. It stays AES-256
     whatever the GCM suite: the question is what each suite costs against the
     builtin a deployment uses today, and keeping the denominator fixed is what makes
     the three suites' ratios comparable with each other.
+
+    The plaintext column carries no collation clause on purpose: it takes the
+    charset's default collation, which is also what gcm_decrypt's utf8mb4-tagged
+    result gets, so `plain` runs LIKE under the same collation as `gcm`.
     """
     execute(conn, f"CREATE DATABASE IF NOT EXISTS {SCHEMA}")
     execute(conn, f"DROP TABLE IF EXISTS {SCHEMA}.{TABLE}")
@@ -137,28 +148,39 @@ def load_rows(conn: Connection, rows: int, seed: int, suite: str) -> None:
         f"CREATE TABLE {SCHEMA}.{TABLE} ("
         "  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
         "  name_gcm VARBINARY(128) NOT NULL,"
-        "  name_cbc VARBINARY(128) NOT NULL"
+        "  name_cbc VARBINARY(128) NOT NULL,"
+        "  name_plain VARCHAR(64) CHARACTER SET utf8mb4 NOT NULL"
         ") ENGINE=InnoDB",
     )
     execute(conn, "SET SESSION block_encryption_mode = 'aes-256-cbc'")
 
     names = generated_names(rows, seed)
     key_hex = suite_key_hex(suite)
-    placeholder = "(gcm_encrypt_det(%s, UNHEX(%s)), AES_ENCRYPT(%s, UNHEX(%s), UNHEX(%s)))"
+    placeholder = "(gcm_encrypt_det(%s, UNHEX(%s)), AES_ENCRYPT(%s, UNHEX(%s), UNHEX(%s)), %s)"
     for start in range(0, rows, INSERT_BATCH):
         batch = names[start : start + INSERT_BATCH]
         values = ", ".join([placeholder] * len(batch))
         args: list[object] = []
         for name in batch:
-            args += [name, key_hex, name, FIXTURE_KEY_HEX, IV_HEX]
+            args += [name, key_hex, name, FIXTURE_KEY_HEX, IV_HEX, name]
         execute(
             conn,
-            f"INSERT INTO {SCHEMA}.{TABLE} (name_gcm, name_cbc) VALUES {values}",
+            f"INSERT INTO {SCHEMA}.{TABLE} (name_gcm, name_cbc, name_plain) VALUES {values}",
             tuple(args),
         )
 
 
+# Ordered from the cheapest predicate to the baseline. The order is the rotation seed in
+# time_one_session, not a measurement order: every variant leads equally often.
 QUERIES = {
+    "plain": f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} WHERE name_plain LIKE %s",
+    # CHAR_LENGTH, not LENGTH: it walks the result as utf8mb4 characters the way LIKE
+    # would start to, and either way the UDF result is materialised and tagged. The
+    # predicate is true for every row, so the count is the row count, not the match.
+    "gcm_nolike": (
+        f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} "
+        "WHERE CHAR_LENGTH(gcm_decrypt(name_gcm, UNHEX(%s))) > 0"
+    ),
     "gcm": (
         f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} WHERE gcm_decrypt(name_gcm, UNHEX(%s)) LIKE %s"
     ),
@@ -170,20 +192,24 @@ QUERIES = {
 
 
 def query_args(variant: str, suite: str) -> tuple[object, ...]:
+    if variant == "plain":
+        return (f"%{NEEDLE}%",)
+    if variant == "gcm_nolike":
+        return (suite_key_hex(suite),)
     if variant == "gcm":
         return (suite_key_hex(suite), f"%{NEEDLE}%")
     return (FIXTURE_KEY_HEX, IV_HEX, f"%{NEEDLE}%")
 
 
 def time_one_session(runs: int, suite: str) -> dict[str, list[float]]:
-    """Times both variants on one connection, alternating between them.
+    """Times every variant on one connection, interleaved per iteration.
 
     Interleaved on purpose. Running every GCM session and then every AES session
     measures two different time windows, so anything that makes the host slow for a
     while — a noisy neighbour on a shared runner, a checkpoint, another job on the same
-    machine — lands on one variant and shows up as a ratio. Alternating puts both under
-    the same ambient load and the same contention, which is what the ratio is supposed
-    to be about.
+    machine — lands on one variant and shows up as a ratio. Interleaving puts all of
+    them under the same ambient load and the same contention, which is what the ratio
+    and the decomposition are supposed to be about.
     """
     conn = connect()
     try:
@@ -195,10 +221,14 @@ def time_one_session(runs: int, suite: str) -> dict[str, list[float]]:
         timings: dict[str, list[float]] = {variant: [] for variant in QUERIES}
         variants = list(QUERIES)
         for index in range(runs):
-            # And alternate which of the pair goes first. Interleaving fixes the *between
-            # variants* drift, but a fixed order inside each pair still hands one of them
-            # whatever the other just warmed or evicted, every single iteration.
-            order = variants if index % 2 == 0 else variants[::-1]
+            # And rotate which variant goes first. Interleaving fixes the *between
+            # variants* drift, but a fixed order inside each round still hands one of them
+            # whatever the other just warmed or evicted, every single iteration. With two
+            # variants this was an alternation of the pair; with N it is a rotation by one
+            # per iteration, so each variant leads runs/N times and follows every other
+            # variant equally often (MEASURED_RUNS is a multiple of len(QUERIES)).
+            shift = index % len(variants)
+            order = variants[shift:] + variants[:shift]
             for variant in order:
                 started = time.perf_counter()
                 scalar(conn, QUERIES[variant], query_args(variant, suite))
@@ -255,6 +285,42 @@ def status_value(conn: Connection, name: str) -> int:
         row = cur.fetchone()
     assert row is not None, name
     return int(row[1])
+
+
+def decompose(rows: int, concurrency: int, by_variant: dict[str, Measurement]) -> dict[str, object]:
+    """Splits the gcm query's p95 into three shares by differencing the variants.
+
+    Differences of percentiles, not percentiles of differences: the variants run in
+    the same session and window, so a share is the gap between two curves measured
+    under the same load. A negative share means the gap is inside the noise.
+    """
+    plain = by_variant["plain"].p95_ms
+    nolike = by_variant["gcm_nolike"].p95_ms
+    gcm = by_variant["gcm"].p95_ms
+    floor_ms = plain
+    decrypt_ms = nolike - plain
+    like_ms = gcm - nolike
+
+    def share(part: float) -> float | None:
+        return round(100.0 * part / gcm, 1) if gcm else None
+
+    return {
+        "rows": rows,
+        "concurrency": concurrency,
+        "plain_p95_ms": plain,
+        "gcm_nolike_p95_ms": nolike,
+        "gcm_p95_ms": gcm,
+        "scan_like_floor_ms": round(floor_ms, 3),
+        "udf_decrypt_tag_ms": round(decrypt_ms, 3),
+        "like_on_udf_result_ms": round(like_ms, 3),
+        "scan_like_floor_pct": share(floor_ms),
+        "udf_decrypt_tag_pct": share(decrypt_ms),
+        "like_on_udf_result_pct": share(like_ms),
+        # The share divided by the rows it was paid over: what one UDF call, decrypt
+        # and tagging costs per row at the SQL level, to set beside the core
+        # micro-benchmark's bare-cipher number (tests/bench).
+        "udf_decrypt_tag_ns_per_row": round(decrypt_ms * 1_000_000.0 / rows, 1) if rows else None,
+    }
 
 
 def gate(comparisons: list[dict[str, object]], baseline_path: str) -> list[str]:
@@ -321,9 +387,12 @@ def main() -> int:
         setup.close()
 
     comparisons: list[dict[str, object]] = []
+    decompositions: list[dict[str, object]] = []
     for concurrency in concurrencies:
-        gcm = next(m for m in measurements if m.concurrency == concurrency and m.variant == "gcm")
-        aes = next(m for m in measurements if m.concurrency == concurrency and m.variant == "aes")
+        by_variant = {m.variant: m for m in measurements if m.concurrency == concurrency}
+        gcm = by_variant["gcm"]
+        aes = by_variant["aes"]
+        decompositions.append(decompose(args.rows, concurrency, by_variant))
         comparisons.append(
             {
                 "rows": args.rows,
@@ -347,6 +416,7 @@ def main() -> int:
         "created_tmp_disk_tables_delta": disk_after - disk_before,
         "measurements": [asdict(m) for m in measurements],
         "comparisons": comparisons,
+        "decomposition": decompositions,
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -359,6 +429,16 @@ def main() -> int:
             f"{args.suite} rows={entry['rows']} c={entry['concurrency']} "
             f"gcm p95={entry['gcm_p95_ms']}ms aes p95={entry['aes_p95_ms']}ms "
             f"ratio={entry['p95_ratio']}",
+            file=sys.stderr,
+        )
+    for entry in decompositions:
+        print(
+            f"{args.suite} rows={entry['rows']} c={entry['concurrency']} "
+            f"plain p95={entry['plain_p95_ms']}ms gcm_nolike p95={entry['gcm_nolike_p95_ms']}ms "
+            f"| floor {entry['scan_like_floor_pct']}% "
+            f"udf+decrypt+tag {entry['udf_decrypt_tag_ms']}ms ({entry['udf_decrypt_tag_pct']}%, "
+            f"{entry['udf_decrypt_tag_ns_per_row']} ns/row) "
+            f"like-on-udf {entry['like_on_udf_result_ms']}ms ({entry['like_on_udf_result_pct']}%)",
             file=sys.stderr,
         )
 

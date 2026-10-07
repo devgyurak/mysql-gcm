@@ -34,17 +34,23 @@ The `.so` named by `GCM_SO` (default `build/8.4/...`) is mounted read-only into 
 
 ## Load — `tests/load`
 `run.py --rows {10000,100000,300000} --concurrency 1,8,32 --baseline aes [--suite aes256|aes192|aes128] --out result.json`
-1. Given: N rows in `patients(id, name_gcm VARBINARY, name_cbc VARBINARY)` from a seeded Korean-name
-   generator, with the **same plaintext** in both columns. The CBC column is written with the builtin
-   `AES_ENCRYPT` under `block_encryption_mode = 'aes-256-cbc'` — that is the baseline being compared
-   against.
+1. Given: N rows in `patients(id, name_gcm VARBINARY, name_cbc VARBINARY, name_plain VARCHAR utf8mb4)`
+   from a seeded Korean-name generator, with the **same plaintext** in all three columns. The CBC
+   column is written with the builtin `AES_ENCRYPT` under `block_encryption_mode = 'aes-256-cbc'` —
+   that is the baseline being compared against.
 2. When: `gcm_decrypt(name_gcm,@k) LIKE '%김%'` and `AES_DECRYPT(name_cbc,@k,@iv) LIKE '%김%'`, after 3
    warm-ups, 40 measured iterations, with one thread per concurrent session and a connection per
-   thread. The two variants are **interleaved per iteration**, with the order within the pair
-   alternating — measuring all of one and then all of the other attributes drift to the variant.
-3. Then: p50/p95/max in ms, the `gcm/aes` ratio, and the increase in `Created_tmp_disk_tables`, as JSON
-   on stdout with a human summary on stderr. With `--gate tests/load/baseline.json`, exceeding a
-   threshold exits 1.
+   thread. Two more variants locate the cost: `plain` (`name_plain LIKE '%김%'`, the scan + collation
+   LIKE floor with no UDF) and `gcm_nolike` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`, the UDF decrypt
+   without a LIKE on its result). All variants are **interleaved per iteration**, with the leading
+   variant rotating by one each round — measuring all of one and then all of the other attributes
+   drift to the variant.
+3. Then: p50/p95/max in ms per variant, the `gcm/aes` ratio, a `decomposition` per concurrency (the
+   p95 floor, `gcm_nolike − plain` as the UDF + decrypt + tagging share, `gcm − gcm_nolike` as the
+   LIKE-on-UDF-result share, each in ms and as a percentage of `gcm`, plus the decrypt share per row
+   in ns), and the increase in `Created_tmp_disk_tables`, as JSON on stdout with a human summary on
+   stderr. With `--gate tests/load/baseline.json`, exceeding a threshold exits 1; the gate reads
+   `gcm` against `aes` only.
 
 `--suite` selects the key length for the GCM column (32, 24 or 16 bytes of the fixture key); the
 `AES_DECRYPT` baseline stays `aes-256-cbc` so the suites' ratios share a denominator. The runner lowers

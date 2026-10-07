@@ -6,6 +6,110 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A11 (2026-10-07) — Per-statement reuse of the decrypt context and the deterministic nonce key
+>
+> **Status: proposed — implemented behind this PR; takes effect on merge.** The numbers below are
+> developer-machine prototypes (an arm64 laptop with other containers running) and are quoted for the
+> shape of the saving, not its size. CI measurements follow in `docs/perf.md` and replace them.
+>
+> §8 left one item open on purpose: `derive_nonce_key` depends only on the key, `encrypt_det`
+> recomputes it on every row, and caching it per `UDF_INIT` means **keeping a copy of the key between
+> rows**, which `crypto-safety.md` does not allow without an amendment and a security review. This is
+> that amendment, widened to the one other place where the same key is scheduled afresh on every row:
+> the EVP context behind `gcm_decrypt`.
+>
+> **The decision.** A `UDF_INIT` — the lifetime of one UDF item from its `init` to its `deinit`, which
+> is **one execution of one statement** and is always driven by one thread — may hold, in its
+> per-instance state:
+>
+> (Confirmed in the 8.0.43, 8.4.11 and 9.4.0 sources rather than assumed: `func_init` runs from
+> `udf_handler::fix_fields` and `func_deinit` from `Item_udf_func::cleanup()` at the end of that
+> execution; a prepared statement that references a UDF is re-prepared on every `EXECUTE`
+> (`Prepared_statement::execute_loop`, `has_udf()`), so the pair never spans two executions. A scalar
+> UDF's handler is never copy-constructed — that path exists for aggregate UDFs only, which this
+> component does not register — and an `Item` belongs to one statement arena of one `THD`.)
+>
+> - (a) for `gcm_decrypt`: one `EVP_CIPHER_CTX` whose key schedule is set, together with a copy of the
+>   key bytes it was scheduled with (at most 32 bytes) and the suite it belongs to;
+> - (b) for `gcm_encrypt_det`: a copy of the key bytes (at most 32 bytes) and the derived 32-byte
+>   `nonce_key = HMAC-SHA256(key, label)`.
+>
+> `gcm_encrypt` (random nonce) gets no cache. Reusing its EVP context is a possible later measurement
+> and is not decided here.
+>
+> **The invariants.** The implementation enforces every one of them and the unit tests pin them:
+>
+> - The stored key copy is compared with the incoming key by `CRYPTO_memcmp` (constant time). The
+>   length and the suite are public and may short-circuit the comparison; the bytes may not.
+> - The copy is replaced only when the bytes or the suite differ, and the old copy is
+>   `OPENSSL_cleanse`d before it is replaced.
+> - On **every** failure of the cipher operation — an OpenSSL error at any step, and `bad_tag` — the
+>   copy is cleansed and the context is forgotten. The next row starts from scratch and never trusts a
+>   context that has just reported an error. The pre-checks that return *before* the context is
+>   consulted — a key length no suite has, a malformed envelope — leave it intact: a wrong-length key
+>   on one row is that row's SQL error, not a reason to discard a valid schedule. The nonce-key cache
+>   follows the same rule: forgotten on an HMAC failure, untouched by a `bad_key_len` pre-check.
+> - `deinit` cleanses both.
+> - When the key is forgotten, the context is reset as well: the key schedule inside the
+>   `EVP_CIPHER_CTX` is key-equivalent material and does not outlive the copy it was made from.
+> - The state is never shared across threads, and one `UDF_INIT` is driven by one thread.
+> - Nothing about the bytes written or accepted changes. `spec/envelope.md`'s byte layout is
+>   untouched; its one sentence saying `nonce_key` is derived "per call" is corrected to "when the
+>   key changes within one `UDF_INIT`", which §7 allows without a version bump. The existing vector
+>   tests, run through the reusing paths, prove the outputs byte-identical.
+> - A row that rebuilds the context takes longer than a row that reuses it. That difference is
+>   observable only inside one statement, by the caller, who supplied both keys; it reveals
+>   nothing a caller does not already know, and is noted so that it is a stated non-issue.
+>
+> **Why.** The time is where the per-row setup is, not in the cipher:
+>
+> - Core: a 16-byte `open` goes from 353 to 170 ns. At that size the per-call `EVP_CIPHER_CTX_new`,
+>   the two `Init` calls (the second of which runs the key schedule) and the free *are* the cost.
+> - SQL: `gcm_decrypt(col) LIKE` over 100,000 rows on MySQL 9.4. p95 at one session 49.6 → 23.2 ms,
+>   at eight sessions 126.4 → 27.2 ms; the ratio to `AES_DECRYPT` 1.06 → 0.48 and 1.27 → 0.26. The
+>   eight-session gain (about 1 µs per row) is far larger than the serial bench predicts (about
+>   180 ns per row), which points at contention inside OpenSSL 3's per-call context setup, not only at
+>   the key schedule.
+> - Deterministic: one HMAC per row removed, about 0.75 µs per call measured server-side with
+>   `BENCHMARK()` on MySQL 8.0 (2.29 → 1.52 µs). It helps only a statement in which one function item
+>   is evaluated over many rows — `INSERT … SELECT`, `UPDATE`, a join. A multi-row `INSERT … VALUES`
+>   gains nothing, because each expression in it is its own `UDF_INIT`.
+> - A plaintext-column baseline added to the load runner shows that about 80% of a
+>   `gcm_decrypt(col) LIKE` query is the UDF call plus decryption and only about 19% is the scan and
+>   `LIKE` floor. That is why this is where the time is.
+>
+> **Exposure, stated honestly.** What changes is the *retention* of key material: a second copy of
+> the key, and derived key material, live in the component's heap for the lifetime of the UDF item
+> instead of for one operation. The server already holds the same key for that whole time, in the
+> statement's argument buffers (`UDF_ARGS`) and in the statement text — which §6 already lists as
+> reaching the general and slow logs. A core dump taken mid-statement therefore contains the key
+> either way; what this adds is a second location for it. The risks this amendment names:
+>
+> - The copy lives through the whole execution, including the idle time between the rows the
+>   function is evaluated on, not only while an operation is in flight.
+> - A server crash skips `deinit`, so the copy is never cleansed. Neither is the server's own
+>   argument buffer.
+> - A bug that reused the state across threads would be a correctness bug and a secrecy bug at once.
+>   The single-threaded `UDF_INIT` model is the assumption this rests on, and this PR's adapter tests
+>   pin that one state is created per `init`.
+>
+> Precedent: the `UDF_INIT` state already holds the `gcm.strict` and `gcm.min_key_bytes` snapshots
+> for exactly this lifetime (A5, A10). What is new is that the retained state is secret.
+>
+> **Rejected.** A cache that outlives a `UDF_INIT` or lives in a global — its lifetime is unbounded
+> and it would need locking on the row path. And a cache keyed on anything other than the full key
+> bytes: not a hash of the key, not its length, not the address of the argument buffer.
+>
+> **Impact:**
+>
+> | Area | Change |
+> |---|---|
+> | `.agents/rules/architecture.md` §3, §5 | The `UDF_INIT` row gains the two retained states; the operation row keeps the EVP *operation* and the transient secrets; cross-row reuse is confined to this amendment |
+> | `.agents/rules/crypto-safety.md` | The key-copy rule gains this one exception, with its invariants; a copy that outlives its `UDF_INIT`, or a cache keyed on anything but the full key bytes, is a blocked pattern |
+> | `src/gcm.{h,cc}`, `src/nonce.{h,cc}`, `src/udf_*.cc` | The reusing decrypt path and the cached nonce-key path, hung off the `UDF_INIT` state |
+> | `tests/unit`, `tests/adapter` | The invariants above; the vectors through the reusing paths; one state per `init` |
+> | `docs/perf.md` | The CI measurements that replace the prototype numbers quoted here |
+
 > ## Amendment A10 (2026-10-06) — AES-128-GCM and AES-192-GCM
 >
 > **Status: implemented in full.** All three suites ship — `0x02`/`0x03` (AES-256), `0x06`/`0x07`
@@ -428,7 +532,9 @@
 > sysvar layers.
 >
 > Resources are divided into component, `UDF_INIT` and operation lifetimes. `UDF_INIT` is not the same
-> as a whole session. A failed registration rolls back; a failed release keeps the resources that are in
+> as a whole session. (Amendment A11 adds two secret-bearing resources to the `UDF_INIT` lifetime —
+> `gcm_decrypt`'s scheduled EVP context and `gcm_encrypt_det`'s derived nonce key, each with its key
+> copy — under invariants stated there.) A failed registration rolls back; a failed release keeps the resources that are in
 > use and tracks state so that nothing already released is released twice. Do not repeat configuration
 > lookups, algorithm fetches or file and network access on the row-processing path. The fixed-nonce test
 > entry point is not exposed in SQL, and experimental code that bypasses encryption is excluded from
@@ -964,6 +1070,7 @@ forward compatibility.
 | `initid->max_length` is narrowed by the server with `min<uint32>(...)`, so it is **truncated to uint32 first** | `udf_handler::fix_fields` in `sql/item_func.cc`. Adding 29 to a LONGTEXT argument (4294967295) wraps to 28, truncating the envelope below its minimum length — measured on 8.4 as `ERROR 1406 Data too long`. `envelope_max_length()` in `udf_glue.h` prevents it with saturating arithmetic and `gcm_null_and_edge.test` pins it |
 | A component cannot include `mysql_com.h` | the `my_io.h` behind it raises `#error This header shall not be included in components`. It surfaced as a failure in the 9.4.0 build while 8.0 and 8.4 passed silently — only building all three catches it |
 | `component_sys_variable_register::register_variable` **copies** the `def_val` from the `*_CHECK_ARG` | `sql/server_component/component_sys_var_service.cc`: `sysvar_bool->def_val = bool_arg->def_val` (into a my_malloc'd struct). So passing a stack-local check-arg is safe |
+| **The per-call EVP context setup, not the cipher, is most of a small decryption**, and about 80% of a `gcm_decrypt(col) LIKE` query is the UDF call plus decryption against a ~19% scan-and-`LIKE` floor | amendment A11 — developer-machine prototypes: a 16-byte `open` 353 → 170 ns with a reused context; p95 over 100k rows on 9.4 49.6 → 23.2 ms (1 session) and 126.4 → 27.2 ms (8 sessions); the plaintext-column baseline in `tests/load`. CI numbers to follow in `docs/perf.md` |
 
 ### Open (to be answered in Phase S)
 
@@ -990,12 +1097,16 @@ forward compatibility.
   envelope, error translation, buffer management and cleansing combined is under 10% on all three
   encryption paths. The deterministic variant costing 3.5–5x a plain seal is the two HMAC passes, not
   implementation overhead.
-- **Open**: `derive_nonce_key` depends only on the key, yet `encrypt_det` recomputes it on every call
+- ~~`derive_nonce_key` depends only on the key, yet `encrypt_det` recomputes it on every call
   (about 40% of `seal_det` for a small plaintext). Caching it per `UDF_INIT` would be a meaningful
   saving, but since the key is a per-row argument, deciding whether the cache is valid requires
   **keeping a copy of the key between rows** — which runs head-on into the key handling in
   `crypto-safety.md`. Doing this for performance means raising it as an amendment and getting a
-  security review. The measurements and the argument are in `docs/perf.md`.
+  security review.~~ → **decided by amendment A11**: a `UDF_INIT` may keep the key copy beside the
+  derived nonce key, and beside `gcm_decrypt`'s scheduled EVP context, under the invariants stated
+  there (constant-time compare, cleanse before replacement, forget on any error, cleanse in deinit,
+  never shared). The prototype measurements are in A11; the CI numbers go in `docs/perf.md`. The
+  security review A11 asks for is still owed.
 
 ## 9. References
 

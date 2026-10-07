@@ -181,8 +181,10 @@ nonce           = HMAC-SHA256(nonce_key, plaintext)[0..12)      # first 12 bytes
   > ciphertext equality joins require the same key and AAD on both sides. Never vary the AAD while
   > keeping the key and plaintext fixed, and never mix "with AAD" and "without AAD" writes of the same
   > value under one key. The random variant (`0x02`) is not affected.
-* The server derives `nonce_key` per call and MUST wipe its buffer after use with
-  `OPENSSL_cleanse` — see `.agents/rules/crypto-safety.md`.
+* The server derives `nonce_key` when the key changes within one `UDF_INIT` (design A11; before
+  A11, on every call) and MUST wipe it with `OPENSSL_cleanse` when it is replaced, on an operation
+  error and in `deinit` — see `.agents/rules/crypto-safety.md`. The bytes produced do not depend on
+  when the derivation runs.
 
 Collision safety: a truncated HMAC-SHA256 gives ~2⁻⁹⁶ per pair; at 10⁷ distinct plaintexts the
 birthday probability is ≈ 10⁻¹⁵. Identical plaintexts colliding is the intended determinism.

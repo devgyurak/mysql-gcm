@@ -33,7 +33,10 @@ bool hmac_sha256(const uint8_t *k, size_t kl, const uint8_t *m, size_t ml, uint8
   EVP_MAC_CTX_free(ctx); return ok;
 }
 ```
-The 32-byte `nonce_key` is a stack buffer, `OPENSSL_cleanse`d after use.
+The 32-byte `nonce_key` is a stack buffer, `OPENSSL_cleanse`d after use. Under design amendment A11
+`gcm_encrypt_det` may instead keep it per `UDF_INIT`, beside a copy of the key it was derived from,
+and re-derive only when the key bytes change; the invariants are listed in `crypto-safety.md`
+"Key handling".
 
 ## GCM — `gcm.cc`
 ```cpp
@@ -58,7 +61,13 @@ Error open(const uint8_t key[32], const uint8_t nonce[12], span ct, span aad, co
 ```
 - Random: anything other than `RAND_bytes(nonce, 12) == 1` is `Error::rng`.
 - Error enum: `ok, bad_envelope, bad_tag, bad_key_len, rng, openssl`. No string errors.
-- `crypto_init` / `crypto_deinit` manage only the fetched handles. Contexts are per call.
+- `crypto_init` / `crypto_deinit` manage only the fetched handles. Contexts are per call, with one
+  exception: under design amendment A11 `gcm_decrypt` keeps one scheduled context per `UDF_INIT` and
+  re-initialises it with the nonce alone while the key bytes and the suite are unchanged. The copy of
+  the key that makes that decision is compared with `CRYPTO_memcmp`, cleansed before it is replaced,
+  cleansed and forgotten on any cipher-operation failure (`bad_tag` included; the `bad_key_len` and
+  `bad_envelope` pre-checks leave it alone), cleansed in `deinit`, and never shared —
+  the full list is in `crypto-safety.md` "Key handling" and design A11. `gcm_encrypt` stays per call.
 
 ## Tests that must come with it (the unit-tests skill, GWT)
 Convert the IV-96 / tag-128 cases from the NIST CAVP `gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp`

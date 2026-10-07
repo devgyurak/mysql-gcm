@@ -116,7 +116,9 @@ different build method on your own.
   symbol directly.
 - Use the libcrypto the server has loaded. No static linking and no bundling of another version.
 - Never put a key, plaintext or nonce in a log, an error message or an assertion string.
-  `OPENSSL_cleanse` the key and plaintext buffers.
+  `OPENSSL_cleanse` the key and plaintext buffers. The per-`UDF_INIT` key copies amendment A11 allows
+  (beside `gcm_decrypt`'s scheduled context and `gcm_encrypt_det`'s nonce key) are the one exception,
+  on the conditions in `crypto-safety.md` "Key handling".
 - A tag verification failure is an error when `gcm.strict=ON`. Do not swallow it as NULL. Never return
   unauthenticated plaintext.
 - The key length is 32, 24 or 16 bytes and selects the suite (amendment A10); the two encryption

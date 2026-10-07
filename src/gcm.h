@@ -79,10 +79,18 @@ void decrypt_session_free(DecryptSession *session);
 Error decrypt_with_session(DecryptSession *session, Bytes key, Bytes envelope, Bytes aad,
                            unsigned char *out, size_t *out_len);
 
-/* Test seam: whether the session currently holds a scheduled key. Lets the unit tests
+/* Test seam: whether the session currently holds key material — a key copy, or a
+   context with a cipher still set up. Lets the unit tests
    pin that a failed open forgets the key and a successful one keeps it. Core-only, not
    reachable from SQL (architecture rule §6; scripts/check-architecture.py lists it). */
 bool decrypt_session_has_key(const DecryptSession *session);
+
+#ifdef GCM_FAULT_INJECTION
+/* Test seam, compiled only into tests/unit (GCM_FAULT_INJECTION): the next context
+   rebuild fails at step 1 (cipher), 2 (IV length) or 3 (key and nonce), after the real
+   OpenSSL call has succeeded. Listed in scripts/check-architecture.py. */
+void fault_inject_decrypt_init(int step);
+#endif
 
 }  // namespace gcm
 

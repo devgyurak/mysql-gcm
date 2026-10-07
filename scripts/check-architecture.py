@@ -12,7 +12,7 @@ CORE_HEADERS = {
     "envelope": {"envelope.h"},
 }
 STANDARD_HEADERS = {"climits", "cstddef", "cstring", "memory"}
-TEST_SEAMS = {"encrypt_with_nonce", "decrypt_session_has_key"}
+TEST_SEAMS = {"encrypt_with_nonce", "decrypt_session_has_key", "fault_inject_decrypt_init"}
 TOKENS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/')
 
 

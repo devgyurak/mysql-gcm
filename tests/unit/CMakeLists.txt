@@ -40,6 +40,9 @@ target_include_directories(gcm_core PUBLIC ${GCM_SRC_DIR})
 target_link_libraries(gcm_core PUBLIC OpenSSL::Crypto)
 # Same flags the server tree uses for components: errors are return values, not exceptions.
 target_compile_options(gcm_core PRIVATE -Wall -Wextra -Werror -fno-exceptions)
+# The failure-injection seam in gcm.cc (design A11 tests). Never defined by the
+# component build, so the shipped .so has no injection point.
+target_compile_definitions(gcm_core PUBLIC GCM_FAULT_INJECTION)
 
 add_executable(gcm_unit
   vectors.cc

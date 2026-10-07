@@ -658,3 +658,58 @@ TEST_F(Lifecycle, GivenAValueSealedByOneItem_WhenAnotherItemOpensItTwice_ThenBot
 }
 
 }  // namespace
+
+namespace {
+
+/* One gcm_decrypt item over three rows: good, tampered, good. Under strict=OFF the server
+   gets plaintext, NULL, plaintext from the same UDF_INIT — the reused context must recover
+   from the bad tag on the row after it (design A11). */
+TEST_F(Lifecycle, GivenStrictOffAndOneItem_WhenRowsAreGoodBadGood_ThenPlainNullPlain) {
+  // Given
+  ASSERT_EQ(component_init(), 0);
+  gcm_adapter::set_sysvar_value("gcm.strict", "OFF");
+  char message[512] = {};
+  TwoArgs seal_args(kA11Name, sizeof(kA11Name) - 1, kA11Key, sizeof(kA11Key));
+  UDF_INIT sealer{};
+  ASSERT_FALSE(gcm_encrypt_det_init(&sealer, &seal_args.args, message)) << message;
+  unsigned long envelope_len = 0;
+  unsigned char is_null = 0;
+  unsigned char error = 0;
+  const char *envelope =
+      gcm_encrypt_det_udf(&sealer, &seal_args.args, nullptr, &envelope_len, &is_null, &error);
+  ASSERT_NE(envelope, nullptr);
+  const std::string good(envelope, envelope_len);
+  gcm_encrypt_det_deinit(&sealer);
+  std::string bad = good;
+  bad.back() = static_cast<char>(bad.back() ^ 0x01);
+
+  TwoArgs good_row(good.data(), good.size(), kA11Key, sizeof(kA11Key));
+  TwoArgs bad_row(bad.data(), bad.size(), kA11Key, sizeof(kA11Key));
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_init(&opener, &good_row.args, message)) << message;
+  const std::string name(kA11Name, sizeof(kA11Name) - 1);
+
+  // When: three rows through the one item
+  unsigned long len1 = 0, len2 = 0, len3 = 0;
+  unsigned char null1 = 0, null2 = 0, null3 = 0;
+  unsigned char err1 = 0, err2 = 0, err3 = 0;
+  const char *r1 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len1, &null1, &err1);
+  const std::string first(r1 != nullptr ? r1 : "", r1 != nullptr ? len1 : 0);
+  const char *r2 = gcm_decrypt_udf(&opener, &bad_row.args, nullptr, &len2, &null2, &err2);
+  const char *r3 = gcm_decrypt_udf(&opener, &good_row.args, nullptr, &len3, &null3, &err3);
+  const std::string third(r3 != nullptr ? r3 : "", r3 != nullptr ? len3 : 0);
+
+  // Then: plaintext, NULL without an error, plaintext
+  EXPECT_EQ(first, name);
+  EXPECT_EQ(null1, 0);
+  EXPECT_EQ(err1, 0);
+  EXPECT_EQ(r2, nullptr);
+  EXPECT_EQ(null2, 1);
+  EXPECT_EQ(err2, 0);
+  EXPECT_EQ(third, name);
+  EXPECT_EQ(null3, 0);
+  EXPECT_EQ(err3, 0);
+  gcm_decrypt_deinit(&opener);
+}
+
+}  // namespace

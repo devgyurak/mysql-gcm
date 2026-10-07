@@ -1055,3 +1055,51 @@ TEST(DecryptSession, GivenWarmSessionOnShortRow_WhenNextRowIsLonger_ThenPlaintex
 }
 
 }  // namespace
+
+// --- A rebuild that fails part-way leaves no key material (fault injection) -------------
+
+namespace {
+
+class RebuildFault : public ::testing::TestWithParam<int> {};
+
+TEST_P(RebuildFault, GivenWarmSessionAndAKeyChange_WhenRebuildFailsAtStep_ThenNothingIsRetained) {
+  // Given: a session warmed under key A, and a row under key B whose rebuild will fail at
+  //        this step after the real OpenSSL call succeeded
+  const std::vector<unsigned char> key_a(kSessionKeyA.begin(), kSessionKeyA.end());
+  const std::vector<unsigned char> key_b(gcm::kKeyLen256, 0xB2);
+  const Sealed under_a = seal_random(key_a, kSessionTextOne, {});
+  const Sealed under_b = seal_random(key_b, kSessionTextTwo, {});
+  ASSERT_EQ(under_a.err, Error::ok);
+  ASSERT_EQ(under_b.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key_a, under_a, {}), Error::ok);
+  gcm::fault_inject_decrypt_init(GetParam());
+  // When
+  const Error err = warm(session.get(), key_b, under_b, {});
+  // Then: an error, and neither the copy nor a scheduled context survives it
+  EXPECT_EQ(err, Error::openssl);
+  EXPECT_FALSE(gcm::decrypt_session_has_key(session.get()));
+}
+
+INSTANTIATE_TEST_SUITE_P(Steps, RebuildFault, ::testing::Values(1, 2, 3));
+
+TEST(RebuildFault, GivenARebuildThatFailedAfterSchedulingTheKey_WhenTheNextRowArrives_ThenItOpens) {
+  // Given: a first open whose key-and-nonce step fails after scheduling the key
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed sealed = seal_random(key, kSessionTextOne, {});
+  ASSERT_EQ(sealed.err, Error::ok);
+  SessionPtr session = new_session();
+  gcm::fault_inject_decrypt_init(3);
+  ASSERT_EQ(warm(session.get(), key, sealed, {}), Error::openssl);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(sealed.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When: the next row, same key
+  const Error err = gcm::decrypt_with_session(session.get(), span_of(key), span_of(sealed.envelope),
+                                              gcm::Bytes{nullptr, 0}, out.data(), &out_len);
+  // Then: it rebuilds from scratch and opens, and the session holds the key again
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), kSessionTextOne);
+  EXPECT_TRUE(gcm::decrypt_session_has_key(session.get()));
+}
+
+}  // namespace

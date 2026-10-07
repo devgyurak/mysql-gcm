@@ -17,13 +17,29 @@ namespace gcm {
    owns it. key_len == 0 means nothing is scheduled and the next call does a full
    initialisation. */
 struct DecryptSession {
-  EVP_CIPHER_CTX *ctx;
+  EVP_CIPHER_CTX *ctx;           /* created on first use, so pre-check errors allocate nothing */
   const EVP_CIPHER *cipher;      /* the suite the context is scheduled for */
   unsigned char key[kKeyLen256]; /* the scheduled key, key_len bytes of it */
   size_t key_len;
+  bool retain; /* false for the one-call path: no key copy, nothing to reuse */
 };
 
 namespace {
+
+#ifdef GCM_FAULT_INJECTION
+/* Test-only (tests/unit defines GCM_FAULT_INJECTION; the component build does not):
+   makes the named step of the context rebuild fail *after* the real OpenSSL call
+   succeeded, which is the worst case — the context really holds the key schedule when
+   the error is reported. 0 means no fault. */
+int g_decrypt_init_fault = 0;
+bool fault(int step) {
+  if (g_decrypt_init_fault != step) return false;
+  g_decrypt_init_fault = 0;
+  return true;
+}
+#else
+constexpr bool fault(int) { return false; }
+#endif
 
 /* Fetched once; immutable afterwards. Per-call state lives in EVP_*_CTX so the
    UDFs are safe to call from many sessions at once. */
@@ -101,17 +117,24 @@ Error seal(Bytes key, const unsigned char *nonce, Bytes plaintext, Bytes aad, un
   return Error::ok;
 }
 
-/* Drops the scheduled key. Called on every failure so a context that reported an
-   error is never trusted for the next row, and before a key is replaced (design A11). */
-void session_forget(DecryptSession *s) {
-  OPENSSL_cleanse(s->key, sizeof(s->key));
+/* Drops the key copy only. Used before a rebuild, which passes the cipher and so
+   resets the context itself (EVP_DecryptInit_ex2 with a non-NULL cipher clears the
+   provider context first); resetting here as well would be a second reset per miss. */
+void session_drop_copy(DecryptSession *s) {
+  if (s->key_len != 0) OPENSSL_cleanse(s->key, s->key_len);
   s->key_len = 0;
   s->cipher = nullptr;
-  /* The key schedule inside the context is key-equivalent material; a forgotten key
-     must not leave it behind until the next rebuild. The reset frees the provider
-     context (a clear-free), and the rebuild path passes the cipher again, which is
-     exactly the first-call path. Error and key-change paths only, never the hit. */
-  EVP_CIPHER_CTX_reset(s->ctx);
+}
+
+/* Drops the key copy *and* the schedule in the context. Called on every failure of
+   the cipher operation — including a failure in the middle of a rebuild, after the key
+   may already be scheduled — so a context that reported an error is never trusted for
+   the next row and holds no key-equivalent material (design A11). The reset is a
+   clear-free of the provider context; the next row rebuilds as on a first call. */
+Error session_fail(DecryptSession *s, Error err) {
+  session_drop_copy(s);
+  if (s->ctx != nullptr) EVP_CIPHER_CTX_reset(s->ctx);
+  return err;
 }
 
 bool session_has_key(const DecryptSession *s, Bytes key, const EVP_CIPHER *cipher) {
@@ -134,53 +157,59 @@ Error open_gcm(DecryptSession *s, Bytes key, Bytes nonce, Bytes ciphertext, Byte
      seal() uses the same constant. */
   if (nonce.size != kNonceLen) return Error::bad_envelope;
 
-  if (session_has_key(s, key, cipher)) {
+  if (s->retain && session_has_key(s, key, cipher)) {
     if (EVP_DecryptInit_ex2(s->ctx, nullptr, nullptr, nonce.data, nullptr) != 1) {
-      session_forget(s);
-      return Error::openssl;
+      return session_fail(s, Error::openssl);
     }
   } else {
-    session_forget(s);
-    if (EVP_DecryptInit_ex2(s->ctx, cipher, nullptr, nullptr, nullptr) != 1) return Error::openssl;
+    session_drop_copy(s);
+    if (s->ctx == nullptr) {
+      s->ctx = EVP_CIPHER_CTX_new();
+      if (s->ctx == nullptr) return Error::openssl;
+    }
+    /* Every step below can fail after OpenSSL has already changed the context, and the
+       last one after the key is scheduled; each failure resets the context. */
+    if (EVP_DecryptInit_ex2(s->ctx, cipher, nullptr, nullptr, nullptr) != 1 || fault(1)) {
+      return session_fail(s, Error::openssl);
+    }
     if (EVP_CIPHER_CTX_ctrl(s->ctx, EVP_CTRL_AEAD_SET_IVLEN, static_cast<int>(kNonceLen),
-                            nullptr) != 1) {
-      return Error::openssl;
+                            nullptr) != 1 ||
+        fault(2)) {
+      return session_fail(s, Error::openssl);
     }
-    if (EVP_DecryptInit_ex2(s->ctx, nullptr, key.data, nonce.data, nullptr) != 1) {
-      return Error::openssl;
+    if (EVP_DecryptInit_ex2(s->ctx, nullptr, key.data, nonce.data, nullptr) != 1 || fault(3)) {
+      return session_fail(s, Error::openssl);
     }
-    std::memcpy(s->key, key.data, key.size);
-    s->key_len = key.size;
-    s->cipher = cipher;
+    if (s->retain) {
+      std::memcpy(s->key, key.data, key.size);
+      s->key_len = key.size;
+      s->cipher = cipher;
+    }
   }
 
   int aad_out = 0;
   if (aad.size != 0 &&
       EVP_DecryptUpdate(s->ctx, nullptr, &aad_out, aad.data, static_cast<int>(aad.size)) != 1) {
-    session_forget(s);
-    return Error::openssl;
+    return session_fail(s, Error::openssl);
   }
   int written = 0;
   if (ciphertext.size != 0 && EVP_DecryptUpdate(s->ctx, out, &written, ciphertext.data,
                                                 static_cast<int>(ciphertext.size)) != 1) {
     OPENSSL_cleanse(out, ciphertext.size);
-    session_forget(s);
-    return Error::openssl;
+    return session_fail(s, Error::openssl);
   }
   /* SET_TAG must precede Final: Final's return value *is* the verification. */
   if (EVP_CIPHER_CTX_ctrl(s->ctx, EVP_CTRL_AEAD_SET_TAG, static_cast<int>(kTagLen),
                           const_cast<unsigned char *>(tag.data)) != 1) {
     OPENSSL_cleanse(out, ciphertext.size);
-    session_forget(s);
-    return Error::openssl;
+    return session_fail(s, Error::openssl);
   }
   int final_len = 0;
   if (EVP_DecryptFinal_ex(s->ctx, out + written, &final_len) <= 0) {
     /* design.md §5.5: never hand back unauthenticated plaintext. The key is
        forgotten too: a failed Final is a failure, and the next row starts clean. */
     OPENSSL_cleanse(out, ciphertext.size);
-    session_forget(s);
-    return Error::bad_tag;
+    return session_fail(s, Error::bad_tag);
   }
   *out_len = static_cast<size_t>(written) + static_cast<size_t>(final_len);
   return Error::ok;
@@ -317,6 +346,7 @@ Error encrypt_det(Bytes key, Bytes plaintext, Bytes aad, unsigned char *out, siz
 DecryptSession *decrypt_session_new() {
   auto *s = static_cast<DecryptSession *>(OPENSSL_zalloc(sizeof(DecryptSession)));
   if (s == nullptr) return nullptr;
+  s->retain = true;
   s->ctx = EVP_CIPHER_CTX_new();
   if (s->ctx == nullptr) {
     OPENSSL_free(s);
@@ -326,13 +356,21 @@ DecryptSession *decrypt_session_new() {
 }
 
 bool decrypt_session_has_key(const DecryptSession *session) {
-  return session != nullptr && session->key_len != 0;
+  /* Either form of retained key material counts: the copy, or a context that still has
+     a cipher set up — after a reset EVP_CIPHER_CTX_get0_cipher returns NULL. */
+  return session != nullptr &&
+         (session->key_len != 0 ||
+          (session->ctx != nullptr && EVP_CIPHER_CTX_get0_cipher(session->ctx) != nullptr));
 }
+
+#ifdef GCM_FAULT_INJECTION
+void fault_inject_decrypt_init(int step) { g_decrypt_init_fault = step; }
+#endif
 
 void decrypt_session_free(DecryptSession *session) {
   if (session == nullptr) return;
-  session_forget(session);
-  EVP_CIPHER_CTX_free(session->ctx);
+  session_drop_copy(session);
+  EVP_CIPHER_CTX_free(session->ctx);  // clear-frees the provider context, schedule included
   OPENSSL_free(session);
 }
 
@@ -371,12 +409,12 @@ Error decrypt_with_session(DecryptSession *session, Bytes key, Bytes envelope, B
 }
 
 Error decrypt(Bytes key, Bytes envelope, Bytes aad, unsigned char *out, size_t *out_len) {
-  /* A one-call session: the same checks and the same open as the UDF path, with the
-     context and the key copy released before returning. */
-  DecryptSession *session = decrypt_session_new();
-  if (session == nullptr) return Error::openssl;
-  const Error err = decrypt_with_session(session, key, envelope, aad, out, out_len);
-  decrypt_session_free(session);
+  /* A one-call session on the stack: the same checks and the same open as the UDF path,
+     with what the pre-A11 path paid and nothing more — no heap session, no key copy
+     (retain = false), and the context allocated only once the pre-checks have passed. */
+  DecryptSession session{};
+  const Error err = decrypt_with_session(&session, key, envelope, aad, out, out_len);
+  EVP_CIPHER_CTX_free(session.ctx);  // nullptr-safe; clear-frees the schedule
   return err;
 }
 

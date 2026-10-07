@@ -91,6 +91,10 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 - `encrypt_with_nonce` is an internal entry point for the vector tests. Do not reference it from a
   server adapter and do not register it in SQL. The same constraint applies to any new test entry
   point.
+- `decrypt_session_has_key` (amendment A11) is a core test seam under the same constraint.
+  `fault_inject_decrypt_init` is compiled only when `GCM_FAULT_INJECTION` is defined, which
+  `tests/unit` does and the component build never does, so the shipped `.so` contains no injection
+  point. Both are listed in `scripts/check-architecture.py`.
 - Do not ship experimental code that skips encryption or returns plaintext as a successful result under
   an environment variable or a debug option. Experiments belong in a target that is not shipped.
 - `python3 scripts/check-architecture.py` checks the core's explicit include dependencies and

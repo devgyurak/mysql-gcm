@@ -20,22 +20,47 @@ import json
 import sys
 from typing import Any
 
-# Gated: each case divided by a reference that performs the *same work mix*. An earlier version
-# divided all three encrypt cases by a bare seal, and three runs on identical CI runners spread
-# `seal_det` by 2.69x — because that quotient is really the runner's SHA-to-AES throughput ratio,
-# which varies across the fleet. bench_support.h has the numbers.
+# The three suites, in the order the tables report them. The key length selects the suite and
+# nothing else does (design A10); the benchmark names carry these labels.
+SUITES = ("aes256", "aes192", "aes128")
+GATED_CASES = ("seal_random", "seal_det", "open")
+
+# Gated: each case divided by a reference that performs the *same work mix* with the *same
+# cipher*. An earlier version divided all three encrypt cases by a bare seal, and three runs on
+# identical CI runners spread `seal_det` by 2.69x — because that quotient is really the runner's
+# SHA-to-AES throughput ratio, which varies across the fleet. bench_support.h has the numbers.
+# The same logic is why each suite divides by its own reference rather than by AES-256's: the
+# ratio must stay a property of this code's structure, not of the round count.
 RATIO_PAIRS = {
-    "seal_random": ("gcm/seal_random", "ref/seal_random"),
-    "seal_det": ("gcm/seal_det", "ref/seal_det"),
-    "open": ("gcm/open", "ref/open"),
+    f"{case}/{suite}": (f"gcm/{case}/{suite}", f"ref/{case}/{suite}")
+    for case in GATED_CASES
+    for suite in SUITES
 }
 
-# Reported, never gated: the cost of each variant against a plain seal. This is the number that
-# tells someone choosing between gcm_encrypt and gcm_encrypt_det what determinism costs, and it
-# is exactly the number that moves with the machine — useful to read, useless to gate.
+# Reported, never gated. Two families:
+#
+# `*_vs_plain`: each encrypt variant against a plain seal of the same suite. This is the number
+# that tells someone choosing between gcm_encrypt and gcm_encrypt_det what determinism costs,
+# and it is exactly the number that moves with the machine — useful to read, useless to gate.
+#
+# `*_vs_aes256`: AES-192 and AES-128 against AES-256 on the *gcm* side, so a reader can see what
+# the smaller suites buy at the core. Machine-dependent for the same reason: with AES-NI the
+# extra rounds are nearly free, and without it they are not.
 INFORMATIONAL_PAIRS = {
-    "seal_random_vs_plain": ("gcm/seal_random", "ref/seal"),
-    "seal_det_vs_plain": ("gcm/seal_det", "ref/seal"),
+    **{
+        f"seal_random_vs_plain/{suite}": (f"gcm/seal_random/{suite}", f"ref/seal/{suite}")
+        for suite in SUITES
+    },
+    **{
+        f"seal_det_vs_plain/{suite}": (f"gcm/seal_det/{suite}", f"ref/seal/{suite}")
+        for suite in SUITES
+    },
+    **{
+        f"{case}/{suite}_vs_aes256": (f"gcm/{case}/{suite}", f"gcm/{case}/aes256")
+        for case in GATED_CASES
+        for suite in SUITES
+        if suite != "aes256"
+    },
 }
 
 
@@ -150,18 +175,21 @@ def main() -> int:
         "recorded": recorded(results),
     }
 
-    print("gated — against a reference doing the same work:", file=sys.stderr)
+    print("gated — against a reference doing the same work with the same cipher:", file=sys.stderr)
     for row in rows:
         print(
-            f"  {row['case']:<12} {row['size']:>6}B  "
+            f"  {row['case']:<20} {row['size']:>6}B  "
             f"{row['cpu_ns']:>9.1f} ns vs ref {row['reference_ns']:>9.1f} ns  "
             f"ratio {row['ratio']}",
             file=sys.stderr,
         )
-    print("reported — against a plain seal, moves with the machine:", file=sys.stderr)
+    print(
+        "reported — against a plain seal, or against AES-256; moves with the machine:",
+        file=sys.stderr,
+    )
     for row in summary["informational"]:
         print(
-            f"  {row['case']:<22} {row['size']:>6}B  ratio {row['ratio']}",
+            f"  {row['case']:<30} {row['size']:>6}B  ratio {row['ratio']}",
             file=sys.stderr,
         )
 

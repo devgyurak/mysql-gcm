@@ -3,10 +3,11 @@
  *
  * `parse` touches no cipher and allocates nothing — it reads a version byte and computes
  * offsets (spec/envelope.md §2). It is here because it runs once per row on the decrypt path,
- * so the thing to watch is that it stays independent of the envelope's size. All three
- * versions are measured at one size: if a later change made parsing scan the body, the v2 and
- * v3 numbers would move away from v1 and away from each other, and nothing else in the
- * project would notice.
+ * so the thing to watch is that it stays independent of the envelope's size. All seven
+ * versions are measured at one size: if a later change made parsing scan the body, the GCM
+ * numbers would move away from v1 and away from each other, and nothing else in the project
+ * would notice. The four A10 versions share v2's and v3's layout, so their numbers should be
+ * indistinguishable from those — a suite lookup that grew a cost would show here first.
  *
  * No `ref/` counterpart: there is no OpenSSL operation to divide by. Recorded, not ratio-gated. */
 
@@ -21,8 +22,8 @@ namespace {
 
 using gcm_bench::filler;
 
-/* One body size for all three: parsing cost must not depend on it, and holding it constant is
- * what makes the three numbers comparable with each other. */
+/* One body size for all seven: parsing cost must not depend on it, and holding it constant is
+ * what makes the numbers comparable with each other. */
 constexpr size_t kBodyLen = 256;
 
 std::vector<unsigned char> envelope_with_version(unsigned char version, size_t body_len) {
@@ -58,3 +59,7 @@ void parse_envelope(benchmark::State &state, unsigned char version) {
 BENCHMARK_CAPTURE(parse_envelope, v1_legacy_cbc, gcm::kVersionLegacyCbc)->Name("envelope/parse/v1");
 BENCHMARK_CAPTURE(parse_envelope, v2_random, gcm::kVersionRandom)->Name("envelope/parse/v2");
 BENCHMARK_CAPTURE(parse_envelope, v3_det, gcm::kVersionDet)->Name("envelope/parse/v3");
+BENCHMARK_CAPTURE(parse_envelope, v4_random128, gcm::kVersionRandom128)->Name("envelope/parse/v4");
+BENCHMARK_CAPTURE(parse_envelope, v5_det128, gcm::kVersionDet128)->Name("envelope/parse/v5");
+BENCHMARK_CAPTURE(parse_envelope, v6_random192, gcm::kVersionRandom192)->Name("envelope/parse/v6");
+BENCHMARK_CAPTURE(parse_envelope, v7_det192, gcm::kVersionDet192)->Name("envelope/parse/v7");

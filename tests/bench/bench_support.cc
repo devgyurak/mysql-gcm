@@ -11,9 +11,27 @@
 namespace gcm_bench {
 namespace {
 
-/* Fetched once, like the component does. */
-EVP_CIPHER *g_gcm = nullptr;
+/* Fetched once, like the component does: one handle per suite plus the MAC. */
+EVP_CIPHER *g_gcm256 = nullptr;
+EVP_CIPHER *g_gcm192 = nullptr;
+EVP_CIPHER *g_gcm128 = nullptr;
 EVP_MAC *g_hmac = nullptr;
+
+/* The key length selects the cipher and nothing else does — the same rule as src/gcm.cc,
+   so the reference and the code under test always run the same suite for the same key.
+   nullptr for a length no suite has, which every caller turns into a reported failure. */
+const EVP_CIPHER *cipher_for(size_t key_len) {
+  switch (key_len) {
+    case gcm::kKeyLen256:
+      return g_gcm256;
+    case gcm::kKeyLen192:
+      return g_gcm192;
+    case gcm::kKeyLen128:
+      return g_gcm128;
+    default:
+      return nullptr;
+  }
+}
 
 /* HMAC-SHA256 the way src/nonce.cc does it, so the reference pays the same OpenSSL costs —
    a context per call, the digest passed as a parameter — and the difference that remains is
@@ -48,7 +66,11 @@ const unsigned char kFixtureKey[gcm::kKeyLen256] = {
 
 }  // namespace
 
-const gcm::Bytes fixture_key() { return gcm::Bytes{kFixtureKey, sizeof(kFixtureKey)}; }
+const gcm::Bytes fixture_key(size_t key_len) {
+  /* Preserve invalid lengths for the downstream suite check: clamping an oversized key to
+     32 would silently turn a bad benchmark argument into a valid AES-256 measurement. */
+  return gcm::Bytes{key_len <= sizeof(kFixtureKey) ? kFixtureKey : nullptr, key_len};
+}
 
 std::vector<unsigned char> filler(size_t len, uint64_t seed) {
   std::vector<unsigned char> out(len);
@@ -62,27 +84,34 @@ std::vector<unsigned char> filler(size_t len, uint64_t seed) {
 bool reference_init() {
   /* By name, not `EVP_aes_256_gcm()` / `HMAC()`: a number that src/ is judged against must not
      be produced through symbols src/ is forbidden to use (crypto-safety). */
-  g_gcm = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
+  g_gcm256 = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
+  g_gcm192 = EVP_CIPHER_fetch(nullptr, "AES-192-GCM", nullptr);
+  g_gcm128 = EVP_CIPHER_fetch(nullptr, "AES-128-GCM", nullptr);
   g_hmac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
-  return g_gcm != nullptr && g_hmac != nullptr;
+  return g_gcm256 != nullptr && g_gcm192 != nullptr && g_gcm128 != nullptr && g_hmac != nullptr;
 }
 
 void reference_deinit() {
-  EVP_CIPHER_free(g_gcm);
-  g_gcm = nullptr;
+  EVP_CIPHER_free(g_gcm256);
+  g_gcm256 = nullptr;
+  EVP_CIPHER_free(g_gcm192);
+  g_gcm192 = nullptr;
+  EVP_CIPHER_free(g_gcm128);
+  g_gcm128 = nullptr;
   EVP_MAC_free(g_hmac);
   g_hmac = nullptr;
 }
 
-bool reference_seal(const unsigned char *key, const unsigned char *nonce,
-                    const unsigned char *plaintext, size_t plaintext_len, unsigned char *out,
-                    unsigned char *tag) {
+bool reference_seal(gcm::Bytes key, const unsigned char *nonce, const unsigned char *plaintext,
+                    size_t plaintext_len, unsigned char *out, unsigned char *tag) {
+  const EVP_CIPHER *cipher = cipher_for(key.size);
+  if (cipher == nullptr) return false;
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
   if (ctx == nullptr) return false;
-  bool ok = EVP_EncryptInit_ex(ctx, g_gcm, nullptr, nullptr, nullptr) == 1 &&
+  bool ok = EVP_EncryptInit_ex(ctx, cipher, nullptr, nullptr, nullptr) == 1 &&
             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, static_cast<int>(gcm::kNonceLen),
                                 nullptr) == 1 &&
-            EVP_EncryptInit_ex(ctx, nullptr, nullptr, key, nonce) == 1;
+            EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.data, nonce) == 1;
   int written = 0;
   ok = ok && EVP_EncryptUpdate(ctx, out, &written, plaintext, static_cast<int>(plaintext_len)) == 1;
   int final_written = 0;
@@ -92,15 +121,16 @@ bool reference_seal(const unsigned char *key, const unsigned char *nonce,
   return ok;
 }
 
-bool reference_open(const unsigned char *key, const unsigned char *nonce,
-                    const unsigned char *ciphertext, size_t ciphertext_len,
-                    const unsigned char *tag, unsigned char *out) {
+bool reference_open(gcm::Bytes key, const unsigned char *nonce, const unsigned char *ciphertext,
+                    size_t ciphertext_len, const unsigned char *tag, unsigned char *out) {
+  const EVP_CIPHER *cipher = cipher_for(key.size);
+  if (cipher == nullptr) return false;
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
   if (ctx == nullptr) return false;
-  bool ok = EVP_DecryptInit_ex(ctx, g_gcm, nullptr, nullptr, nullptr) == 1 &&
+  bool ok = EVP_DecryptInit_ex(ctx, cipher, nullptr, nullptr, nullptr) == 1 &&
             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, static_cast<int>(gcm::kNonceLen),
                                 nullptr) == 1 &&
-            EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, nonce) == 1;
+            EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data, nonce) == 1;
   int written = 0;
   ok = ok &&
        EVP_DecryptUpdate(ctx, out, &written, ciphertext, static_cast<int>(ciphertext_len)) == 1;
@@ -115,21 +145,22 @@ bool reference_open(const unsigned char *key, const unsigned char *nonce,
   return ok;
 }
 
-bool reference_seal_random(const unsigned char *key, const unsigned char *plaintext,
-                           size_t plaintext_len, unsigned char *out, unsigned char *tag) {
+bool reference_seal_random(gcm::Bytes key, const unsigned char *plaintext, size_t plaintext_len,
+                           unsigned char *out, unsigned char *tag) {
   unsigned char nonce[gcm::kNonceLen];
   if (RAND_bytes(nonce, static_cast<int>(sizeof(nonce))) != 1) return false;
   return reference_seal(key, nonce, plaintext, plaintext_len, out, tag);
 }
 
-bool reference_seal_det(const unsigned char *key, const unsigned char *plaintext,
-                        size_t plaintext_len, unsigned char *out, unsigned char *tag) {
+bool reference_seal_det(gcm::Bytes key, const unsigned char *plaintext, size_t plaintext_len,
+                        unsigned char *out, unsigned char *tag) {
   unsigned char nonce_key[gcm::kHmacLen];
   unsigned char mac[gcm::kHmacLen];
   /* No OPENSSL_cleanse here, deliberately: the reference is meant to be the cheapest correct
      implementation of the algorithm, so wiping — which src/nonce.cc does and must — stays on
-     this project's side of the ratio where it can be seen. */
-  bool ok = reference_hmac(key, gcm::kKeyLen256,
+     this project's side of the ratio where it can be seen. The HMAC key is the whole
+     encryption key, whatever its length — the derivation does not change per suite. */
+  bool ok = reference_hmac(key.data, key.size,
                            reinterpret_cast<const unsigned char *>(gcm::kDetNonceLabel),
                            gcm::kDetNonceLabelLen, nonce_key) &&
             reference_hmac(nonce_key, sizeof(nonce_key), plaintext, plaintext_len, mac);

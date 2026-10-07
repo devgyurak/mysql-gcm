@@ -33,7 +33,7 @@ The `.so` named by `GCM_SO` (default `build/8.4/...`) is mounted read-only into 
 `plugin_dir`.
 
 ## Load — `tests/load`
-`run.py --rows {10000,100000,300000} --concurrency 1,8,32 --baseline aes --out result.json`
+`run.py --rows {10000,100000,300000} --concurrency 1,8,32 --baseline aes [--suite aes256|aes192|aes128] --out result.json`
 1. Given: N rows in `patients(id, name_gcm VARBINARY, name_cbc VARBINARY)` from a seeded Korean-name
    generator, with the **same plaintext** in both columns. The CBC column is written with the builtin
    `AES_ENCRYPT` under `block_encryption_mode = 'aes-256-cbc'` — that is the baseline being compared
@@ -45,6 +45,12 @@ The `.so` named by `GCM_SO` (default `build/8.4/...`) is mounted read-only into 
 3. Then: p50/p95/max in ms, the `gcm/aes` ratio, and the increase in `Created_tmp_disk_tables`, as JSON
    on stdout with a human summary on stderr. With `--gate tests/load/baseline.json`, exceeding a
    threshold exits 1.
+
+`--suite` selects the key length for the GCM column (32, 24 or 16 bytes of the fixture key); the
+`AES_DECRYPT` baseline stays `aes-256-cbc` so the suites' ratios share a denominator. The runner lowers
+`gcm.min_key_bytes` only while it writes the rows and restores the previous value — decryption, which
+is what gets timed, ignores the setting. `load.yml` takes `suite` as a dispatch input; the nightly
+measures `aes256`.
 
 p95 is **nearest-rank** (`ceil(0.95n)`). With 20 samples, `int(len*0.95)` is one rank too high and
 equals the maximum, which looks steadier while measuring something else.

@@ -4,7 +4,14 @@
  * Every case checks that the operation succeeded. Without that a benchmark is free to measure
  * an error path: `bad_key_len` returns before touching a cipher, and the result would be a
  * beautiful number for code that does nothing. The check is one comparison per iteration,
- * accumulated so the failure is reported once after the loop instead of branching inside it. */
+ * accumulated so the failure is reported once after the loop instead of branching inside it.
+ *
+ * Every case is run once per suite. The key length is the only thing that differs between
+ * the three (design A10): the same code path, the same envelope layout, a different cipher
+ * fetched by name. Each suite is gated against a reference running that same cipher, so the
+ * gated ratio is still "this project's structure over the algorithm" and says nothing about
+ * what AES-128 costs relative to AES-256. That number is reported separately by gate.py and
+ * depends on the hardware, provider and workload. */
 
 #include <vector>
 
@@ -36,7 +43,7 @@ Buffers buffers_for(size_t size) {
 
 const gcm::Bytes kNoAad{nullptr, 0};
 
-void seal_random(benchmark::State &state) {
+void seal_random(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   const gcm::Bytes plaintext{b.plaintext.data(), size};
@@ -45,7 +52,7 @@ void seal_random(benchmark::State &state) {
   for ([[maybe_unused]] auto iteration : state) {
     size_t written = 0;
     const gcm::Error err =
-        gcm::encrypt_random(fixture_key(), plaintext, kNoAad, b.envelope.data(), &written);
+        gcm::encrypt_random(fixture_key(key_len), plaintext, kNoAad, b.envelope.data(), &written);
     last = err != gcm::Error::ok ? err : last;
     benchmark::DoNotOptimize(b.envelope.data());
     benchmark::DoNotOptimize(written);
@@ -54,7 +61,7 @@ void seal_random(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-void seal_det(benchmark::State &state) {
+void seal_det(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   const gcm::Bytes plaintext{b.plaintext.data(), size};
@@ -63,7 +70,7 @@ void seal_det(benchmark::State &state) {
   for ([[maybe_unused]] auto iteration : state) {
     size_t written = 0;
     const gcm::Error err =
-        gcm::encrypt_det(fixture_key(), plaintext, kNoAad, b.envelope.data(), &written);
+        gcm::encrypt_det(fixture_key(key_len), plaintext, kNoAad, b.envelope.data(), &written);
     last = err != gcm::Error::ok ? err : last;
     benchmark::DoNotOptimize(b.envelope.data());
     benchmark::DoNotOptimize(written);
@@ -72,12 +79,13 @@ void seal_det(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-void open_envelope(benchmark::State &state) {
+void open_envelope(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   size_t envelope_len = 0;
-  const gcm::Error sealed = gcm::encrypt_det(fixture_key(), gcm::Bytes{b.plaintext.data(), size},
-                                             kNoAad, b.envelope.data(), &envelope_len);
+  const gcm::Error sealed =
+      gcm::encrypt_det(fixture_key(key_len), gcm::Bytes{b.plaintext.data(), size}, kNoAad,
+                       b.envelope.data(), &envelope_len);
   if (sealed != gcm::Error::ok) {
     state.SkipWithError(gcm::error_name(sealed));
     return;
@@ -87,7 +95,8 @@ void open_envelope(benchmark::State &state) {
 
   for ([[maybe_unused]] auto iteration : state) {
     size_t written = 0;
-    const gcm::Error err = gcm::decrypt(fixture_key(), envelope, kNoAad, b.out.data(), &written);
+    const gcm::Error err =
+        gcm::decrypt(fixture_key(key_len), envelope, kNoAad, b.out.data(), &written);
     last = err != gcm::Error::ok ? err : last;
     benchmark::DoNotOptimize(b.out.data());
     benchmark::DoNotOptimize(written);
@@ -101,7 +110,7 @@ void open_envelope(benchmark::State &state) {
  * perform the same work mix as the case they pair with, which is what makes the ratio a property
  * of this code rather than of the runner's SHA-to-AES throughput ratio (bench_support.h). */
 
-void reference_seal(benchmark::State &state) {
+void reference_seal(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   const std::vector<unsigned char> nonce = filler(gcm::kNonceLen, 0x1234567890ABCDEFULL);
@@ -109,7 +118,7 @@ void reference_seal(benchmark::State &state) {
   bool ok = true;
 
   for ([[maybe_unused]] auto iteration : state) {
-    ok = gcm_bench::reference_seal(fixture_key().data, nonce.data(), b.plaintext.data(), size,
+    ok = gcm_bench::reference_seal(fixture_key(key_len), nonce.data(), b.plaintext.data(), size,
                                    b.envelope.data(), tag) &&
          ok;
     benchmark::DoNotOptimize(b.envelope.data());
@@ -119,12 +128,12 @@ void reference_seal(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-void reference_open(benchmark::State &state) {
+void reference_open(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   const std::vector<unsigned char> nonce = filler(gcm::kNonceLen, 0x1234567890ABCDEFULL);
   unsigned char tag[gcm::kTagLen] = {};
-  if (!gcm_bench::reference_seal(fixture_key().data, nonce.data(), b.plaintext.data(), size,
+  if (!gcm_bench::reference_seal(fixture_key(key_len), nonce.data(), b.plaintext.data(), size,
                                  b.envelope.data(), tag)) {
     state.SkipWithError("reference seal failed while preparing the open case");
     return;
@@ -132,7 +141,7 @@ void reference_open(benchmark::State &state) {
   bool ok = true;
 
   for ([[maybe_unused]] auto iteration : state) {
-    ok = gcm_bench::reference_open(fixture_key().data, nonce.data(), b.envelope.data(), size, tag,
+    ok = gcm_bench::reference_open(fixture_key(key_len), nonce.data(), b.envelope.data(), size, tag,
                                    b.out.data()) &&
          ok;
     benchmark::DoNotOptimize(b.out.data());
@@ -141,14 +150,14 @@ void reference_open(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-void reference_seal_random(benchmark::State &state) {
+void reference_seal_random(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   unsigned char tag[gcm::kTagLen] = {};
   bool ok = true;
 
   for ([[maybe_unused]] auto iteration : state) {
-    ok = gcm_bench::reference_seal_random(fixture_key().data, b.plaintext.data(), size,
+    ok = gcm_bench::reference_seal_random(fixture_key(key_len), b.plaintext.data(), size,
                                           b.envelope.data(), tag) &&
          ok;
     benchmark::DoNotOptimize(b.envelope.data());
@@ -158,14 +167,14 @@ void reference_seal_random(benchmark::State &state) {
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(size));
 }
 
-void reference_seal_det(benchmark::State &state) {
+void reference_seal_det(benchmark::State &state, size_t key_len) {
   const size_t size = static_cast<size_t>(state.range(0));
   Buffers b = buffers_for(size);
   unsigned char tag[gcm::kTagLen] = {};
   bool ok = true;
 
   for ([[maybe_unused]] auto iteration : state) {
-    ok = gcm_bench::reference_seal_det(fixture_key().data, b.plaintext.data(), size,
+    ok = gcm_bench::reference_seal_det(fixture_key(key_len), b.plaintext.data(), size,
                                        b.envelope.data(), tag) &&
          ok;
     benchmark::DoNotOptimize(b.envelope.data());
@@ -177,36 +186,27 @@ void reference_seal_det(benchmark::State &state) {
 
 }  // namespace
 
-/* The names are the contract with tests/bench/gate.py, which pairs `gcm/<case>/<size>` against
- * `ref/<case>/<size>`. Renaming a case here means renaming it in tests/bench/baseline.json.
+/* The names are the contract with tests/bench/gate.py, which pairs `gcm/<case>/<suite>/<size>`
+ * against `ref/<case>/<suite>/<size>`. Renaming a case or a suite here means renaming it in
+ * tests/bench/baseline.json.
  *
  * RangeMultiplier(16) from 16 to 65536 is exactly 16, 256, 4096, 65536 — the sizes and the
  * reason for them are in bench_support.h. */
-BENCHMARK(seal_random)
-    ->Name("gcm/seal_random")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(seal_det)
-    ->Name("gcm/seal_det")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(open_envelope)
-    ->Name("gcm/open")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(reference_seal)
-    ->Name("ref/seal")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(reference_seal_random)
-    ->Name("ref/seal_random")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(reference_seal_det)
-    ->Name("ref/seal_det")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
-BENCHMARK(reference_open)
-    ->Name("ref/open")
-    ->RangeMultiplier(gcm_bench::kSizeMultiplier)
-    ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize);
+#define GCM_BENCH_SUITE(fn, prefix, suite, key_len) \
+  BENCHMARK_CAPTURE(fn, suite, key_len)             \
+      ->Name(prefix "/" #suite)                     \
+      ->RangeMultiplier(gcm_bench::kSizeMultiplier) \
+      ->Range(gcm_bench::kMinSize, gcm_bench::kMaxSize)
+
+#define GCM_BENCH_ALL_SUITES(fn, prefix)                \
+  GCM_BENCH_SUITE(fn, prefix, aes256, gcm::kKeyLen256); \
+  GCM_BENCH_SUITE(fn, prefix, aes192, gcm::kKeyLen192); \
+  GCM_BENCH_SUITE(fn, prefix, aes128, gcm::kKeyLen128)
+
+GCM_BENCH_ALL_SUITES(seal_random, "gcm/seal_random");
+GCM_BENCH_ALL_SUITES(seal_det, "gcm/seal_det");
+GCM_BENCH_ALL_SUITES(open_envelope, "gcm/open");
+GCM_BENCH_ALL_SUITES(reference_seal, "ref/seal");
+GCM_BENCH_ALL_SUITES(reference_seal_random, "ref/seal_random");
+GCM_BENCH_ALL_SUITES(reference_seal_det, "ref/seal_det");
+GCM_BENCH_ALL_SUITES(reference_open, "ref/open");

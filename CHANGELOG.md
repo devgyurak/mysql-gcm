@@ -5,6 +5,29 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Measured
+- **The two smaller suites, at the core and at the SQL level.** `tests/bench` now runs every gated
+  case once per suite, each against a reference running the same cipher, so the 1.10 ceiling applies
+  to AES-192 and AES-128 as it does to AES-256 — the claim is the same, and the suites share every line
+  of code except the fetched cipher. `gate.py` additionally reports each suite against AES-256, un-gated,
+  because that number is a property of the machine. `tests/load/run.py --suite` and `load.yml`'s
+  `suite` input measure the SQL path with a 24- or 16-byte key, lowering `gcm.min_key_bytes` only
+  while the rows are written and against the same `aes-256-cbc` baseline so the ratios share a
+  denominator.
+- **Initial observations, with the limits of the measurements.** The developer-machine core ratios
+  against AES-256 range from 0.81 to 1.16; the first CI core run ranges from 0.919 to 1.012 and passes
+  all 36 overhead ceilings. The developer SQL p95 spread is 7.3% at one session and 11.8% at eight;
+  the spread of the CBC-normalized ratios is a different quantity. One CI load run per suite also
+  passes, on separate hosted runners. `docs/perf.md` records the artifacts and exact values. These
+  observations do not establish equal performance, a consistent SQL suite ranking or row-scan
+  dominance. Repeated measurements remain open in #18.
+- `envelope/parse` for the four A10 version bytes is recorded alongside v1–v3: 1.5–2.1 ns against
+  1.3–1.4 on the developer machine; the measurement does not isolate lookup cost.
+- **Review fixes:** benchmark fixtures preserve unsupported key lengths instead of silently clamping
+  them to AES-256. The load runner restores the previous minimum key policy after successful or
+  failed fixture loading, with regression tests run by PR CI; a load requiring a longer key does not
+  raise an already lower policy.
+
 ### Changed
 - **CI stops rebuilding a MySQL server on every MTR run.** `images.yml` publishes two images per
   major to GHCR — `mysql-gcm-build` (a configured source tree) and `mysql-gcm-mtr` (that plus a

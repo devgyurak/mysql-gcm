@@ -18,9 +18,8 @@
 `gcm_encrypt`, `gcm_encrypt_det` and `gcm_decrypt` are registered as a MySQL **component** (not a
 legacy UDF plugin). The decrypted value is charset-tagged `utf8mb4`, so MySQL's own collation drives
 `LIKE '%길%'` **inside the server** — keeping partial-match search on encrypted columns, which is the
-reason this project exists. It is **not slower than the `AES_DECRYPT` builtin** at any measured
-point — the authenticated cipher is not the cost here; the row scan is, and both variants pay it.
-See [Performance](#performance).
+reason this project exists. The measured workloads compare its cost with the `AES_DECRYPT` builtin;
+the result depends on the hardware, suite and workload. See [Performance](#performance).
 
 > **Status: ready to tag 0.1.0.** Builds in-tree against MySQL 8.0, 8.4 and 9.x and passes the unit
 > and integration suites on all three majors in CI, plus MTR, E2E and load on 8.4. The envelope format is frozen
@@ -259,8 +258,8 @@ Normative byte layout, failure codes and test vectors: **`spec/envelope.md`**.
 ## Performance
 
 Measured on a GitHub-hosted `ubuntu-24.04` runner against MySQL 8.4.11, 2026-10-02, over 300,000 rows
-of which 29,918 match `'%김%'`. **The ratios travel to other hardware; the milliseconds do not** — a
-GitHub runner is not your server, so re-measure absolute numbers where you plan to deploy.
+of which 29,918 match `'%김%'`. Ratios help compare runs, but both ratios and absolute times can vary
+with hardware and workload. Re-measure where you plan to deploy.
 
 ### Server-side decrypt and partial match
 
@@ -302,7 +301,24 @@ amortise the same way. **Whether that ratio rises or falls with size depends on 
 fall from 4.9 to 3.6, and a runner with faster AES went the other way, 5.6 to 9.7. Decryption costs the
 same for either variant.
 
-Both gates, the three runs behind every number, and the micro-benchmark results are in
+### Does a smaller suite buy anything?
+
+The first measurements do not establish a consistent SQL speed advantage. In one developer-machine
+core run, AES-192 and AES-128 took 0.81–1.16 times the AES-256 time, depending on operation and size.
+The first CI core run put those ratios at 0.919–1.012; its 64 KiB AES-128 decrypt was 8.1% faster.
+These are observations from individual runs, not a bound for other machines or proof of equal cost.
+
+At the SQL level, the developer-machine GCM p95 times were 42.7–45.8 ms at one session and
+110.7–123.8 ms at eight. The corresponding ratios against each run's AES-256-CBC baseline were
+0.933–1.053 and 0.773–0.795; those are different quantities. The first CI load run for each suite
+passed the existing gate, but the runs used separate hosted runners and cannot establish a suite
+ranking or identify how much time was spent scanning versus decrypting.
+
+Keep AES-256 as the default recommendation. Use a smaller suite when the security and interoperability
+requirements permit it, and measure the intended workload before making a performance trade-off.
+Repeated CI measurements remain open in #18. Run links and the full tables are in `docs/perf.md`.
+
+Both gates, the original three-run baseline, and the newer per-suite measurements are in
 [`docs/perf.md`](docs/perf.md).
 
 ## Tests

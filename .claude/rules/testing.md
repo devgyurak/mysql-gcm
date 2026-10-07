@@ -124,6 +124,10 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   and divide by it. Absolute nanoseconds are not comparable on a shared runner and are never used as a
   gate — the same approach `load` takes with `AES_DECRYPT`. Cases with no reference (nonce derivation,
   envelope parsing) are recorded without a ratio gate.
+- Every gated case runs **once per suite** (`aes256`, `aes192`, `aes128`), each against a reference
+  running the same cipher, so the gated ratio stays a statement about this code's structure and not
+  about the round count. What AES-128 costs *relative to* AES-256 is reported, never gated: with AES-NI
+  the difference is close to nothing and without it it is not, which makes it a property of the machine.
 - Sizes are 16 B / 256 B / 4 KiB / 64 KiB. The small end is dominated by per-call fixed cost (the EVP
   context, the key schedule, the HMAC) and the large end by throughput. The `load` fixture holds only
   Korean names, so it measures the small end alone.
@@ -152,6 +156,10 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - Measured: `gcm_decrypt(col,@k) LIKE '%김%'` p50/p95 at 10k/100k/300k rows, 1/8/32 concurrent
   sessions, the ratio against the same query with `AES_DECRYPT`, server RSS, and the increase in
   `Created_tmp_disk_tables`.
+- `--suite aes256|aes192|aes128` picks the key length for the encrypted column. The `AES_DECRYPT`
+  baseline stays `aes-256-cbc` whatever the suite, so the three ratios share a denominator and can be
+  read against each other. The nightly measures `aes256`; the other two are measured on dispatch.
+  The runner lowers `gcm.min_key_bytes` only while it writes the rows and restores the previous value.
 - The promise (in the docs and the README): p95 within **1.2x** of `AES_DECRYPT`, and serial p95 under
   **1.0 s** at 300k rows.
 - The actual gate (`tests/load/baseline.json`): a p95 ratio of **1.10**. Measurements land at 0.80–0.95,

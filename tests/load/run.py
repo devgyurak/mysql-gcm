@@ -5,12 +5,14 @@ The question this answers is the one docs/design.md §1.2 raises with estimates
 rather than measurements: is a server-side partial match over encrypted names fast
 enough, and how much does GCM cost over the CBC builtin the system uses today.
 
-Two further variants say where the GCM query's time goes. `plain` runs the same
-LIKE over a plaintext utf8mb4 column — the floor: table scan plus collation-aware
-LIKE, no UDF call, no crypto. `gcm_nolike` decrypts through the UDF but only checks
-the result's length, so `gcm_nolike - plain` is the UDF call, the decrypt and the
-charset tagging, and `gcm - gcm_nolike` is the LIKE over a UDF result. The gate
-compares `gcm` with `aes` only; the two extra variants are measured, not gated.
+Two further variants bracket where the GCM query's time goes. Both use the same
+predicate, `CHAR_LENGTH(x) > 0`, which is true for every row: `plain_len` over a
+plaintext utf8mb4 column (scan, no UDF, no crypto) and `gcm_len` over
+`gcm_decrypt(...)`. Same predicate, same rows counted, so `gcm_len - plain_len` is a
+difference between two queries that differ only in the decrypting UDF call, and
+`gcm - gcm_len` the difference between a LIKE and the length check on the decrypted
+result. These are differences of p95 between queries, not component timings: the
+script reports them as such. The gate compares `gcm` with `aes` only.
 
 Everything cryptographic happens in the server through SQL. This script only
 issues statements, times them, and compares against tests/load/baseline.json
@@ -67,7 +69,7 @@ INSERT_BATCH = 1000
 class Measurement:
     rows: int
     concurrency: int
-    variant: str  # plain | gcm_nolike | gcm | aes
+    variant: str  # plain_len | gcm_len | gcm | aes
     p50_ms: float
     p95_ms: float
     max_ms: float
@@ -170,14 +172,12 @@ def load_rows(conn: Connection, rows: int, seed: int, suite: str) -> None:
         )
 
 
-# Ordered from the cheapest predicate to the baseline. The order is the rotation seed in
-# time_one_session, not a measurement order: every variant leads equally often.
+# The measurement order is not this order: see query_schedule().
 QUERIES = {
-    "plain": f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} WHERE name_plain LIKE %s",
-    # CHAR_LENGTH, not LENGTH: it walks the result as utf8mb4 characters the way LIKE
-    # would start to, and either way the UDF result is materialised and tagged. The
-    # predicate is true for every row, so the count is the row count, not the match.
-    "gcm_nolike": (
+    # The two controls share one predicate so their difference is the decrypting call and
+    # nothing else: CHAR_LENGTH, true for every row, so both count every row.
+    "plain_len": f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} WHERE CHAR_LENGTH(name_plain) > 0",
+    "gcm_len": (
         f"SELECT COUNT(*) FROM {SCHEMA}.{TABLE} "
         "WHERE CHAR_LENGTH(gcm_decrypt(name_gcm, UNHEX(%s))) > 0"
     ),
@@ -192,24 +192,64 @@ QUERIES = {
 
 
 def query_args(variant: str, suite: str) -> tuple[object, ...]:
-    if variant == "plain":
-        return (f"%{NEEDLE}%",)
-    if variant == "gcm_nolike":
+    if variant == "plain_len":
+        return ()
+    if variant == "gcm_len":
         return (suite_key_hex(suite),)
     if variant == "gcm":
         return (suite_key_hex(suite), f"%{NEEDLE}%")
     return (FIXTURE_KEY_HEX, IV_HEX, f"%{NEEDLE}%")
 
 
+def de_bruijn_pairs(k: int) -> list[int]:
+    """A cyclic sequence over range(k) in which every ordered pair (a, b) — a == b
+    included — appears exactly once as consecutive elements: the de Bruijn sequence
+    B(k, 2), length k*k. Each symbol appears k times."""
+    sequence: list[int] = []
+    a = [0] * (2 * k)
+
+    def db(t: int, p: int) -> None:
+        if t > 2:
+            if 2 % p == 0:
+                sequence.extend(a[1 : p + 1])
+            return
+        a[t] = a[t - p]
+        db(t + 1, p)
+        for j in range(a[t - p] + 1, k):
+            a[t] = j
+            db(t + 1, t)
+
+    db(1, 1)
+    return sequence
+
+
+def query_schedule(variants: list[str], runs: int) -> tuple[str, list[str]]:
+    """The order one session issues its measured queries in, and the unmeasured query
+    issued just before them.
+
+    Each variant runs `runs` times, and every variant is *preceded* by every variant
+    (itself included) the same number of times, so whatever one query warms or evicts
+    lands equally on all of them. A rotation by one per round did not do that: it made
+    each variant's predecessor almost always the same one. The sequence is B(k, 2)
+    repeated; the primer is its last element, which closes the cycle so the first
+    measured query has a predecessor like every other.
+    """
+    k = len(variants)
+    if runs % k != 0:
+        raise ValueError(f"runs ({runs}) must be a multiple of the variant count ({k})")
+    cycle = [variants[i] for i in de_bruijn_pairs(k)]
+    sequence = cycle * (runs // k)
+    return sequence[-1], sequence
+
+
 def time_one_session(runs: int, suite: str) -> dict[str, list[float]]:
-    """Times every variant on one connection, interleaved per iteration.
+    """Times every variant on one connection, interleaved.
 
     Interleaved on purpose. Running every GCM session and then every AES session
     measures two different time windows, so anything that makes the host slow for a
     while — a noisy neighbour on a shared runner, a checkpoint, another job on the same
     machine — lands on one variant and shows up as a ratio. Interleaving puts all of
-    them under the same ambient load and the same contention, which is what the ratio
-    and the decomposition are supposed to be about.
+    them under the same ambient load; query_schedule() balances what precedes each.
     """
     conn = connect()
     try:
@@ -218,21 +258,13 @@ def time_one_session(runs: int, suite: str) -> dict[str, list[float]]:
             for _ in range(WARMUP_RUNS):
                 scalar(conn, QUERIES[variant], query_args(variant, suite))
 
+        primer, sequence = query_schedule(list(QUERIES), runs)
+        scalar(conn, QUERIES[primer], query_args(primer, suite))
         timings: dict[str, list[float]] = {variant: [] for variant in QUERIES}
-        variants = list(QUERIES)
-        for index in range(runs):
-            # And rotate which variant goes first. Interleaving fixes the *between
-            # variants* drift, but a fixed order inside each round still hands one of them
-            # whatever the other just warmed or evicted, every single iteration. With two
-            # variants this was an alternation of the pair; with N it is a rotation by one
-            # per iteration, so each variant leads runs/N times and follows every other
-            # variant equally often (MEASURED_RUNS is a multiple of len(QUERIES)).
-            shift = index % len(variants)
-            order = variants[shift:] + variants[:shift]
-            for variant in order:
-                started = time.perf_counter()
-                scalar(conn, QUERIES[variant], query_args(variant, suite))
-                timings[variant].append((time.perf_counter() - started) * 1000.0)
+        for variant in sequence:
+            started = time.perf_counter()
+            scalar(conn, QUERIES[variant], query_args(variant, suite))
+            timings[variant].append((time.perf_counter() - started) * 1000.0)
         return timings
     finally:
         conn.close()
@@ -288,18 +320,19 @@ def status_value(conn: Connection, name: str) -> int:
 
 
 def decompose(rows: int, concurrency: int, by_variant: dict[str, Measurement]) -> dict[str, object]:
-    """Splits the gcm query's p95 into three shares by differencing the variants.
+    """Differences of p95 between the queries, as a share of the gcm query's p95.
 
-    Differences of percentiles, not percentiles of differences: the variants run in
-    the same session and window, so a share is the gap between two curves measured
-    under the same load. A negative share means the gap is inside the noise.
+    These are differences between queries, not the execution time of components: a p95
+    is a rank statistic of each query's own distribution, and the difference of two is
+    not the p95 of anything. They bracket where the time goes; they do not attribute it.
+    A negative difference means the gap is inside the noise.
     """
-    plain = by_variant["plain"].p95_ms
-    nolike = by_variant["gcm_nolike"].p95_ms
+    plain_len = by_variant["plain_len"].p95_ms
+    gcm_len = by_variant["gcm_len"].p95_ms
     gcm = by_variant["gcm"].p95_ms
-    floor_ms = plain
-    decrypt_ms = nolike - plain
-    like_ms = gcm - nolike
+    floor_ms = plain_len
+    decrypt_ms = gcm_len - plain_len
+    like_ms = gcm - gcm_len
 
     def share(part: float) -> float | None:
         return round(100.0 * part / gcm, 1) if gcm else None
@@ -307,19 +340,20 @@ def decompose(rows: int, concurrency: int, by_variant: dict[str, Measurement]) -
     return {
         "rows": rows,
         "concurrency": concurrency,
-        "plain_p95_ms": plain,
-        "gcm_nolike_p95_ms": nolike,
+        "plain_len_p95_ms": plain_len,
+        "gcm_len_p95_ms": gcm_len,
         "gcm_p95_ms": gcm,
-        "scan_like_floor_ms": round(floor_ms, 3),
-        "udf_decrypt_tag_ms": round(decrypt_ms, 3),
-        "like_on_udf_result_ms": round(like_ms, 3),
-        "scan_like_floor_pct": share(floor_ms),
-        "udf_decrypt_tag_pct": share(decrypt_ms),
-        "like_on_udf_result_pct": share(like_ms),
-        # The share divided by the rows it was paid over: what one UDF call, decrypt
-        # and tagging costs per row at the SQL level, to set beside the core
-        # micro-benchmark's bare-cipher number (tests/bench).
-        "udf_decrypt_tag_ns_per_row": round(decrypt_ms * 1_000_000.0 / rows, 1) if rows else None,
+        "floor_p95_ms": round(floor_ms, 3),
+        "decrypt_call_p95_diff_ms": round(decrypt_ms, 3),
+        "like_vs_len_p95_diff_ms": round(like_ms, 3),
+        "floor_pct": share(floor_ms),
+        "decrypt_call_p95_diff_pct": share(decrypt_ms),
+        "like_vs_len_p95_diff_pct": share(like_ms),
+        # The decrypt-call difference over the rows it was measured on — a per-row scale
+        # to set beside the core micro-benchmark, not a measured per-row time.
+        "decrypt_call_p95_diff_ns_per_row": (
+            round(decrypt_ms * 1_000_000.0 / rows, 1) if rows else None
+        ),
     }
 
 
@@ -434,11 +468,12 @@ def main() -> int:
     for entry in decompositions:
         print(
             f"{args.suite} rows={entry['rows']} c={entry['concurrency']} "
-            f"plain p95={entry['plain_p95_ms']}ms gcm_nolike p95={entry['gcm_nolike_p95_ms']}ms "
-            f"| floor {entry['scan_like_floor_pct']}% "
-            f"udf+decrypt+tag {entry['udf_decrypt_tag_ms']}ms ({entry['udf_decrypt_tag_pct']}%, "
-            f"{entry['udf_decrypt_tag_ns_per_row']} ns/row) "
-            f"like-on-udf {entry['like_on_udf_result_ms']}ms ({entry['like_on_udf_result_pct']}%)",
+            f"plain_len p95={entry['plain_len_p95_ms']}ms gcm_len p95={entry['gcm_len_p95_ms']}ms "
+            f"| p95 differences: floor {entry['floor_pct']}% "
+            f"decrypt call {entry['decrypt_call_p95_diff_ms']}ms "
+            f"({entry['decrypt_call_p95_diff_pct']}%, {entry['decrypt_call_p95_diff_ns_per_row']} "
+            f"ns/row) like-vs-len {entry['like_vs_len_p95_diff_ms']}ms "
+            f"({entry['like_vs_len_p95_diff_pct']}%)",
             file=sys.stderr,
         )
 

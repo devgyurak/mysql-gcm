@@ -156,10 +156,10 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - Measured: `gcm_decrypt(col,@k) LIKE '%김%'` p50/p95 at 10k/100k/300k rows, 1/8/32 concurrent
   sessions, the ratio against the same query with `AES_DECRYPT`, server RSS, and the increase in
   `Created_tmp_disk_tables`.
-- Two ungated variants decompose the `gcm` query: `plain` (`name_plain LIKE`, the scan + collation
-  floor with no UDF) and `gcm_nolike` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`, decrypt without a LIKE on
-  the result). The JSON `decomposition` block gives the three shares in ms, as a percentage of `gcm`,
-  and the decrypt share per row in ns to set against the `tests/bench` bare-cipher number.
+- Two ungated controls with one predicate bracket the `gcm` query: `plain_len`
+  (`CHAR_LENGTH(name_plain) > 0`) and `gcm_len` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`). The JSON
+  `decomposition` block gives p95 differences between queries, not component timings. The query
+  order is a de Bruijn sequence so every variant follows every other equally often; a test pins it.
 - `--suite aes256|aes192|aes128` picks the key length for the encrypted column. The `AES_DECRYPT`
   baseline stays `aes-256-cbc` whatever the suite, so the three ratios share a denominator and can be
   read against each other. The nightly measures `aes256`; the other two are measured on dispatch.

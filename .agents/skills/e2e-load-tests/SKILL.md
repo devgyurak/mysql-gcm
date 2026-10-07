@@ -40,15 +40,15 @@ The `.so` named by `GCM_SO` (default `build/8.4/...`) is mounted read-only into 
    that is the baseline being compared against.
 2. When: `gcm_decrypt(name_gcm,@k) LIKE '%김%'` and `AES_DECRYPT(name_cbc,@k,@iv) LIKE '%김%'`, after 3
    warm-ups, 40 measured iterations, with one thread per concurrent session and a connection per
-   thread. Two more variants locate the cost: `plain` (`name_plain LIKE '%김%'`, the scan + collation
-   LIKE floor with no UDF) and `gcm_nolike` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`, the UDF decrypt
-   without a LIKE on its result). All variants are **interleaved per iteration**, with the leading
-   variant rotating by one each round — measuring all of one and then all of the other attributes
-   drift to the variant.
-3. Then: p50/p95/max in ms per variant, the `gcm/aes` ratio, a `decomposition` per concurrency (the
-   p95 floor, `gcm_nolike − plain` as the UDF + decrypt + tagging share, `gcm − gcm_nolike` as the
-   LIKE-on-UDF-result share, each in ms and as a percentage of `gcm`, plus the decrypt share per row
-   in ns), and the increase in `Created_tmp_disk_tables`, as JSON on stdout with a human summary on
+   thread. Two controls bracket the cost with one predicate so they count the same rows:
+   `plain_len` (`CHAR_LENGTH(name_plain) > 0`) and `gcm_len` (`CHAR_LENGTH(gcm_decrypt(...)) > 0`).
+   All variants are **interleaved** in a de Bruijn order (`query_schedule`): every variant is preceded
+   by every variant equally often, so what one query warms or evicts lands evenly — measuring all of
+   one and then all of the other attributes drift to the variant.
+3. Then: p50/p95/max in ms per variant, the `gcm/aes` ratio, a `decomposition` per concurrency — the
+   `plain_len` p95, the p95 difference `gcm_len − plain_len` and `gcm − gcm_len`, each in ms and as a
+   percentage of `gcm`, plus the first per row in ns. These are **differences between queries' p95**,
+   not component timings; read them as brackets, not attributions — and the increase in `Created_tmp_disk_tables`, as JSON on stdout with a human summary on
    stderr. With `--gate tests/load/baseline.json`, exceeding a threshold exits 1; the gate reads
    `gcm` against `aes` only.
 

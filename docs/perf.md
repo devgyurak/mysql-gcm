@@ -297,12 +297,47 @@ up to 4 KiB; both are 1.10 at 64 KiB. The one-call `open`, which an earlier vers
 pushed to 1.11–1.13 at 16 and 256 B with a heap session and two context resets per call, is back
 inside 1.10 there.
 
-**Not absorbed.** The third run landed on a runner about five times faster than the usual class
-(bare 64 KiB seal 3,237 ns against ~17,000) and there three values broke their ceilings:
-`open_session/aes256/4096` 1.224, and two one-call cases whose code path this change does not alter
-in kind, `seal_det/aes256/256` 1.118 and `open/aes192/4096` 1.126. The cause is not isolated. No
-ceiling was widened to absorb them, so a run on that runner class can fail this gate; the decision is
-deferred explicitly to #24, which lists what has to be measured to make it.
+**Not absorbed, then explained (#24).** The third run landed on a runner about five times faster
+than the usual class (bare 64 KiB seal 3,237 ns against ~17,000) and there three values broke their
+ceilings: `open_session/aes256/4096` 1.224, `seal_det/aes256/256` 1.118 and `open/aes192/4096`
+1.126. No ceiling was widened to absorb them; #24 investigated, recorded below.
+
+### Runner classes, and why the gate now uses five interleaved repetitions (#24)
+
+`bench.yml` now records each runner's CPU. Thirty-four CI runs on 2026-10-07 met six classes:
+
+| CPU | bare 64 KiB seal |
+|---|---:|
+| AMD EPYC 7763 (Zen 3) | ~17,000 ns |
+| AMD EPYC 9V74 (Zen 4) | ~6,500 ns, once ~18,900 |
+| Intel Xeon Platinum 8370C (Ice Lake) | ~5,900 ns |
+| Intel Xeon Platinum 8573C (Emerald Rapids) | ~4,800–5,800 ns |
+| Intel Xeon 6973P-C (Granite Rapids) | ~4,200 ns |
+| AMD EPYC 9V45 (Zen 5) | ~3,000–3,250 ns |
+
+What the runs showed, in order:
+
+- **A11 did not regress the one-call paths.** On the three CPU classes that both a pre-A11 and a
+  post-A11 branch landed on (Zen 3, Zen 4, Emerald Rapids), the one-call ratios matched: 1.02–1.045
+  either side.
+- **The breaches came from the harness, not the code.** With five repetitions but run in
+  registration order, two of twelve post-A11 runs still failed — on Zen 5 and Granite Rapids — and
+  broke ceilings even at 64 KiB (`seal_det_session/aes128/65536` 1.146), where the structure under
+  test is a negligible share; other runs on the same CPU models passed. Benchmarks ran in
+  registration order, so every `gcm/*` case was measured before every `ref/*` reference, minutes
+  apart, and a case's repetitions ran back to back: a slow stretch on a shared runner landed on one
+  side of a ratio, and the median of contiguous repetitions could not remove it. `gate.py` also kept
+  only the last repetition of each case, so asking for repetitions bought nothing; it now uses the
+  median.
+- **With repetitions randomly interleaved** (`--benchmark_enable_random_interleaving`), eight runs —
+  three of them on Zen 5, the class that produced #24 — passed every ceiling, and no 64 KiB ratio
+  exceeded 1.05. The worst `open_session` values were 1.236 at 16 B and 1.09 at 4 KiB on Zen 5,
+  inside 1.30 and 1.15.
+
+So the gate runs five interleaved repetitions and judges the medians (`bench.yml` default, and
+`scripts/bench.sh --gate`). The bench step takes ~9.5 minutes instead of ~2.5; it runs on merges and
+nightly only. No ceiling changed. Granite Rapids did not come up in the interleaved runs, so it has
+one failing non-interleaved sample and no interleaved one; that is the gap still open.
 
 The first container run on the laptop, before any of this, had measured `open_session` at
 1.04–1.40 and put two one-call cases over 1.10; those numbers set nothing.

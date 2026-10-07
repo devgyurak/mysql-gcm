@@ -21,11 +21,12 @@ on:
       min_time:
         description: "Per-case measurement budget, e.g. 0.5s"
         default: "0.5s"
-      # More than one repetition makes gate.py judge the median of the repetitions instead of a
-      # single sample (#24). The nightly and the merge runs keep one.
+      # Five interleaved repetitions, judged on their median, are what the gate is calibrated on
+      # (#24); it takes the bench step from ~2.5 to ~9.5 minutes, which a merge and nightly job
+      # can afford. Fewer is for a quick look, not for gating.
       reps:
-        description: "Repetitions per case (gate.py uses the median)"
-        default: "1"
+        description: "Repetitions per case, interleaved (gate.py uses the median)"
+        default: "5"
   # Path-filtered so it runs only when there is something to measure. A merge that touches none of
   # these has nothing to compare, and the job not running is the correct outcome rather than a gap.
   push:
@@ -51,7 +52,7 @@ jobs:
       # container path in scripts/bench.sh exists for developers whose host is not ubuntu-24.04.
       GCM_BENCH_LOCAL: "1"
       GCM_BENCH_MIN_TIME: ${{ inputs.min_time || '0.5s' }}
-      GCM_BENCH_REPS: ${{ inputs.reps || '1' }}
+      GCM_BENCH_REPS: ${{ inputs.reps || '5' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install the toolchain

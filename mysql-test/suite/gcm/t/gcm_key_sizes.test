@@ -1,7 +1,9 @@
-# AES-128-GCM: the key length selects the suite, and gcm.min_key_bytes is the
-# floor that keeps a truncated key from silently choosing a weaker one (design A10).
+# All three key sizes: the key length selects the suite, and gcm.min_key_bytes is
+# the floor that keeps a truncated key from silently choosing a weaker one
+# (design A10).
 --source suite/gcm/include/gcm_install.inc
 
+SET @k192 = UNHEX('091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734');
 SET @k128 = UNHEX('0310171e252c333a41484f565d646b72');
 
 --echo # Given: the floor at its default, which is AES-256 only
@@ -15,42 +17,53 @@ SELECT gcm_encrypt('홍길동', @k128);
 SET GLOBAL gcm.min_key_bytes = 16;
 --echo # When: the same plaintext is sealed under each key length
 SELECT HEX(LEFT(gcm_encrypt('홍길동', @k), 1))        AS random_256_version,
+       HEX(LEFT(gcm_encrypt('홍길동', @k192), 1))     AS random_192_version,
        HEX(LEFT(gcm_encrypt('홍길동', @k128), 1))     AS random_128_version,
        HEX(LEFT(gcm_encrypt_det('홍길동', @k), 1))    AS det_256_version,
+       HEX(LEFT(gcm_encrypt_det('홍길동', @k192), 1)) AS det_192_version,
        HEX(LEFT(gcm_encrypt_det('홍길동', @k128), 1)) AS det_128_version;
---echo # Then: 02 / 04 / 03 / 05 — the version byte follows the key
+--echo # Then: 02 / 06 / 04 and 03 / 07 / 05 — the version byte follows the key
 
---echo # Given: an AES-128 envelope
---echo # When: it is round-tripped and matched with native LIKE
-SELECT gcm_decrypt(gcm_encrypt_det('홍길동', @k128), @k128) LIKE '%길%' AS korean_like,
-       CHARSET(gcm_decrypt(gcm_encrypt('홍길동', @k128), @k128)) AS result_charset,
-       LENGTH(gcm_encrypt_det('홍길동', @k128)) AS envelope_length;
---echo # Then: 1, utf8mb4 and 38 = 9 + 29 — the same layout as AES-256
+--echo # Given: AES-128 and AES-192 envelopes
+--echo # When: each is round-tripped and matched with native LIKE
+SELECT gcm_decrypt(gcm_encrypt_det('홍길동', @k128), @k128) LIKE '%길%' AS korean_like_128,
+       gcm_decrypt(gcm_encrypt_det('홍길동', @k192), @k192) LIKE '%길%' AS korean_like_192,
+       CHARSET(gcm_decrypt(gcm_encrypt('홍길동', @k192), @k192)) AS result_charset,
+       LENGTH(gcm_encrypt_det('홍길동', @k192)) AS envelope_length;
+--echo # Then: 1, 1, utf8mb4 and 38 = 9 + 29 — the same layout as AES-256
 
 --echo # Given: deterministic values under the two suites
 --echo # When: they are compared
 SELECT gcm_encrypt_det('EMR-001', @k128) = gcm_encrypt_det('EMR-001', @k128) AS det_128_stable,
-       gcm_encrypt_det('EMR-001', @k) = gcm_encrypt_det('EMR-001', @k128) AS joins_across_suites;
---echo # Then: 1 and 0 — ciphertext never joins across suites
+       gcm_encrypt_det('EMR-001', @k192) = gcm_encrypt_det('EMR-001', @k192) AS det_192_stable,
+       gcm_encrypt_det('EMR-001', @k) = gcm_encrypt_det('EMR-001', @k192) AS joins_256_192,
+       gcm_encrypt_det('EMR-001', @k192) = gcm_encrypt_det('EMR-001', @k128) AS joins_192_128;
+--echo # Then: 1, 1, 0, 0 — ciphertext never joins across suites
 
 --echo # Given: an envelope and a key that disagree about the suite
 SET @e256 = gcm_encrypt_det('홍길동', @k);
+SET @e192 = gcm_encrypt_det('홍길동', @k192);
 SET @e128 = gcm_encrypt_det('홍길동', @k128);
 --echo # When: each is decrypted with the other suite's key
 --error ER_UDF_ERROR
 SELECT gcm_decrypt(@e256, @k128);
 --error ER_UDF_ERROR
 SELECT gcm_decrypt(@e128, @k);
---echo # Then: bad_key_len both ways, never bad_tag — a key problem reported as one
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@e192, @k);
+--error ER_UDF_ERROR
+SELECT gcm_decrypt(@e256, @k192);
+--echo # Then: bad_key_len every way, never bad_tag — a key problem reported as one
 
---echo # Given: a 24-byte key; AES-192 is allocated by A10 and not implemented
+--echo # Given: a 23-byte key, one short of AES-192
 --echo # When: it is used to encrypt
 --error ER_UDF_ERROR
-SELECT gcm_encrypt('홍길동', UNHEX('000102030405060708090a0b0c0d0e0f1011121314151617'));
---echo # Then: an error — never folded into a neighbouring suite
+SELECT gcm_encrypt('홍길동', UNHEX('000102030405060708090a0b0c0d0e0f10111213141516'));
+--echo # Then: an error — never rounded to a neighbouring suite
 
 --echo # Given: a tampered 0x05 envelope and strict ON
-SET @bad128 = CONCAT(LEFT(@e128, LENGTH(@e128)-1), UNHEX('FF'));
+SET @bad128 = CONCAT(LEFT(@e128, LENGTH(@e128)-1),
+                     UNHEX(LPAD(HEX(ORD(RIGHT(@e128, 1)) ^ 255), 2, '0')));
 --echo # When: it is decrypted
 --error ER_UDF_ERROR
 SELECT gcm_decrypt(@bad128, @k128);

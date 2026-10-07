@@ -145,8 +145,7 @@ class BadKeyLen : public ::testing::TestWithParam<size_t> {};
 
 TEST_P(BadKeyLen, GivenKeyOfWrongLength_WhenDeriveNonceKey_ThenBadKeyLen) {
   // Given: a length no suite has; never folded or padded (design A1, A10).
-  // 16 is not here any more -- it is a valid AES-128 key -- and 24 is, because
-  // AES-192 has version bytes allocated but no implementation.
+  // 16, 24 and 32 are all valid keys now, so what is left brackets each of them.
   const std::vector<unsigned char> key(GetParam(), 0x11);
   unsigned char out[gcm::kHmacLen] = {0};
   // When
@@ -156,7 +155,7 @@ TEST_P(BadKeyLen, GivenKeyOfWrongLength_WhenDeriveNonceKey_ThenBadKeyLen) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Lengths, BadKeyLen,
-                         ::testing::Values(0u, 1u, 15u, 17u, 24u, 31u, 33u, 64u),
+                         ::testing::Values(0u, 1u, 15u, 17u, 23u, 25u, 31u, 33u, 64u),
                          [](const ::testing::TestParamInfo<size_t> &info) {
                            return "len" + std::to_string(info.param);
                          });

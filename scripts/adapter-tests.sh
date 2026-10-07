@@ -22,10 +22,7 @@ ver="$1"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 versions="${root}/docker/versions.json"
 
-# Same resolution as scripts/build-in-docker.sh and scripts/mtr.sh: the patch version is part of
-# the image tag, so a versions.json bump gets a different image rather than a stale one.
-# shellcheck disable=SC2034  # src_sha256 is unused here; read together for one parse
-read -r src_version src_sha256 toolset <<<"$(
+toolset="$(
   python3 - "${versions}" "${ver}" <<'PY'
 import json, sys
 
@@ -34,11 +31,16 @@ with open(sys.argv[1], encoding="utf-8") as fh:
 major = sys.argv[2]
 if major not in versions:
     sys.exit(f"unknown MySQL major {major!r}; known: {', '.join(versions)}")
-print(versions[major]["source"], versions[major]["source_sha256"], versions[major]["rhel9_toolset"])
+print(versions[major]["rhel9_toolset"])
 PY
 )"
 
-image="mysql-gcm-build:${ver}-${src_version}"
+# The tag is scripts/image-ref.sh's to compute -- it carries a hash of the image inputs, not just
+# the patch version, and this script once assembled the old <major>-<patch> form by hand and
+# failed with "build image missing" on every run after the tag changed. GCM_REGISTRY is cleared
+# and GCM_IMAGE_REF_ONLY set so this only names the local tag build-in-docker.sh leaves behind,
+# without pulling or building anything.
+image="$(GCM_REGISTRY='' GCM_IMAGE_REF_ONLY=1 "${root}/scripts/image-ref.sh" "${ver}" build)"
 if ! docker image inspect "${image}" >/dev/null 2>&1; then
   echo "build image missing; run scripts/build-in-docker.sh ${ver} first" >&2
   exit 1

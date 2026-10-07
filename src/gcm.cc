@@ -17,6 +17,7 @@ namespace {
 /* Fetched once; immutable afterwards. Per-call state lives in EVP_*_CTX so the
    UDFs are safe to call from many sessions at once. */
 EVP_CIPHER *g_aes_gcm_256 = nullptr;
+EVP_CIPHER *g_aes_gcm_192 = nullptr;
 EVP_CIPHER *g_aes_gcm_128 = nullptr;
 EVP_CIPHER *g_aes_cbc = nullptr;
 
@@ -26,6 +27,8 @@ const EVP_CIPHER *gcm_cipher_for(size_t key_len) {
   switch (key_len) {
     case kKeyLen256:
       return g_aes_gcm_256;
+    case kKeyLen192:
+      return g_aes_gcm_192;
     case kKeyLen128:
       return g_aes_gcm_128;
     default:
@@ -183,7 +186,8 @@ void wipe(void *data, size_t len) { OPENSSL_cleanse(data, len); }
 int crypto_init() {
   /* Idempotent: a second call would otherwise overwrite the handles and leak the
      first pair. mac_init() already guards itself the same way. */
-  if (g_aes_gcm_256 != nullptr && g_aes_gcm_128 != nullptr && g_aes_cbc != nullptr) {
+  if (g_aes_gcm_256 != nullptr && g_aes_gcm_192 != nullptr && g_aes_gcm_128 != nullptr &&
+      g_aes_cbc != nullptr) {
     return mac_init();
   }
 
@@ -195,10 +199,11 @@ int crypto_init() {
      had to fetch would put provider lookup on the row path. A provider that
      offers neither is a configuration this component refuses to install on. */
   g_aes_gcm_256 = EVP_CIPHER_fetch(nullptr, "AES-256-GCM", nullptr);
+  g_aes_gcm_192 = EVP_CIPHER_fetch(nullptr, "AES-192-GCM", nullptr);
   g_aes_gcm_128 = EVP_CIPHER_fetch(nullptr, "AES-128-GCM", nullptr);
   g_aes_cbc = EVP_CIPHER_fetch(nullptr, "AES-256-CBC", nullptr);
-  if (g_aes_gcm_256 == nullptr || g_aes_gcm_128 == nullptr || g_aes_cbc == nullptr ||
-      mac_init() != 0) {
+  if (g_aes_gcm_256 == nullptr || g_aes_gcm_192 == nullptr || g_aes_gcm_128 == nullptr ||
+      g_aes_cbc == nullptr || mac_init() != 0) {
     crypto_deinit();
     return 1;
   }
@@ -208,6 +213,8 @@ int crypto_init() {
 void crypto_deinit() {
   EVP_CIPHER_free(g_aes_gcm_256);
   g_aes_gcm_256 = nullptr;
+  EVP_CIPHER_free(g_aes_gcm_192);
+  g_aes_gcm_192 = nullptr;
   EVP_CIPHER_free(g_aes_gcm_128);
   g_aes_gcm_128 = nullptr;
   EVP_CIPHER_free(g_aes_cbc);

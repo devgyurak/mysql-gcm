@@ -532,16 +532,102 @@ TEST(Aes128, GivenA128EnvelopeAndA256Key_WhenDecrypt_ThenBadKeyLenNotBadTag) {
   EXPECT_EQ(err, Error::bad_key_len);
 }
 
-TEST(Aes192, GivenA24ByteKey_WhenEncryptRandom_ThenBadKeyLen) {
-  // Given: AES-192 has version bytes allocated by A10 but is not implemented
-  const std::vector<unsigned char> key(24, 0x44);
+TEST(Aes192, GivenA24ByteKey_WhenEncryptRandom_ThenVersionIs06AndRoundTrips) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen192, 0x44);
+  const std::vector<unsigned char> plaintext = {'z', 'e', 'd'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(gcm::decrypt_out_len(sealed.size()) + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_random(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                                &sealed_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(sealed[0], gcm::kVersionRandom192);
+  EXPECT_EQ(sealed_len, plaintext.size() + gcm::kGcmOverhead);
+  ASSERT_EQ(gcm::decrypt(span_of(key), Bytes{sealed.data(), sealed_len}, Bytes{nullptr, 0},
+                         opened.data(), &opened_len),
+            Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(opened.data(), opened_len),
+            gcm_test::to_hex(plaintext.data(), plaintext.size()));
+}
+
+TEST(Aes192, GivenA24ByteKey_WhenEncryptDetTwice_ThenIdenticalEnvelopeWithVersion07) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen192, 0x55);
+  const std::vector<unsigned char> plaintext = {'E', 'M', 'R', '-', '2'};
+  std::vector<unsigned char> first(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> second(first.size(), 0);
+  size_t first_len = 0;
+  size_t second_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, first.data(),
+                             &first_len),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, second.data(),
+                             &second_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(first[0], gcm::kVersionDet192);
+  EXPECT_EQ(gcm_test::to_hex(first.data(), first_len), gcm_test::to_hex(second.data(), second_len));
+}
+
+TEST(Aes192, GivenA192EnvelopeAndA256Key_WhenDecrypt_ThenBadKeyLenNotBadTag) {
+  // Given
+  const std::vector<unsigned char> key192(gcm::kKeyLen192, 0x66);
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x66);
+  const std::vector<unsigned char> plaintext = {'w'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(sealed.size() + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  ASSERT_EQ(gcm::encrypt_det(span_of(key192), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                             &sealed_len),
+            Error::ok);
+  // When
+  const Error err = gcm::decrypt(span_of(key256), Bytes{sealed.data(), sealed_len},
+                                 Bytes{nullptr, 0}, opened.data(), &opened_len);
+  // Then
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+TEST(Aes192, GivenThreeSuitesOverOnePlaintext_WhenEncryptDet_ThenAllThreeEnvelopesDiffer) {
+  // Given: the shorter keys are the long one truncated, the shape a client bug makes
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x11);
+  const std::vector<unsigned char> key192(gcm::kKeyLen192, 0x11);
+  const std::vector<unsigned char> key128(gcm::kKeyLen128, 0x11);
+  const std::vector<unsigned char> plaintext = {'j', 'o', 'i', 'n'};
+  std::vector<unsigned char> a(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> b(a.size(), 0);
+  std::vector<unsigned char> c(a.size(), 0);
+  size_t la = 0;
+  size_t lb = 0;
+  size_t lc = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key256), span_of(plaintext), Bytes{nullptr, 0}, a.data(), &la),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key192), span_of(plaintext), Bytes{nullptr, 0}, b.data(), &lb),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key128), span_of(plaintext), Bytes{nullptr, 0}, c.data(), &lc),
+            Error::ok);
+  // Then: no pair joins, which is why the key length is part of the key's identity
+  EXPECT_NE(gcm_test::to_hex(a.data(), la), gcm_test::to_hex(b.data(), lb));
+  EXPECT_NE(gcm_test::to_hex(b.data(), lb), gcm_test::to_hex(c.data(), lc));
+  EXPECT_NE(gcm_test::to_hex(a.data(), la), gcm_test::to_hex(c.data(), lc));
+}
+
+TEST(UnsupportedSuite, GivenA23ByteKey_WhenEncryptRandom_ThenBadKeyLen) {
+  // Given: one byte short of AES-192, the boundary a folding implementation would blur
+  const std::vector<unsigned char> key(23, 0x44);
   const std::vector<unsigned char> plaintext = {'z'};
   std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
   size_t sealed_len = 0;
   // When
   const Error err = gcm::encrypt_random(span_of(key), span_of(plaintext), Bytes{nullptr, 0},
                                         sealed.data(), &sealed_len);
-  // Then: not folded into a neighbouring suite
+  // Then: never rounded to a neighbouring suite
   EXPECT_EQ(err, Error::bad_key_len);
 }
 

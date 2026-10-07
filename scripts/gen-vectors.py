@@ -42,8 +42,12 @@ DET_NONCE_LABEL = b"mysql-gcm/v1/det-nonce"
 
 # The version byte is a function of the key length (design A10, spec §2).
 # This mirrors kSuites in src/envelope.cc; the C++ vector test consumes both.
-RANDOM_VERSION = {32: 0x02, 16: 0x04}
-DET_VERSION = {32: 0x03, 16: 0x05}
+RANDOM_VERSION = {32: 0x02, 24: 0x06, 16: 0x04}
+DET_VERSION = {32: 0x03, 24: 0x07, 16: 0x05}
+# Derived, never listed again: a hardcoded tuple of GCM versions went stale the
+# moment a suite was added, and the generator's own verifier was what caught it.
+GCM_VERSIONS = frozenset(RANDOM_VERSION.values()) | frozenset(DET_VERSION.values())
+KNOWN_VERSIONS = GCM_VERSIONS | {0x01}
 
 #: Test key from the testing rule: never a real key, never PHI.
 KEY = bytes(range(32))
@@ -54,6 +58,7 @@ KEY_ALT = bytes((b + 0x80) % 256 for b in range(32))
 # shorter key. Deliberately NOT a prefix of KEY -- a prefix would make the
 # truncation failure mode look like a legitimate fixture.
 KEY_128 = bytes((b * 7 + 3) % 256 for b in range(16))
+KEY_192 = bytes((b * 13 + 9) % 256 for b in range(24))
 #: Fixed nonces for the random-variant vectors: production uses RAND_bytes, but a
 #: vector has to be reproducible, so these are passed directly to AESGCM.
 NONCE_A = bytes.fromhex("000000000000000000000001")
@@ -260,11 +265,10 @@ def project_vectors() -> list[dict[str, Any]]:
                 note=f"{n} bytes: below the 29-byte minimum",
             )
         )
-    # 0x04 and 0x05 left this list when AES-128 took them (design A10). 0x06 and
-    # 0x07 are allocated to AES-192 by the same amendment but are NOT implemented,
-    # so they must still be rejected -- that is the case most likely to rot into a
-    # silent accept when the suite table grows, which is why it is pinned here.
-    for version in (0x00, 0x06, 0x07, 0x7F, 0xFF):
+    # 0x04-0x07 all left this list as their suites landed (design A10). 0x08 is
+    # the first unassigned byte and is the one most likely to rot into a silent
+    # accept if the suite table ever grows by accident, which is why it leads.
+    for version in (0x00, 0x08, 0x09, 0x7F, 0xFF):
         body = bytes([version]) + good[1:]
         out.append(
             vec(
@@ -393,11 +397,72 @@ def project_vectors() -> list[dict[str, Any]]:
         )
     )
 
+    # --- AES-192 (design A10) --------------------------------------------------
+    out.append(
+        random_vector(
+            "aes192-random-korean",
+            NONCE_A,
+            HONG,
+            b"",
+            "0x06: AES-192-GCM random, the key length selects the suite",
+            key=KEY_192,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes192-det-korean",
+            HONG,
+            b"",
+            "0x07: AES-192-GCM deterministic, same layout as 0x03 and 0x05",
+            key=KEY_192,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes192-det-empty",
+            b"",
+            b"",
+            "0x07 over an empty plaintext is still 29 bytes",
+            key=KEY_192,
+        )
+    )
+    out.append(
+        det_vector(
+            "aes192-det-with-aad",
+            KIM,
+            b"patients.name",
+            "0x07 with an AAD; the AAD is not an input to the nonce (design §5.2)",
+            key=KEY_192,
+        )
+    )
+
+    good192 = bytes.fromhex(
+        str(next(v for v in out if v["id"] == "aes192-det-korean")["envelope_hex"])
+    )
+    aes192_tamper = [
+        ("bad-tag-aes192-last-byte", flip_last_bit(good192, len(good192) - 1), "tag bit flipped"),
+        ("bad-tag-aes192-nonce-flip", flip_last_bit(good192, 1), "nonce bit flipped"),
+        ("bad-tag-aes192-ct-flip", flip_last_bit(good192, 13), "ciphertext bit flipped"),
+    ]
+    for vid, env, note in aes192_tamper:
+        out.append(
+            vec(
+                id=vid,
+                kind="det",
+                key_hex=KEY_192.hex(),
+                aad_hex="",
+                plaintext_hex="",
+                envelope_hex=env.hex(),
+                expect="bad_tag",
+                note=f"0x07 envelope, {note}",
+            )
+        )
+
     # --- failure: key length ---------------------------------------------------
-    # 16 is no longer here: it is a valid AES-128 key (design A10). 15 and 17
-    # bracket it, and 24 pins that AES-192 is NOT implemented -- the suite table
-    # has two rows, and a 24-byte key must not be folded into one of them.
-    for n in (0, 15, 17, 24, 31, 33, 64):
+    # Every suite length is absent by construction: 16, 24 and 32 are valid keys
+    # (design A10). What is left brackets each of them, so a suite silently
+    # widening its accepted length is caught from both sides.
+    for n in (0, 15, 17, 23, 25, 31, 33, 64):
         out.append(
             vec(
                 id=f"bad-key-len-{n}",
@@ -500,8 +565,8 @@ def _verify_failure(v: dict[str, Any]) -> None:
     if expect == "bad_envelope":
         version = env[0] if env else None
         structural = (
-            version not in (0x01, 0x02, 0x03, 0x04, 0x05)
-            or (version in (0x02, 0x03, 0x04, 0x05) and len(env) < 29)
+            version not in KNOWN_VERSIONS
+            or (version in GCM_VERSIONS and len(env) < 29)
             or (version == 0x01 and (len(env) < 33 or (len(env) - 17) % 16 != 0))
             or (version == 0x01 and bool(aad))
         )
@@ -510,10 +575,7 @@ def _verify_failure(v: dict[str, Any]) -> None:
 
     if expect == "bad_tag":
         _require(len(env) >= 29, f"{v['id']}: bad_tag fixture is too short to reach the tag")
-        _require(
-            env[0] in (0x02, 0x03, 0x04, 0x05),
-            f"{v['id']}: bad_tag fixture is not a GCM envelope",
-        )
+        _require(env[0] in GCM_VERSIONS, f"{v['id']}: bad_tag fixture is not a GCM envelope")
         authenticates = True
         try:
             AESGCM(key).decrypt(env[1:13], env[13:], aad)
@@ -548,7 +610,7 @@ def verify(vectors: list[dict[str, Any]]) -> None:
             unpadder = PKCS7(128).unpadder()
             actual = unpadder.update(padded) + unpadder.finalize()
         else:
-            _require(env[0] in (0x02, 0x03, 0x04, 0x05), f"{v['id']}: wrong version byte")
+            _require(env[0] in GCM_VERSIONS, f"{v['id']}: wrong version byte")
             _require(
                 env[0] in (RANDOM_VERSION[len(key)], DET_VERSION[len(key)]),
                 f"{v['id']}: version byte does not match the key length",

@@ -129,9 +129,9 @@ void raise(const char *func, Error err, size_t key_len, size_t envelope_len) {
   switch (err) {
     case Error::bad_key_len:
       snprintf(detail, sizeof(detail),
-               "key must be %zu bytes (AES-256) or %zu (AES-128), and on decryption must "
-               "match the envelope version; got %zu",
-               kKeyLen256, kKeyLen128, key_len);
+               "key must be %zu bytes (AES-256), %zu (AES-192) or %zu (AES-128), and on "
+               "decryption must match the envelope version; got %zu",
+               kKeyLen256, kKeyLen192, kKeyLen128, key_len);
       break;
     case Error::bad_envelope:
       snprintf(detail, sizeof(detail), "malformed or unsupported envelope (length %zu)",

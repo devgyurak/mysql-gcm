@@ -1,6 +1,6 @@
 name: integration
 on: { pull_request: {}, push: { branches: [main, develop] } }
-permissions: { contents: read }
+permissions: { contents: read, packages: read }
 # A new push supersedes the run before it, so three superseded server-image pulls do not keep
 # running. Only pull_request runs are cancelled — a push to main or develop must finish, because it
 # is the gate on that branch.
@@ -20,8 +20,15 @@ jobs:
   smoke:
     strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
     runs-on: ubuntu-24.04
+    env:
+      GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
       - run: scripts/verify.sh "${{ matrix.mysql }}"
       - name: Collect diagnostics

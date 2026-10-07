@@ -20,9 +20,9 @@ gcm_encrypt_det(plaintext, key [, aad])   -> BLOB     deterministic — joins, U
 gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 → native LIKE works
 ```
 
-- `key`: 32 binary bytes (AES-256) or 16 (AES-128). Any other length is an error (`AES_ENCRYPT`'s key
-  folding is not reproduced). **The key length selects the suite and nothing else does** (amendment
-  A10). AES-192 is allocated but not implemented, so 24 bytes is an error.
+- `key`: 32 binary bytes (AES-256), 24 (AES-192) or 16 (AES-128). Any other length is an error
+  (`AES_ENCRYPT`'s key folding is not reproduced). **The key length selects the suite and nothing else
+  does** (amendment A10).
 - Deterministic nonce: `nonce_key = HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`,
   `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`.
 - Envelope (the normative definition is `spec/envelope.md`):
@@ -33,7 +33,8 @@ gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 →
 0x03  AES-256-GCM deterministic : 0x03 || nonce(12) || ciphertext || tag(16)
 0x04  AES-128-GCM random        : same layout (amendment A10)
 0x05  AES-128-GCM deterministic : same layout (amendment A10)
-0x06  0x07  allocated to AES-192, NOT implemented -- rejected as bad_envelope
+0x06  AES-192-GCM random        : same layout (amendment A10)
+0x07  AES-192-GCM deterministic : same layout (amendment A10)
 ```
 
   The deterministic nonce is an HMAC of the plaintext and therefore cannot be recomputed at decryption
@@ -41,7 +42,7 @@ gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 →
 - sysvars: `gcm.strict` (GLOBAL + SESSION, default ON) — on a tag mismatch, ON gives an error and OFF
   gives NULL; the session scope is 9.0+ only (amendment A5). And `gcm.min_key_bytes` (GLOBAL, default
   32) — the smallest key the two encryption functions accept, which is what keeps a truncated key
-  from silently selecting AES-128; decryption ignores it (amendment A10). In my.cnf both take the
+  from silently selecting a weaker suite; decryption ignores it (amendment A10). In my.cnf both take the
   `loose_` prefix.
 - Withdrawn (amendment A1): keyring integration, `gcm.key_id`, `gcm.nonce_key_id`, `gcm_key_id()`. If
   asked for one, turn it back into a proposal to amend the design.
@@ -85,7 +86,7 @@ docker/                        build.Dockerfile (a configured server source tree
 docs/perf.md                   Accumulated load measurements — replacing design §1.2's estimates with measured numbers
 CHANGELOG.md                   Changes per release. An envelope change comes with a compatibility note
 .github/workflows/             CI (lint · unit · build matrix · integration (smoke) · mtr and adapter (path-filtered)
-                               · e2e · load (nightly) · bench (on merges) · release (on tags))
+                               · e2e · load (nightly) · bench (on merges) · images (GHCR) · release (on tags))
 ```
 
 ## 4. Build and verification commands (the skills hold the detail)

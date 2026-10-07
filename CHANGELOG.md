@@ -6,6 +6,68 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Changed
+- **CI stops rebuilding a MySQL server on every MTR run.** `images.yml` publishes two images per
+  major to GHCR — `mysql-gcm-build` (a configured source tree) and `mysql-gcm-mtr` (that plus a
+  compiled server, 8.4 only) — and `scripts/image-ref.sh` resolves local → registry → build for every
+  consumer.
+
+  The measurement that prompted it: `mtr` ran 49–63 minutes, of which the suite itself is **16
+  seconds**. `scripts/mtr.sh` called `cmake --build` with no `--target`, so it compiled the whole tree,
+  3,441 object files. Pruning targets was checked and rejected: by object count the tree is 26% bundled
+  third-party, 24% storage engines, 20% `sql/`, and the router — the one clearly droppable piece — is
+  **8%**. There is no target list that makes a server build cheap.
+
+  **The tag carries a hash of the inputs**, not just the MySQL version: `build.Dockerfile`,
+  `build-component.sh` and that major's `versions.json` entry. Before this the tag was
+  `<major>-<patch>`, so editing the Dockerfile produced a byte-different image under a name that was
+  already cached — harmless while every run built its own, and a correctness hole the moment a run can
+  pull one somebody else built. A changed input yields a tag that does not exist and every consumer
+  falls back to building, so a stale image can never be served.
+
+  A published image is a **cache, never a dependency**: the scripts work with no network and no
+  registry. Only amd64 jobs opt in, because the images are built on `ubuntu-24.04` and an emulated pull
+  on `build.yml`'s arm64 half would be slower than the build it replaced. The `mtr` job also stops
+  running `build-in-docker.sh` first: it produced a `.so` the job never used, since `mtr.sh` builds the
+  component inside the MTR container.
+
+  The figures above for the published path are projections from image sizes and typical GHCR pull
+  rates, not measurements. They go in `docs/perf.md` once real runs exist.
+
+- **AES-192-GCM**, completing amendment A10. Envelope versions `0x06` (random) and `0x07`
+  (deterministic), byte-for-byte the layout of the other four. All three suites now ship, selected by
+  key length and nothing else: 32 → AES-256, 24 → AES-192, 16 → AES-128. `spec/envelope.md` is at v3.
+
+  **The default does not move.** `gcm.min_key_bytes` stays at 32, so a server that is left alone still
+  refuses anything below AES-256; `24` now permits AES-192 and AES-256 while still refusing AES-128.
+
+  This tested A10's own claim that adding a suite is "one row in the table plus one
+  `EVP_CIPHER_fetch`". It held — four files, seventeen lines, and parsing, the version/key agreement
+  check, the nonce derivation, the error message and the floor all followed from the table. What was
+  **not** free was the test and document surface: a dozen places asserted AES-192 was unimplemented
+  and each had to be flipped deliberately, which is the honest cost of allocating a version byte
+  before implementing it.
+
+  The CAVP KAT is now imported for every suite — 2,250 cases, 750 each, with 191 / 190 / 196
+  authentication failures — plus project tamper vectors for `0x07`, which the CAVP decrypt files never
+  reach because they are all random-nonce. The generator's list of valid version bytes is now derived
+  from the suite table rather than written out, after a hardcoded tuple went stale the moment this
+  suite was added and the generator's own verifier was what caught it.
+
+  Review then found two gaps in the coverage this added, both confirmed by mutation before fixing.
+  The adapter suite's "are the algorithms still live" probe used a 32-byte key only, so **deleting the
+  AES-192 release pair passed all 35 cases** — and the AES-128 pair was equally invisible, which
+  follows from the same cause and had been true since that suite landed. The probe takes a key length
+  now; each deletion is detected (26 of the 35 adapter cases fail). And the integration case only exercised the floor against
+  AES-128, so a policy applied to 16-byte keys alone would have passed; it now covers both encryption
+  functions at floor 32, the middle setting of 24 where AES-192 and AES-256 pass and AES-128 does not,
+  and a raise back to 32 with existing AES-192 data still decrypting.
+
+  Two latent test defects surfaced while writing this. The tamper fixture appended a constant `0xFF`
+  to replace the last tag byte, which is a **no-op when the tag already ends in `0xFF`** — the AES-192
+  envelope did, so the case decrypted successfully and claimed to be testing a tag failure. It now
+  XORs. And the AES-192 fixture key in the integration case was 20 bytes rather than 24, which the
+  key-length error reported before any of it could pass.
+
 - **AES-128-GCM**, alongside AES-256-GCM (`docs/design.md` amendment A10, `spec/envelope.md` v2).
   Envelope versions `0x04` (random) and `0x05` (deterministic), byte-for-byte the layout of
   `0x02`/`0x03` — plaintext + 29 either way. **The key length selects the suite and nothing else

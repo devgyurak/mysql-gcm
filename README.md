@@ -122,16 +122,16 @@ Full text and rationale: `docs/ops-constraints.md` and `docs/design.md` §6 with
     result charset has to be verified with that combination — this project validates self-managed
     MySQL servers only.
 16. **A truncated key silently selects a weaker cipher unless `gcm.min_key_bytes` stops it.** The
-    key length picks the suite — 32 bytes is AES-256-GCM, 16 is AES-128-GCM — so a 32-byte key
-    truncated by a client bug, a mis-set environment variable or a mis-sliced buffer is a *valid*
-    AES-128 key, and `gcm_encrypt` seals with it and reports success at a strength nobody asked for.
-    `gcm.min_key_bytes` is GLOBAL and defaults to `32`, which refuses exactly that; leave it alone
-    unless you intend to use AES-128. It is an administrator policy, not a session setting, and
+    key length picks the suite — 32 bytes is AES-256-GCM, 24 is AES-192, 16 is AES-128 — so a
+    32-byte key truncated by a client bug, a mis-set environment variable or a mis-sliced buffer is a
+    *valid* key for a weaker suite, and `gcm_encrypt` seals with it and reports success at a strength
+    nobody asked for. `gcm.min_key_bytes` is GLOBAL and defaults to `32`, which refuses exactly that;
+    leave it alone unless you intend to use a smaller suite. It is an administrator policy, not a session setting, and
     lowering it on a server that hosts several applications removes the guard for all of them.
     Decryption never consults it, so raising it again cannot lock out data written while it was
     lower. A wrong key length on decryption reports that the envelope and the key disagree — that is
-    not evidence of truncation, since a corrupted version byte gives the same error. AES-192 is not
-    implemented: `0x06` and `0x07` are allocated to it and a 24-byte key is an error.
+    not evidence of truncation, since a corrupted version byte gives the same error. A floor of 24
+    permits AES-192 and AES-256 while refusing AES-128.
 
 ## Support matrix
 
@@ -200,29 +200,34 @@ component built for 8.4 does not load into 9.x.
 
 | Function | Envelope | Returns | Use it for |
 |:--|:--|:--|:--|
-| `gcm_encrypt(plaintext, key [, aad])` | `0x02` / `0x04` — random 96-bit nonce | `BLOB` | everything that is only read back |
-| `gcm_encrypt_det(plaintext, key [, aad])` | `0x03` / `0x05` — synthetic nonce | `BLOB` | join keys, `UNIQUE`, exact match |
-| `gcm_decrypt(ciphertext, key [, aad])` | reads `0x01`–`0x05` | `VARCHAR` tagged `utf8mb4` | reading, and `LIKE` on the plaintext |
+| `gcm_encrypt(plaintext, key [, aad])` | `0x02` / `0x04` / `0x06` — random 96-bit nonce | `BLOB` | everything that is only read back |
+| `gcm_encrypt_det(plaintext, key [, aad])` | `0x03` / `0x05` / `0x07` — synthetic nonce | `BLOB` | join keys, `UNIQUE`, exact match |
+| `gcm_decrypt(ciphertext, key [, aad])` | reads `0x01`–`0x07` | `VARCHAR` tagged `utf8mb4` | reading, and `LIKE` on the plaintext |
 
-`key` must be **32 bytes (AES-256) or 16 (AES-128)**; any other length is an error on *every* call.
+`key` must be **32 bytes (AES-256), 24 (AES-192) or 16 (AES-128)**; any other length is an error on
+*every* call.
 The `AES_ENCRYPT` key-folding behaviour is deliberately not reproduced. Tag verification failure
 raises an error while `gcm.strict` is ON (the default) and returns NULL when it is OFF — a malformed
 envelope or a wrong key length is *always* an error, because `gcm.strict=OFF` must never hide
 corruption.
 
-**The key length selects the cipher, and nothing else does** (`docs/design.md` amendment A10): 32
-bytes gives AES-256-GCM and the `0x02`/`0x03` envelopes, 16 gives AES-128-GCM and `0x04`/`0x05`. The
-layout is identical — plaintext + 29 bytes either way — and on decryption the version byte states the
-key length it needs, so a mismatch is reported as a key error rather than as a failed tag.
+**The key length selects the cipher, and nothing else does** (`docs/design.md` amendment A10):
 
-That has a cost, which is why **AES-128 is off by default**. A 32-byte key truncated in transit is a
-*valid* 16-byte key, and without a floor `gcm_encrypt` would seal with it and report success at a
-strength nobody asked for. `gcm.min_key_bytes` (GLOBAL, default `32`) is that floor: leave it alone
-and the server behaves exactly as it did before, refusing short keys. Set it to `16` to opt in.
-Decryption ignores it entirely, so raising the floor again never locks out data that was written
-under a lower one.
+| Key | Suite | `gcm_encrypt` | `gcm_encrypt_det` |
+|---:|:--|:--|:--|
+| 32 B | AES-256-GCM | `0x02` | `0x03` |
+| 24 B | AES-192-GCM | `0x06` | `0x07` |
+| 16 B | AES-128-GCM | `0x04` | `0x05` |
 
-AES-192 is **not** implemented. `0x06` and `0x07` are allocated to it and a 24-byte key is an error.
+The layout is identical — plaintext + 29 bytes in every case — and on decryption the version byte
+states the key length it needs, so a mismatch is reported as a key error rather than as a failed tag.
+
+That has a cost, which is why **anything below AES-256 is off by default**. A 32-byte key truncated in
+transit is a *valid* 24- or 16-byte key, and without a floor `gcm_encrypt` would seal with it and
+report success at a strength nobody asked for. `gcm.min_key_bytes` (GLOBAL, default `32`) is that
+floor: leave it alone and the server behaves exactly as it did before, refusing short keys. Set it to
+`24` to allow AES-192, or `16` to allow both smaller suites. Decryption ignores it entirely, so
+raising the floor again never locks out data that was written under a lower one.
 
 ```sql
 SET @k = UNHEX('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');  -- fixture key

@@ -298,13 +298,17 @@ bool sysvar_is_registered() { return g_registered_vars.count("gcm.strict") != 0;
 
 bool min_key_bytes_is_registered() { return g_registered_vars.count("gcm.min_key_bytes") != 0; }
 
-gcm::Error probe_gcm() {
+gcm::Error probe_gcm(size_t key_len) {
+  /* One probe per *handle*, and there are three GCM handles now (design A10), so the key
+     length has to be a parameter. A probe that only ever used 32 bytes could not see
+     g_aes_gcm_192 or g_aes_gcm_128 leak — verified by mutation: deleting the AES-192
+     free/nullptr pair passed the whole suite before this was parameterised, which is the same
+     blind spot that once let a missing mac_deinit() through. */
   const unsigned char plaintext[] = {'x'};
   unsigned char envelope[gcm::encrypt_out_len(sizeof(plaintext))] = {};
   size_t written = 0;
-  return gcm::encrypt_random(gcm::Bytes{kKey, sizeof(kKey)},
-                             gcm::Bytes{plaintext, sizeof(plaintext)}, gcm::Bytes{nullptr, 0},
-                             envelope, &written);
+  return gcm::encrypt_random(gcm::Bytes{kKey, key_len}, gcm::Bytes{plaintext, sizeof(plaintext)},
+                             gcm::Bytes{nullptr, 0}, envelope, &written);
 }
 
 gcm::Error probe_mac() {
@@ -333,15 +337,20 @@ gcm::Error probe_cbc() {
 }
 
 bool algorithms_live() {
-  /* The CBC probe is fed deliberate nonsense, so "live" for it means anything other than the
-     refusal a null handle produces. The other two round-trip real data and must succeed. */
-  return probe_gcm() == gcm::Error::ok && probe_mac() == gcm::Error::ok &&
-         probe_cbc() != gcm::Error::openssl;
+  /* Every GCM handle, not just the default suite: a leak of one is invisible through the
+     others. The CBC probe is fed deliberate nonsense, so "live" for it means anything other
+     than the refusal a null handle produces; the rest round-trip real data and must succeed. */
+  for (size_t key_len : {gcm::kKeyLen256, gcm::kKeyLen192, gcm::kKeyLen128}) {
+    if (probe_gcm(key_len) != gcm::Error::ok) return false;
+  }
+  return probe_mac() == gcm::Error::ok && probe_cbc() != gcm::Error::openssl;
 }
 
 bool algorithms_released() {
-  return probe_gcm() == gcm::Error::openssl && probe_mac() == gcm::Error::openssl &&
-         probe_cbc() == gcm::Error::openssl;
+  for (size_t key_len : {gcm::kKeyLen256, gcm::kKeyLen192, gcm::kKeyLen128}) {
+    if (probe_gcm(key_len) != gcm::Error::openssl) return false;
+  }
+  return probe_mac() == gcm::Error::openssl && probe_cbc() == gcm::Error::openssl;
 }
 
 int component_init() { return COMPONENT_REF(gcm).init(); }

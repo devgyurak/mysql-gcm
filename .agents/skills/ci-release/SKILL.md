@@ -21,6 +21,7 @@ The rule is `.agents/rules/stack-ci-docker.md`. The skeletons already exist in
 | `bench.yml` | push to main/develop (path-filtered), nightly, dispatch | the core micro-benchmarks and the ratio gate | not required |
 | `load.yml` | nightly cron, dispatch | `tests/load/run.py --gate`, with the results as an artifact | nightly |
 | `release.yml` | tag `v*`, dispatch (dry run) | `guard` → `build` → `image` → `manifest` → `package` → `publish` | — |
+| `images.yml` | push to main/develop (`docker/**`, `image-ref.sh`), weekly, dispatch | `mysql-gcm-build` per major and `mysql-gcm-mtr` for 8.4 to GHCR; skips a tag that exists | — |
 
 **`mtr`, `adapter` and `bench` are path-filtered and therefore must never be made required.** A
 filtered workflow does not report on a PR that misses the filter, and a required check that does not

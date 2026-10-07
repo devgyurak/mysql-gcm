@@ -16,10 +16,13 @@ name: mtr
 # check that never reports blocks the merge button forever. `mtr` itself is deliberately not required
 # for the same reason it is not cheap.
 #
-# The expensive part is that MTR needs a *built* mysqld, not the configured tree build.yml caches, so
-# scripts/mtr.sh compiles the server in the container. Point GCM_MTR_CONTAINER at a warm container
-# locally. Publishing a server-built image to GHCR would cut this to minutes and costs 10-20 GB per
-# major — worth revisiting if this becomes the bottleneck (ci-release skill).
+# The expensive part is that MTR needs a *built* mysqld, not the configured tree build.yml caches.
+# images.yml publishes one (mysql-gcm-mtr, 8.4 only) and scripts/mtr.sh pulls it when GCM_REGISTRY is
+# set, so a run that finds the image is a pull plus a component build. A run that does not -- the tag
+# is new because docker/** changed, or images.yml has not run since -- compiles the server here, and
+# that is the hour. The compiled tree measures 3.1 GB on 8.4.11, so the image is about 6 GB with its
+# base; it was estimated at 10-20 GB before it was measured. Point GCM_MTR_CONTAINER at a warm
+# container locally.
 on:
   pull_request:
     paths: &mtr_paths
@@ -65,7 +68,11 @@ jobs:
       #
       # 8.4 only: the .result files are recorded against it (scripts/mtr.sh says so), and
       # recording them per major would mean three of these.
-      - run: scripts/mtr.sh 8.4
+      #
+      # GCM_MTR_JOBS defaults to 3 for a laptop's docker memory. A hosted runner has
+      # 4 cores and 16 GB, and the default left one core idle for the whole fallback
+      # build; it makes no difference once the image is pulled.
+      - run: GCM_MTR_JOBS="$(nproc)" scripts/mtr.sh 8.4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with: { name: mtr-logs, path: "build/8.4/mtr/" }

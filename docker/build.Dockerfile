@@ -67,6 +67,10 @@ RUN set -eux; \
 
 # WITH_SSL=system: use the distribution libcrypto, never a bundled copy.
 # WITH_UNIT_TESTS=OFF: the server's own gtest suite is not what we build here.
+# WITH_ROUTER=OFF: nothing here uses MySQL Router, and it is a tenth of the server
+# compile (460 of 4477 edge-seconds in the 8.4.11 ninja log) that images.yml and
+# the mtr fallback path would otherwise pay. Only router/src/harness/include stays,
+# which the server itself pulls in.
 # perl is installed above on purpose: cmake bakes PERL_EXECUTABLE into
 # mysql-test/mysql-test-run.pl at configure time, and without it MTR fails with
 # "PERL_EXECUTABLE-NOTFOUND: bad interpreter".
@@ -78,6 +82,7 @@ RUN set -eux; \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DWITH_SSL=system \
       -DWITH_UNIT_TESTS=OFF \
+      -DWITH_ROUTER=OFF \
       ${boost_arg}
 
 COPY build-component.sh /usr/local/bin/build-component.sh

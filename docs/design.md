@@ -108,7 +108,7 @@
 > the caller chose every key, so the difference tells them nothing. In the second, it is in
 > principle a signal of *whether consecutive rows used the same key* — never key bytes — to someone
 > who can time row evaluation. A client does not see only the statement's total duration: a
-> streaming result (`mysql_use_result`, or a server-side cursor) delivers rows as they are produced,
+> streaming result (`mysql_use_result`) delivers rows as they are produced,
 > so the arrival time of each row is observable, and with it, in principle, a per-row difference.
 > How precisely depends on the execution plan, on buffering in the server and the network, and on
 > the driver; a filter that returns few rows, or a sort or aggregate, hides most of it. No attack

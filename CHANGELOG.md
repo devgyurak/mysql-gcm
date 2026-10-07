@@ -27,9 +27,11 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   heap for a statement rather than one operation — is stated in A11 with its invariants, and the
   `crypto-safety` and `architecture` rules carry the exception.
 - `tests/bench` gates the two reused paths (`open_session`, `seal_det_session`) against references
-  that keep the same state, with provisional ceilings of 1.35 / 1.35 / 1.15 / 1.10 by size — the
-  structure around a 120 ns open is a constant ~20 ns, so 1.10 is arithmetic it cannot meet — to be
-  set from three CI runs. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
+  that keep the same state. Ceilings from three CI runs: `open_session` 1.30 / 1.30 / 1.15 / 1.10 by
+  size (measured up to 1.193 at 16 B — the same structure is a larger ratio over a cheaper reference),
+  `seal_det_session` 1.15 / 1.15 / 1.15 / 1.10 (measured up to 1.093). One run on a runner five
+  times faster than the usual class broke three ceilings, two of them one-call cases; the cause is not
+  isolated and nothing was widened to absorb it. `tests/load/run.py` measures two matched-predicate controls, `plain_len` and
   `gcm_len`, alongside `gcm` and `aes`, reports their p95 differences, and issues each session's
   queries in a de Bruijn order so every query follows every other equally often; the nightly's query
   count doubles and the gate's gcm/aes ratio is now measured under that order.

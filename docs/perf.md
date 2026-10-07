@@ -250,15 +250,36 @@ AES-192 and AES-128 show the same shape (`open_session`/`open` 0.38–0.45 at 16
 the per-call setup, so it is a constant: around 190 ns on a decrypt and around 550 ns on a
 deterministic seal, dominant on a name and invisible on 64 KiB.
 
-**The gate, and why the two reused cases have wider ceilings at the small sizes.** The structure
-around one open — the envelope parse, the suite lookups, the constant-time compare of the 32-byte key
-copy — costs the same ~20 ns whether the algorithm under it costs 300 ns (a fresh context) or 120 ns
-(a kept one), and 10% of 120 ns is less than the key compare alone. The first container run measured
-`open_session` at 1.04–1.40 and `seal_det_session` at 0.92–1.21 against their references, with the
-largest values at 16 and 256 bytes. The ceilings are therefore 1.35 at 16 and 256 B, 1.15 at 4 KiB
-and 1.10 at 64 KiB for those two cases, **provisional** until three CI runs set them the way every
-other ceiling in `baseline.json` was set; the same run also put two of the old one-call cases over
-1.10 (`seal_det/aes192/16` 1.155, `open/aes128/256` 1.116), which is this laptop's documented noise.
+**The gate, and why `open_session` has a wider ceiling at the small sizes.** The structure around
+one open — the envelope parse, the suite lookups, the constant-time compare of the key copy — costs
+the same few tens of nanoseconds whether the algorithm under it costs ~600 ns (a fresh context, on
+the CI runner) or ~200 ns (a kept one), so the same structure is a larger ratio over the cheaper
+reference. Three CI `bench` runs on 2026-10-07 (commit `1aa0ba7`;
+[37582494590](https://github.com/devgyurak/mysql-gcm/actions/runs/37582494590),
+[37582537352](https://github.com/devgyurak/mysql-gcm/actions/runs/37582537352),
+[37583117389](https://github.com/devgyurak/mysql-gcm/actions/runs/37583117389)) set the ceilings:
+
+| Gated ratio, min–max over three suites × three runs | 16 B | 256 B | 4 KiB | 64 KiB |
+|---|---|---|---|---|
+| `open_session` | 1.114–1.193 | 1.081–1.162 | 1.007–1.224 | 0.914–1.007 |
+| `seal_det_session` | 1.016–1.053 | 1.025–1.067 | 0.960–1.093 | 0.939–1.006 |
+| `open` (one call, for comparison) | 1.030–1.044 | 0.987–1.061 | 1.008–1.126 | 0.975–1.016 |
+
+`open_session` is 1.30 at 16 and 256 B — the ~9% headroom over the worst observation that the 1.10
+ceilings have over theirs — and 1.15 at 4 KiB; `seal_det_session` never exceeded 1.093 and is 1.15
+up to 4 KiB; both are 1.10 at 64 KiB. The one-call `open`, which an earlier version of this PR had
+pushed to 1.11–1.13 at 16 and 256 B with a heap session and two context resets per call, is back
+inside 1.10 there.
+
+**Not absorbed.** The third run landed on a runner about five times faster than the usual class
+(bare 64 KiB seal 3,237 ns against ~17,000) and there three values broke their ceilings:
+`open_session/aes256/4096` 1.224, and two one-call cases whose code path this change does not alter
+in kind, `seal_det/aes256/256` 1.118 and `open/aes192/4096` 1.126. The cause is not isolated. No
+ceiling was widened to absorb them, so a run on that runner class can fail this gate; whether it
+should is a decision for after more runs on it, not one these three can make.
+
+The first container run on the laptop, before any of this, had measured `open_session` at
+1.04–1.40 and put two one-call cases over 1.10; those numbers set nothing.
 
 **SQL, MySQL 8.4.11 on the laptop, 100,000 rows, three runs each way** — the same server, the same
 load runner with the balanced order, the `develop` component and then the A11 component. Ranges over

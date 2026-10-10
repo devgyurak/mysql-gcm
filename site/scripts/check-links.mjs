@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
-const BASE = (process.env.SITE_BASE ?? "/mysql-gcm").replace(/\/$/, "");
+const BASE = (process.env.SITE_BASE ?? "/").replace(/\/$/, "");
 const ORIGIN = "https://site.invalid";
 
 async function* html(dir) {

@@ -91,7 +91,7 @@ site/                          Landing page and docs site (Astro Starlight, Node
                                edit the source, never site/src/content/docs/*.md. Kept out of Docker contexts
                                by .dockerignore
 .github/workflows/             CI (lint · unit · build matrix · integration (smoke) · mtr and adapter (path-filtered)
-                               · e2e · load (nightly) · bench (on merges) · images (GHCR) · site (build check; Cloudflare Pages deploys)
+                               · e2e · load (nightly) · bench (on merges) · images (GHCR) · site (build check; Cloudflare Workers Builds deploys)
                                · release (on tags))
 ```
 

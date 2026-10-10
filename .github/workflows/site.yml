@@ -5,7 +5,7 @@ name: site
 #
 # A pull request or a push to main that touches any of those sources builds the site and checks
 # its internal links, so a broken page fails here rather than after publication. Publishing is
-# not done here: Cloudflare Pages builds and deploys from its own Git integration
+# not done here: Cloudflare Workers Builds builds and deploys from its own Git integration
 # (site/README.md), which keeps Cloudflare credentials out of this repository. The build below
 # uses the same SITE_BASE as production, "/". Path-filtered, so it is never a required check
 # (stack-ci-docker: a filtered workflow does not report on an unrelated PR).

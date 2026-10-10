@@ -2,7 +2,7 @@
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
-// Where the site is served. On its own domain (Cloudflare Pages) set SITE_URL to that origin and
+// Where the site is served. On its own domain (Cloudflare Workers) set SITE_URL to that origin and
 // SITE_BASE to "/"; the defaults describe a project page at devgyurak.github.io/mysql-gcm.
 // scripts/sync-docs.mjs and scripts/check-links.mjs read the same SITE_BASE, so rewritten and
 // checked links always agree with what Astro serves.

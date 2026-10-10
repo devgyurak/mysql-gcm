@@ -1,4 +1,4 @@
-# Response headers for Cloudflare Pages (read from the build output; ignored elsewhere).
+# Response headers for Cloudflare Workers static assets (read from the build output; ignored elsewhere).
 # A documentation site for a security component should not be frameable, sniffable or chatty
 # about where readers came from.
 /*

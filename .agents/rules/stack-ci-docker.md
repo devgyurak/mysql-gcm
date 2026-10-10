@@ -9,7 +9,8 @@ paths:
 
 - GitHub Actions, split by concern: `lint.yml`, `unit.yml`, `build.yml` (matrix), `integration.yml`
   (smoke — the required checks), `mtr.yml` (path-filtered), `adapter.yml` (path-filtered, three
-  majors), `e2e.yml`, `load.yml` (nightly/dispatch), `bench.yml` (merges to develop and main, plus
+  majors), `e2e.yml`, `load.yml` (nightly/dispatch), `site.yml` (builds the docs site on PRs touching its sources, deploys it to GitHub Pages from main),
+  `bench.yml` (merges to develop and main, plus
   nightly), `release.yml` (tags). Never one giant file.
 - Pin actions by SHA (`actions/checkout@<sha> # v4`). Never reference a tag — that is the supply-chain
   risk. `scripts/check-action-pins.py` enforces it from the `workflows` job in `lint.yml`. To refresh a

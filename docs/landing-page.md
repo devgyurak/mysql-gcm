@@ -45,7 +45,7 @@ credential is stored on GitHub, and every other branch gets a preview URL.
    | Build command | `npm run build` |
    | Deploy command | `npx wrangler deploy` |
    | Non-production branch deploy command | `npx wrangler versions upload` |
-   | Root directory (advanced) | `site` |
+   | Path (advanced settings; the root directory) | `/site` |
 
 3. Build variables (advanced):
 

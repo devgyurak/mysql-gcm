@@ -13,7 +13,7 @@
   <img alt="MySQL 8.0 | 8.4 | 9.x" src="https://img.shields.io/badge/MySQL-8.0%20%7C%208.4%20%7C%209.x-4479A1?logo=mysql&logoColor=white">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
   <img alt="OpenSSL 3" src="https://img.shields.io/badge/OpenSSL-3.x-721412?logo=openssl&logoColor=white">
-  <img alt="status: pre-release" src="https://img.shields.io/badge/status-%EB%A6%B4%EB%A6%AC%EC%8A%A4%20%EC%A0%84-orange">
+  <a href="https://github.com/devgyurak/mysql-gcm/releases"><img alt="release" src="https://img.shields.io/github/v/release/devgyurak/mysql-gcm?color=orange"></a>
   <a href="LICENSE"><img alt="license: GPLv2" src="https://img.shields.io/badge/license-GPLv2-blue"></a>
 </p>
 
@@ -26,7 +26,7 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
 `WHERE gcm_decrypt(name, @k) LIKE '%길%'` 가 MySQL 자신의 collation 으로 **서버 안에서** 돕니다.
 암호화된 한글 컬럼에서 부분일치 검색을 지키는 것이 이 프로젝트의 존재 이유입니다.
 
-**릴리스 전입니다. 아직 공개된 것이 없고, 이 구성은 사람의 암호 감사를 받지 않았습니다.** 두
+**0.1.0 이 첫 릴리스이고, 이 구성은 사람의 암호 감사를 받지 않았습니다.** 두
 질문에 대한 범위 한정 AI 설계 검토가 `docs/design-KO.md` A12 에 기록돼 있습니다(제약 13). 기대기
 전에 아래 제약을 먼저 읽으세요.
 

@@ -3,7 +3,19 @@
 Notable changes per release. Envelope-format changes get their own entry with a compatibility note
 (`ci-release` skill release checklist).
 
-## Unreleased
+## 0.1.0 — 2026-10-10
+
+First release. The component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x. It
+provides AES-256-GCM, and AES-192 and AES-128 selected by key length behind `gcm.min_key_bytes`
+(default 32, amendment A10). The envelope format, version bytes `0x02`–`0x07` with `0x01` read only,
+is frozen by `spec/envelope.md` and `spec/test-vectors.json`.
+
+0.1.0 was first prepared on 2026-09-29 but never tagged. That state, recorded at the end of this
+section, carried two component defects fixed below (the unsynchronised `gcm.strict` read on 8.0
+and 8.4, and the init rollback freeing handles it might not own), so the release is cut from the
+later state, and A10, A11 and A12 ship in it rather than in 0.2.0 (`docs/design.md` A10,
+"Sequencing"). Nothing was published before this tag.
+
 
 ### Fixed
 - **The bench gate failed on fast runners because of how it measured, not what it measured** (#24).
@@ -589,14 +601,17 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   belongs in `docs/design.md` before it belongs in `src/`. The measurement and the argument are in
   `docs/perf.md`.
 
-## 0.1.0 — 2026-09-29
+### As prepared on 2026-09-29 (never tagged)
+
+Kept as written, at a lower heading level, for the record. "First release" below refers to that
+attempt; its envelope statement covered `0x02` and `0x03` only.
 
 First release: the component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x, and
 the envelope format is frozen by `spec/envelope.md` and `spec/test-vectors.json`. Anything sealed by
 this version stays readable by later ones — that is what a version byte is for, and v1 dual-read
 already demonstrates the mechanism.
 
-### Added
+#### Added
 - Component implementation: `component.cc`, `udf_encrypt.cc`, `udf_decrypt.cc`, `udf_glue.{h,cc}`,
   `sysvar.{h,cc}` and the in-tree `src/CMakeLists.txt`. Registers `gcm_encrypt`, `gcm_encrypt_det`
   and `gcm_decrypt` through the `udf_registration` service, tags the decrypted result `utf8mb4`
@@ -616,7 +631,7 @@ already demonstrates the mechanism.
   for regenerating `.result`.
 - `.clang-format`: the MySQL 8.4 config with `ColumnLimit` raised to 100 to match this codebase.
 
-### Fixed
+#### Fixed
 - `tests/unit/CMakeLists.txt` never called `enable_testing()`, so no `CTestTestfile.cmake` was
   written and `ctest` reported "No tests were found" **while exiting 0** — the unit gate in CI was
   passing without running anything. All 1400 tests run now.
@@ -624,7 +639,7 @@ already demonstrates the mechanism.
   aborted the whole binary at startup with "Attempted redefinition of test suite". The nonce one is
   now `DetNonceVector`.
 
-### Released
+#### Released
 - **License is GPLv2** (`GPL-2.0-only`), settled rather than pending: `LICENSE` carries the full text,
   sources carry an SPDX header, and `docs/design.md` §7 records why GPLv2 is the compatible choice for
   something that links the server's GPLv2 headers.
@@ -635,7 +650,7 @@ already demonstrates the mechanism.
   (`docker/server.Dockerfile`). Multi-arch tags `<version>-mysql<major>` and `mysql<major>`.
   Tests still use unmodified official images, so no gate depends on that release image.
 
-### Fixed in review
+#### Fixed in review
 - `gcm_encrypt*` sized its result field from the argument's *pre-conversion* length. The plaintext
   argument is requested as utf8mb4 and the server widens it first, so a latin1 `VARCHAR(1)` holding
   `é` reports `lengths[0] = 1` while the envelope is 31 bytes. Materialising that result failed with
@@ -674,7 +689,7 @@ already demonstrates the mechanism.
 - `docker/versions.json` carries the source tarball SHA-256 and the compiler each server tree
   expects; the Dockerfile verifies the tarball and takes the toolset as a build argument.
 
-### Documented
+#### Documented
 - `docs/design.md` amendment A5: `gcm.strict` has SESSION scope only from MySQL 9.0.0. Component
   sysvars ignore `PLUGIN_VAR_THDLOCAL` before that and reading a session value has no service, so the
   variable is registered GLOBAL-only on 8.0 and 8.4.
@@ -695,7 +710,7 @@ already demonstrates the mechanism.
   `Müller` returns ill-formed and `LIKE '%ller%'` yields 0 with no error. Pinned in both the
   integration and MTR dual-read cases, together with the correct migration.
 
-### Release tooling
+#### Release tooling
 - `release.yml` refuses to publish unless the tag is `vMAJOR.MINOR.PATCH`, the tagged commit is
   contained in `main`, and `CHANGELOG.md` has a section for that version. A `workflow_dispatch` dry
   run executes the identical pipeline and publishes nothing, so the release path is exercised before
@@ -709,7 +724,7 @@ already demonstrates the mechanism.
   workflow in which repository produced the checksums; there is no long-lived key to hold or leak.
   `CONTRIBUTING.md` and both READMEs carry the `cosign verify-blob` invocation.
 
-### Fixed before release
+#### Fixed before release
 - The unit suite did not compile under GCC: `-Wdangling-reference` fires on
   `const Vector &v = vector_by_id("id")` because the parameter was a `const std::string &` and GCC
   cannot prove the returned reference does not point into the temporary bound to it. With `-Werror`
@@ -731,7 +746,7 @@ already demonstrates the mechanism.
 - `develop` was absent from the CI push triggers, so a maintainer push — which the branch protection
   deliberately allows — reached it ungated.
 
-### Supply chain
+#### Supply chain
 - Every action in every workflow is pinned to a commit SHA with the tag in a trailing comment,
   which the `stack-ci-docker` rule already required and a `TODO` in `build.yml` admitted was not
   done. A tag reference is whatever the owner last pointed it at, and an action runs with this
@@ -741,7 +756,7 @@ already demonstrates the mechanism.
   Nothing had been checking the workflow files, so an expression that was syntactically fine and
   semantically wrong first surfaced as a failed run on the branch it was meant to guard.
 
-### Fixed in pre-release review
+#### Fixed in pre-release review
 - `release.yml` could publish a **partial release**. The `image` matrix pushes each architecture tag
   as it finishes and `fail-fast: false`, while `package` depended only on `build` — so one failing
   entry left some `<version>-mysql<major>-<arch>` tags public, no joined multi-arch tag, and a full
@@ -803,7 +818,7 @@ already demonstrates the mechanism.
   server builds. PR runs now supersede; pushes to `main`, to `develop`, and tag runs never cancel, and
   `load` keeps none so baseline runs can be dispatched in parallel.
 
-### Settled after re-measuring
+#### Settled after re-measuring
 - The release baseline is three CI runs at **40 samples per session**, not 20. p95 of 20 samples is
   rank 19 of 20, so it tracks whichever single request was unluckiest: three runs put the one-session
   ratio between 0.809 and 0.928, a 1.19x spread. At 40 samples the same axis spreads 0.799–0.947 and

@@ -13,7 +13,7 @@
   <img alt="MySQL 8.0 | 8.4 | 9.x" src="https://img.shields.io/badge/MySQL-8.0%20%7C%208.4%20%7C%209.x-4479A1?logo=mysql&logoColor=white">
   <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
   <img alt="OpenSSL 3" src="https://img.shields.io/badge/OpenSSL-3.x-721412?logo=openssl&logoColor=white">
-  <img alt="status: pre-release" src="https://img.shields.io/badge/status-pre--release-orange">
+  <a href="https://github.com/devgyurak/mysql-gcm/releases"><img alt="release" src="https://img.shields.io/github/v/release/devgyurak/mysql-gcm?color=orange"></a>
   <a href="LICENSE"><img alt="license: GPLv2" src="https://img.shields.io/badge/license-GPLv2-blue"></a>
 </p>
 
@@ -26,8 +26,8 @@ AES-GCM to MySQL 8.0, 8.4 and 9.x as a server **component**. The decrypted value
 `utf8mb4`, so `WHERE gcm_decrypt(name, @k) LIKE '%길%'` runs **inside the server** with MySQL's own
 collation. Partial-match search on an encrypted Korean column is the reason this project exists.
 
-**Pre-release. Nothing is published yet, and the construction has not had a human cryptographic
-audit** — a scoped AI design review of two questions is recorded in `docs/design.md` A12
+**0.1.0 is the first release, and the construction has not had a human cryptographic audit** — a
+scoped AI design review of two questions is recorded in `docs/design.md` A12
 (constraint 13). Read the constraints below before you rely on it.
 
 ## Read this first — operational constraints

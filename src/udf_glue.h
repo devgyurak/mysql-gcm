@@ -11,16 +11,26 @@
 
 #include <mysql/udf_registration_types.h>
 
-#include "envelope.h"
+#include "gcm.h"
 
 namespace gcm {
 
-/* Hung off UDF_INIT::ptr, one per invocation. Nothing is shared between calls:
-   the same UDF runs concurrently in many sessions (component-src rule). */
+/* Hung off UDF_INIT::ptr, one per UDF item. Nothing is shared between items: the
+   same UDF runs concurrently in many sessions (component-src rule). Everything in
+   here lives from init to deinit — one execution of one statement; a prepared
+   statement with a UDF is re-prepared per EXECUTE — which is the lifetime design A11
+   grants the two crypto sessions. */
 struct UdfState {
-  bool strict;        /* gcm.strict, read once in init (design A5) */
-  unsigned char *out; /* result bytes; holds plaintext for gcm_decrypt */
+  bool strict;          /* gcm.strict, read once in init (design A5) */
+  size_t min_key_bytes; /* gcm.min_key_bytes, read once in init (design A10) */
+  unsigned char *out;   /* result bytes; holds plaintext for gcm_decrypt */
   size_t capacity;
+  /* gcm_decrypt only: the scheduled context and its key copy (design A11).
+     nullptr for the encrypt UDFs; freed and cleansed in free_state. */
+  DecryptSession *decrypt;
+  /* gcm_encrypt_det only: the cached nonce_key and the key copy it is valid for
+     (design A11). Zeroed by calloc in init_state, cleansed in free_state. */
+  DetSession det;
 };
 
 /* Every helper below follows the UDF init convention: true means failure, with
@@ -39,6 +49,10 @@ bool init_argument_collation(UDF_ARGS *args, char *msg, unsigned index, const ch
 
 bool init_state(UDF_INIT *initid, char *msg);
 void free_state(UDF_INIT *initid);
+
+/* Gives the state its decrypt session (design A11). Call after init_state;
+   free_state releases it. True on allocation failure, after releasing the state. */
+bool init_decrypt_session(UDF_INIT *initid, char *msg);
 
 /* Grows state->out to at least `need` bytes. The old buffer is wiped before
    release — it may still hold plaintext. True on allocation failure. */
@@ -102,6 +116,12 @@ void raise_message(const char *func, const char *detail);
 
 /* Reports an argument that exceeds kMaxArgLen. Carries lengths only. */
 void raise_too_long(const char *func, size_t len);
+
+/* Reports a key that is shorter than gcm.min_key_bytes. Distinct from
+   bad_key_len: the key is a valid length for a suite, and the server policy is
+   what refuses it, so the message has to say that rather than claim the length
+   is wrong (design A10). Carries lengths only. */
+void raise_below_floor(const char *func, size_t key_len, size_t floor);
 
 }  // namespace gcm
 

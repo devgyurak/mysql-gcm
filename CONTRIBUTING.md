@@ -43,9 +43,23 @@ Two jobs are deliberately **not** required:
 - `compose` (E2E) runs only on a PR labelled `e2e`, so requiring it would leave every other PR
   waiting for a check that never reports. Add the label when the change touches replication,
   sharding, dual-read or the runner itself.
-- `mtr` builds the server from source, which takes over an hour. It still runs on every PR and on
-  every push to `develop` and `main`, and a failure there is as blocking in practice as a required
-  check — it just is not allowed to hold the merge button hostage for an hour.
+- `adapter` runs only when a PR touches `src/**` or `tests/adapter/**`, like `mtr`, because a PR
+  that changes neither cannot change its result. It is minutes rather than an hour — the comparable
+  `smoke` jobs, which build the image, build the component and run a server, measured 2m52s to
+  3m27s — but being fast does **not** make it a candidate for the required list: a path-filtered
+  workflow does not report on a PR that misses the filter, and a required check that does not report
+  blocks the merge button indefinitely. Running once on `develop` does not help, because the filter
+  is evaluated per pull request. Note also that nothing caches the build image between CI runs
+  today.
+- `bench` does not run on pull requests at all. It runs on the merge — a push to `develop` or
+  `main` that touches `src/**` or `tests/bench/**` — plus nightly. A benchmark on every PR is four
+  minutes and a number nobody reads, and the regressions it catches are rare enough that minutes
+  after the merge is soon enough. It therefore cannot be a required check.
+- `mtr` builds the server from source: 49 to 63 minutes measured. It runs on a PR that touches
+  `src/**`, `mysql-test/**`, `spec/**` or the build tooling, and on a merge to `develop` or `main`,
+  from its own `mtr.yml` — a documentation-only PR cannot change its outcome, so it does not run one.
+  A failure there is as blocking in practice as a required check; it just is not allowed to hold the
+  merge button hostage for an hour.
 
 Branches also do not have to be up to date before merging: for a repository this size the alternative
 is rebasing and re-running a six-entry build matrix for every merge that lands ahead of yours.
@@ -61,8 +75,11 @@ protection deliberately allows — is gated too.
   conversation to have in the PR, not a box to leave blank.
 - **Conventional commit subjects**: `feat(component):`, `fix(crypto):`, `test(mtr):`, `docs:`, `ci:`.
   One commit, one concern.
-- Prose in English for code, comments, README, `spec/` and commit messages. `docs/design.md` is
-  Korean, and `README-KO.md` mirrors `README.md` — change both in the same PR.
+- **English first**, for code, comments, documents, `spec/`, commit messages and PR descriptions. A
+  document may carry a translation named `{document}-{LANG}.md`: `README-KO.md` and
+  `docs/design-KO.md`. The English file is canonical, and a change to it updates the translation **in
+  the same PR** — a translation that lags is a documentation bug. Korean strings in tests are data, not
+  prose, and are never translated.
 
 ## Tests are not optional
 
@@ -75,6 +92,8 @@ The pyramid, and what each layer is for:
 | MTR | the server's own harness | `scripts/mtr.sh 8.4` |
 | E2E | primary + replica + an independent shard | `docker compose -f tests/e2e/compose.yml up --build --exit-code-from runner` |
 | load | p95 against the `AES_DECRYPT` baseline | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
+| adapter | the component's install and uninstall paths against stub services, no server | `scripts/adapter-tests.sh 8.4` |
+| bench | the core against a same-work reference, no server | `scripts/bench.sh --gate` |
 
 Rules that reviewers will hold you to (`.agents/rules/testing.md`):
 
@@ -112,13 +131,22 @@ Performance work must not remove a check. If a change alters per-row cost, show 
 python3 scripts/check-architecture.py            # module boundaries (design A6)
 scripts/agents-sync.sh --check                   # agent adapters are current
 python3 scripts/check-action-pins.py             # no workflow uses a mutable action tag
-clang-format --dry-run --Werror $(git ls-files 'src/*.cc' 'src/*.h' 'tests/unit/*')
-ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/
+git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+    'tests/bench/*.cc' 'tests/bench/*.h' 'tests/adapter/*.cc' 'tests/adapter/*.h' \
+    | xargs -0 clang-format --dry-run --Werror
+ruff check . && ruff format --check . && mypy --strict scripts/ tests/load/run.py tests/e2e/ \
+    tests/bench/gate.py
 shellcheck scripts/*.sh docker/*.sh .claude/hooks/*.sh
 python scripts/gen-vectors.py --check
 ```
 
 CI runs all of these. Nothing here needs network access except the Docker builds.
+
+Two more exist and are not pre-push checks, because both need Docker and neither is fast:
+`scripts/unit-in-docker.sh` runs the unit suite under GCC the way CI does — worth it before touching
+`tests/unit`, since the host toolchain here is clang and GCC rejects things clang accepts — and
+`scripts/bench.sh --gate` measures the core. The benchmark runs in CI on the merge rather than on the
+pull request, so running it locally is how you find out before pushing.
 
 ## Cutting a release
 

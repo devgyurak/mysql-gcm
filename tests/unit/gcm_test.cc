@@ -6,6 +6,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -121,7 +122,12 @@ TEST_P(DetVector, GivenSpecVector_WhenEncryptDet_ThenEnvelopeMatchesByteForByte)
   ASSERT_EQ(err, Error::ok) << v.id;
   EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
             gcm_test::to_hex(v.envelope.data(), v.envelope.size()));
-  EXPECT_EQ(out[0], gcm::kVersionDet);
+  /* The version byte follows the key length (design A10), so it comes from the
+     suite table rather than a constant — otherwise this assertion silently means
+     "AES-256" and an AES-128 vector would have to be excluded from the suite. */
+  const gcm::Suite *suite = gcm::suite_for_key_len(v.key.size());
+  ASSERT_NE(suite, nullptr) << v.id;
+  EXPECT_EQ(out[0], suite->version_det);
 }
 
 INSTANTIATE_TEST_SUITE_P(SpecVectors, DetVector,
@@ -179,9 +185,17 @@ struct BadKeyLenCase {
 std::vector<BadKeyLenCase> bad_key_len_cases() {
   std::vector<BadKeyLenCase> out;
   for (const gcm_test::Vector &v : gcm_test::vectors_where("bad_key_len")) {
-    out.push_back({v, KeyLenEntry::random});
-    out.push_back({v, KeyLenEntry::det});
+    /* Decryption always applies: it has a version byte to disagree with.
+       Encryption only when the key length belongs to no suite at all — a key
+       whose length *is* a suite's is a perfectly good encryption key, and the
+       mismatch vectors (design A10) exist precisely to fail on the decrypt side.
+       Feeding those to encrypt_random would assert that sealing with a valid
+       32-byte key fails, which is not the rule and is not what we want. */
     out.push_back({v, KeyLenEntry::decrypt});
+    if (gcm::suite_for_key_len(v.key.size()) == nullptr) {
+      out.push_back({v, KeyLenEntry::random});
+      out.push_back({v, KeyLenEntry::det});
+    }
   }
   return out;
 }
@@ -252,7 +266,9 @@ TEST(EncryptRandom, GivenSamePlaintextTwice_WhenEncryptRandom_ThenEnvelopesDiffe
             Error::ok);
   // Then: a fresh nonce each time (the property, not a fixed value)
   EXPECT_EQ(first_len, second_len);
-  EXPECT_EQ(first[0], gcm::kVersionRandom);
+  const gcm::Suite *suite = gcm::suite_for_key_len(v.key.size());
+  ASSERT_NE(suite, nullptr) << v.id;
+  EXPECT_EQ(first[0], suite->version_random);
   EXPECT_NE(gcm_test::to_hex(first.data(), first_len), gcm_test::to_hex(second.data(), second_len));
 }
 
@@ -271,7 +287,7 @@ class RoundTripSize : public ::testing::TestWithParam<size_t> {};
 TEST_P(RoundTripSize, GivenPlaintextOfThisSize_WhenEncryptThenDecrypt_ThenOriginalReturned) {
   // Given
   const size_t size = GetParam();
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x77);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x77);
   const std::vector<unsigned char> aad = {'c', 'o', 'l'};
   const std::vector<unsigned char> plaintext = pseudo_random_plaintext(size);
   std::vector<unsigned char> sealed(gcm::encrypt_out_len(size), 0);
@@ -323,7 +339,7 @@ TEST(RoundTrip, GivenDetEnvelope_WhenDecryptedWithoutRecomputingNonce_ThenStored
    pass, or the seal writes past a 29-byte buffer. */
 TEST(Aad, GivenEmptyPlaintextAndLongAad_WhenEncryptDet_ThenTwentyNineBytesAndRoundTrips) {
   // Given
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x41);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x41);
   const std::vector<unsigned char> aad(64, 0x62);
   const std::vector<unsigned char> plaintext;
   std::vector<unsigned char> sealed(gcm::encrypt_out_len(0), 0);
@@ -346,7 +362,7 @@ TEST(Aad, GivenEmptyPlaintextAndLongAad_WhenEncryptDet_ThenTwentyNineBytesAndRou
 
 TEST(EncryptWithNonce, GivenNonceOfWrongLength_WhenSealing_ThenBadEnvelope) {
   // Given: the vector-test seam, which is the only caller that supplies a nonce
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x41);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x41);
   const std::vector<unsigned char> plaintext = {'x'};
   const std::vector<unsigned char> short_nonce(gcm::kNonceLen - 1, 0x00);
   std::vector<unsigned char> out(gcm::encrypt_out_len(plaintext.size()), 0);
@@ -402,7 +418,7 @@ TEST(Legacy, GivenLegacyEnvelopeWithCorruptPadding_WhenDecrypt_ThenBadEnvelope) 
 
 TEST(Envelope, GivenEmptyPlaintext_WhenEncryptDet_ThenTwentyNineBytes) {
   // Given
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x01);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x01);
   std::vector<unsigned char> out(gcm::encrypt_out_len(0), 0);
   size_t out_len = 0;
   // When
@@ -411,6 +427,703 @@ TEST(Envelope, GivenEmptyPlaintext_WhenEncryptDet_ThenTwentyNineBytes) {
   // Then
   ASSERT_EQ(err, Error::ok);
   EXPECT_EQ(out_len, gcm::kGcmOverhead);
+}
+
+// --- AES-128 (design A10) ----------------------------------------------------
+
+TEST(Aes128, GivenA16ByteKey_WhenEncryptRandom_ThenVersionIs04AndRoundTrips) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen128, 0x3C);
+  const std::vector<unsigned char> plaintext = {'h', 'e', 'l', 'l', 'o'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(gcm::decrypt_out_len(sealed.size()) + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_random(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                                &sealed_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(sealed[0], gcm::kVersionRandom128);
+  EXPECT_EQ(sealed_len, plaintext.size() + gcm::kGcmOverhead);
+  ASSERT_EQ(gcm::decrypt(span_of(key), Bytes{sealed.data(), sealed_len}, Bytes{nullptr, 0},
+                         opened.data(), &opened_len),
+            Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(opened.data(), opened_len),
+            gcm_test::to_hex(plaintext.data(), plaintext.size()));
+}
+
+TEST(Aes128, GivenA16ByteKey_WhenEncryptDetTwice_ThenIdenticalEnvelopeWithVersion05) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen128, 0x5A);
+  const std::vector<unsigned char> plaintext = {'E', 'M', 'R', '-', '1'};
+  std::vector<unsigned char> first(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> second(first.size(), 0);
+  size_t first_len = 0;
+  size_t second_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, first.data(),
+                             &first_len),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, second.data(),
+                             &second_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(first[0], gcm::kVersionDet128);
+  EXPECT_EQ(gcm_test::to_hex(first.data(), first_len), gcm_test::to_hex(second.data(), second_len));
+}
+
+TEST(Aes128, GivenTheSamePlaintextUnderBothSuites_WhenEncryptDet_ThenEnvelopesDiffer) {
+  // Given: the AES-128 key is the AES-256 key truncated, the shape a client bug makes
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x11);
+  const std::vector<unsigned char> key128(gcm::kKeyLen128, 0x11);
+  const std::vector<unsigned char> plaintext = {'j', 'o', 'i', 'n'};
+  std::vector<unsigned char> wide(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> narrow(wide.size(), 0);
+  size_t wide_len = 0;
+  size_t narrow_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key256), span_of(plaintext), Bytes{nullptr, 0}, wide.data(),
+                             &wide_len),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key128), span_of(plaintext), Bytes{nullptr, 0}, narrow.data(),
+                             &narrow_len),
+            Error::ok);
+  // Then: ciphertext does not join across suites, which is why the key length is
+  // part of the key's identity and not a tuning knob
+  EXPECT_NE(gcm_test::to_hex(wide.data(), wide_len), gcm_test::to_hex(narrow.data(), narrow_len));
+}
+
+TEST(Aes128, GivenA256EnvelopeAndA128Key_WhenDecrypt_ThenBadKeyLenNotBadTag) {
+  // Given
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x21);
+  const std::vector<unsigned char> key128(gcm::kKeyLen128, 0x21);
+  const std::vector<unsigned char> plaintext = {'x'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(sealed.size() + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  ASSERT_EQ(gcm::encrypt_det(span_of(key256), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                             &sealed_len),
+            Error::ok);
+  // When
+  const Error err = gcm::decrypt(span_of(key128), Bytes{sealed.data(), sealed_len},
+                                 Bytes{nullptr, 0}, opened.data(), &opened_len);
+  // Then: the version byte states the key length, so this is a key problem and is
+  // reported as one. bad_tag would send an operator after data corruption.
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+TEST(Aes128, GivenA128EnvelopeAndA256Key_WhenDecrypt_ThenBadKeyLenNotBadTag) {
+  // Given
+  const std::vector<unsigned char> key128(gcm::kKeyLen128, 0x22);
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x22);
+  const std::vector<unsigned char> plaintext = {'y'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(sealed.size() + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  ASSERT_EQ(gcm::encrypt_det(span_of(key128), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                             &sealed_len),
+            Error::ok);
+  // When
+  const Error err = gcm::decrypt(span_of(key256), Bytes{sealed.data(), sealed_len},
+                                 Bytes{nullptr, 0}, opened.data(), &opened_len);
+  // Then
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+TEST(Aes192, GivenA24ByteKey_WhenEncryptRandom_ThenVersionIs06AndRoundTrips) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen192, 0x44);
+  const std::vector<unsigned char> plaintext = {'z', 'e', 'd'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(gcm::decrypt_out_len(sealed.size()) + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_random(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                                &sealed_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(sealed[0], gcm::kVersionRandom192);
+  EXPECT_EQ(sealed_len, plaintext.size() + gcm::kGcmOverhead);
+  ASSERT_EQ(gcm::decrypt(span_of(key), Bytes{sealed.data(), sealed_len}, Bytes{nullptr, 0},
+                         opened.data(), &opened_len),
+            Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(opened.data(), opened_len),
+            gcm_test::to_hex(plaintext.data(), plaintext.size()));
+}
+
+TEST(Aes192, GivenA24ByteKey_WhenEncryptDetTwice_ThenIdenticalEnvelopeWithVersion07) {
+  // Given
+  const std::vector<unsigned char> key(gcm::kKeyLen192, 0x55);
+  const std::vector<unsigned char> plaintext = {'E', 'M', 'R', '-', '2'};
+  std::vector<unsigned char> first(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> second(first.size(), 0);
+  size_t first_len = 0;
+  size_t second_len = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, first.data(),
+                             &first_len),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key), span_of(plaintext), Bytes{nullptr, 0}, second.data(),
+                             &second_len),
+            Error::ok);
+  // Then
+  EXPECT_EQ(first[0], gcm::kVersionDet192);
+  EXPECT_EQ(gcm_test::to_hex(first.data(), first_len), gcm_test::to_hex(second.data(), second_len));
+}
+
+TEST(Aes192, GivenA192EnvelopeAndA256Key_WhenDecrypt_ThenBadKeyLenNotBadTag) {
+  // Given
+  const std::vector<unsigned char> key192(gcm::kKeyLen192, 0x66);
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x66);
+  const std::vector<unsigned char> plaintext = {'w'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> opened(sealed.size() + 1, 0);
+  size_t sealed_len = 0;
+  size_t opened_len = 0;
+  ASSERT_EQ(gcm::encrypt_det(span_of(key192), span_of(plaintext), Bytes{nullptr, 0}, sealed.data(),
+                             &sealed_len),
+            Error::ok);
+  // When
+  const Error err = gcm::decrypt(span_of(key256), Bytes{sealed.data(), sealed_len},
+                                 Bytes{nullptr, 0}, opened.data(), &opened_len);
+  // Then
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+TEST(Aes192, GivenThreeSuitesOverOnePlaintext_WhenEncryptDet_ThenAllThreeEnvelopesDiffer) {
+  // Given: the shorter keys are the long one truncated, the shape a client bug makes
+  const std::vector<unsigned char> key256(gcm::kKeyLen256, 0x11);
+  const std::vector<unsigned char> key192(gcm::kKeyLen192, 0x11);
+  const std::vector<unsigned char> key128(gcm::kKeyLen128, 0x11);
+  const std::vector<unsigned char> plaintext = {'j', 'o', 'i', 'n'};
+  std::vector<unsigned char> a(gcm::encrypt_out_len(plaintext.size()), 0);
+  std::vector<unsigned char> b(a.size(), 0);
+  std::vector<unsigned char> c(a.size(), 0);
+  size_t la = 0;
+  size_t lb = 0;
+  size_t lc = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(key256), span_of(plaintext), Bytes{nullptr, 0}, a.data(), &la),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key192), span_of(plaintext), Bytes{nullptr, 0}, b.data(), &lb),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(key128), span_of(plaintext), Bytes{nullptr, 0}, c.data(), &lc),
+            Error::ok);
+  // Then: no pair joins, which is why the key length is part of the key's identity
+  EXPECT_NE(gcm_test::to_hex(a.data(), la), gcm_test::to_hex(b.data(), lb));
+  EXPECT_NE(gcm_test::to_hex(b.data(), lb), gcm_test::to_hex(c.data(), lc));
+  EXPECT_NE(gcm_test::to_hex(a.data(), la), gcm_test::to_hex(c.data(), lc));
+}
+
+// --- The reusable decrypt session (design A11) ----------------------------------------
+
+using SessionPtr = std::unique_ptr<gcm::DecryptSession, decltype(&gcm::decrypt_session_free)>;
+
+SessionPtr new_session() {
+  return SessionPtr(gcm::decrypt_session_new(), gcm::decrypt_session_free);
+}
+
+/* A sealed value for the session tests, produced by the per-call encrypt path. */
+struct Sealed {
+  Error err;
+  std::vector<unsigned char> envelope;
+};
+
+Sealed seal_random(const std::vector<unsigned char> &key,
+                   const std::vector<unsigned char> &plaintext,
+                   const std::vector<unsigned char> &aad) {
+  Sealed s{Error::openssl, std::vector<unsigned char>(gcm::encrypt_out_len(plaintext.size()), 0)};
+  size_t len = 0;
+  s.err =
+      gcm::encrypt_random(span_of(key), span_of(plaintext), span_of(aad), s.envelope.data(), &len);
+  s.envelope.resize(len);
+  return s;
+}
+
+/* Warms a session with one decryption under `key`, so the test's When is the *reused*
+   path — the second call, with the key schedule already in the context. */
+Error warm(gcm::DecryptSession *session, const std::vector<unsigned char> &key,
+           const Sealed &sealed, const std::vector<unsigned char> &aad) {
+  std::vector<unsigned char> out(gcm::decrypt_out_len(sealed.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  return gcm::decrypt_with_session(session, span_of(key), span_of(sealed.envelope), span_of(aad),
+                                   out.data(), &out_len);
+}
+
+/* One session shared across every vector of a suite, in file order. Keys, suites and
+   AAD change from one vector to the next, so the key switch is exercised hundreds of
+   times rather than once, and a bad-tag vector is followed by whatever comes next. */
+class SessionVector : public ::testing::TestWithParam<gcm_test::Vector> {
+ protected:
+  static void SetUpTestSuite() { shared = gcm::decrypt_session_new(); }
+  static void TearDownTestSuite() {
+    gcm::decrypt_session_free(shared);
+    shared = nullptr;
+  }
+  static gcm::DecryptSession *shared;
+};
+gcm::DecryptSession *SessionVector::shared = nullptr;
+
+class SessionOpenVector : public SessionVector {};
+
+TEST_P(SessionOpenVector, GivenSharedSession_WhenDecryptWithSession_ThenPlaintextMatches) {
+  // Given
+  const gcm_test::Vector &v = GetParam();
+  ASSERT_NE(shared, nullptr);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(v.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err = gcm::decrypt_with_session(shared, span_of(v.key), span_of(v.envelope),
+                                              span_of(v.aad), out.data(), &out_len);
+  // Then
+  ASSERT_EQ(err, Error::ok) << v.id;
+  EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
+            gcm_test::to_hex(v.plaintext.data(), v.plaintext.size()));
+}
+
+INSTANTIATE_TEST_SUITE_P(AllOk, SessionOpenVector,
+                         ::testing::ValuesIn(gcm_test::vectors_where("ok")),
+                         param_name<gcm_test::Vector>);
+
+class SessionBadTagVector : public SessionVector {};
+
+TEST_P(SessionBadTagVector, GivenSharedSession_WhenTamperedEnvelope_ThenBadTagAndOutputWiped) {
+  // Given
+  const gcm_test::Vector &v = GetParam();
+  ASSERT_NE(shared, nullptr);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(v.envelope.size()) + 1, 0xFF);
+  size_t out_len = 0;
+  // When
+  const Error err = gcm::decrypt_with_session(shared, span_of(v.key), span_of(v.envelope),
+                                              span_of(v.aad), out.data(), &out_len);
+  // Then
+  ASSERT_EQ(err, Error::bad_tag) << v.id;
+  EXPECT_TRUE(all_zero(out.data(), v.envelope.size() - gcm::kGcmOverhead)) << v.id;
+}
+
+INSTANTIATE_TEST_SUITE_P(SpecVectors, SessionBadTagVector,
+                         ::testing::ValuesIn(gcm_test::vectors_where("bad_tag")),
+                         param_name<gcm_test::Vector>);
+
+class SessionBadKeyLenVector : public SessionVector {};
+
+TEST_P(SessionBadKeyLenVector, GivenWrongKeyLength_WhenDecryptWithSession_ThenBadKeyLen) {
+  // Given
+  const gcm_test::Vector &v = GetParam();
+  ASSERT_NE(shared, nullptr);
+  std::vector<unsigned char> out(v.envelope.size() + 64, 0);
+  size_t out_len = 0;
+  // When
+  const Error err = gcm::decrypt_with_session(shared, span_of(v.key), span_of(v.envelope),
+                                              span_of(v.aad), out.data(), &out_len);
+  // Then
+  EXPECT_EQ(err, Error::bad_key_len) << v.id;
+}
+
+INSTANTIATE_TEST_SUITE_P(SpecVectors, SessionBadKeyLenVector,
+                         ::testing::ValuesIn(gcm_test::vectors_where("bad_key_len")),
+                         param_name<gcm_test::Vector>);
+
+class SessionBadEnvelopeVector : public SessionVector {};
+
+TEST_P(SessionBadEnvelopeVector, GivenMalformedEnvelope_WhenDecryptWithSession_ThenBadEnvelope) {
+  // Given
+  const gcm_test::Vector &v = GetParam();
+  ASSERT_NE(shared, nullptr);
+  std::vector<unsigned char> out(v.envelope.size() + 64, 0);
+  size_t out_len = 0;
+  // When
+  const Error err = gcm::decrypt_with_session(shared, span_of(v.key), span_of(v.envelope),
+                                              span_of(v.aad), out.data(), &out_len);
+  // Then
+  EXPECT_EQ(err, Error::bad_envelope) << v.id;
+}
+
+INSTANTIATE_TEST_SUITE_P(SpecVectors, SessionBadEnvelopeVector,
+                         ::testing::ValuesIn(gcm_test::vectors_where("bad_envelope")),
+                         param_name<gcm_test::Vector>);
+
+const std::vector<unsigned char> kSessionKeyA(gcm::kKeyLen256, 0xA1);
+const std::vector<unsigned char> kSessionKeyB(gcm::kKeyLen256, 0xB2);
+const std::vector<unsigned char> kSessionKey128(gcm::kKeyLen128, 0xC3);
+const std::vector<unsigned char> kSessionAad = {'c', 'o', 'l'};
+const std::vector<unsigned char> kSessionTextOne = {'h', 'o', 'n', 'g'};
+const std::vector<unsigned char> kSessionTextTwo = {'k', 'i', 'm'};
+
+TEST(DecryptSession,
+     GivenSessionWarmedWithKey_WhenSecondEnvelopeUnderSameKey_ThenPlaintextMatches) {
+  // Given: the key schedule is already in the context
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed first = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  const Sealed second = seal_random(kSessionKeyA, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(first.err, Error::ok);
+  ASSERT_EQ(second.err, Error::ok);
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, first, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(second.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When: the reused path — nonce only, no key schedule
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(kSessionKeyA), span_of(second.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then
+  ASSERT_EQ(err, Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
+            gcm_test::to_hex(kSessionTextTwo.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenWarmSession_WhenTagBitFlipped_ThenBadTagAndOutputWiped) {
+  // Given
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed first = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  Sealed tampered = seal_random(kSessionKeyA, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(first.err, Error::ok);
+  ASSERT_EQ(tampered.err, Error::ok);
+  tampered.envelope.back() ^= 0x01;
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, first, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(tampered.envelope.size()) + 1, 0xFF);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(kSessionKeyA), span_of(tampered.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then: nothing unauthenticated survives in the buffer
+  ASSERT_EQ(err, Error::bad_tag);
+  EXPECT_TRUE(all_zero(out.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenSessionAfterBadTag_WhenValidEnvelopeUnderSameKey_ThenPlaintextMatches) {
+  // Given: the previous call on this session failed verification
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  Sealed tampered = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  const Sealed valid = seal_random(kSessionKeyA, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(tampered.err, Error::ok);
+  ASSERT_EQ(valid.err, Error::ok);
+  tampered.envelope.back() ^= 0x01;
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, tampered, kSessionAad), Error::bad_tag);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(valid.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(kSessionKeyA), span_of(valid.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then: a failure does not poison the session
+  ASSERT_EQ(err, Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
+            gcm_test::to_hex(kSessionTextTwo.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenSessionWarmedWithKeyA_WhenEnvelopeUnderKeyB_ThenPlaintextMatches) {
+  // Given: key A is scheduled; the next row was written under key B
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed under_a = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  const Sealed under_b = seal_random(kSessionKeyB, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(under_a.err, Error::ok);
+  ASSERT_EQ(under_b.err, Error::ok);
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, under_a, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(under_b.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(kSessionKeyB), span_of(under_b.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then: the session re-scheduled for B rather than reusing A
+  ASSERT_EQ(err, Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
+            gcm_test::to_hex(kSessionTextTwo.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenSessionWarmedWithKeyA_WhenEnvelopeOfAOpenedWithKeyB_ThenBadTag) {
+  // Given: a stale schedule for A would make this succeed; the key compare must not
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed under_a = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  const Sealed under_a_again = seal_random(kSessionKeyA, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(under_a.err, Error::ok);
+  ASSERT_EQ(under_a_again.err, Error::ok);
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, under_a, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(under_a_again.envelope.size()) + 1, 0xFF);
+  size_t out_len = 0;
+  // When
+  const Error err = gcm::decrypt_with_session(session.get(), span_of(kSessionKeyB),
+                                              span_of(under_a_again.envelope), span_of(kSessionAad),
+                                              out.data(), &out_len);
+  // Then
+  ASSERT_EQ(err, Error::bad_tag);
+  EXPECT_TRUE(all_zero(out.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenSessionWarmedWithAes256_WhenEnvelopeUnderAes128_ThenPlaintextMatches) {
+  // Given: the suite changes between rows, not only the key bytes
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed under_256 = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  const Sealed under_128 = seal_random(kSessionKey128, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(under_256.err, Error::ok);
+  ASSERT_EQ(under_128.err, Error::ok);
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, under_256, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(under_128.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(kSessionKey128), span_of(under_128.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then
+  ASSERT_EQ(err, Error::ok);
+  EXPECT_EQ(gcm_test::to_hex(out.data(), out_len),
+            gcm_test::to_hex(kSessionTextTwo.data(), kSessionTextTwo.size()));
+}
+
+TEST(DecryptSession, GivenWarmSession_WhenKeyIsThirtyOneBytes_ThenBadKeyLen) {
+  // Given
+  SessionPtr session = new_session();
+  ASSERT_NE(session, nullptr);
+  const Sealed under_a = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  ASSERT_EQ(under_a.err, Error::ok);
+  ASSERT_EQ(warm(session.get(), kSessionKeyA, under_a, kSessionAad), Error::ok);
+  const std::vector<unsigned char> short_key(31, 0xA1);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(under_a.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(short_key), span_of(under_a.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then: rejected before any cipher work, whatever the session holds
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+TEST(DecryptSession, GivenNullSession_WhenDecryptWithSession_ThenOpensslError) {
+  // Given
+  const Sealed under_a = seal_random(kSessionKeyA, kSessionTextOne, kSessionAad);
+  ASSERT_EQ(under_a.err, Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(under_a.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(nullptr, span_of(kSessionKeyA), span_of(under_a.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then
+  EXPECT_EQ(err, Error::openssl);
+}
+
+TEST(UnsupportedSuite, GivenA23ByteKey_WhenEncryptRandom_ThenBadKeyLen) {
+  // Given: one byte short of AES-192, the boundary a folding implementation would blur
+  const std::vector<unsigned char> key(23, 0x44);
+  const std::vector<unsigned char> plaintext = {'z'};
+  std::vector<unsigned char> sealed(gcm::encrypt_out_len(plaintext.size()), 0);
+  size_t sealed_len = 0;
+  // When
+  const Error err = gcm::encrypt_random(span_of(key), span_of(plaintext), Bytes{nullptr, 0},
+                                        sealed.data(), &sealed_len);
+  // Then: never rounded to a neighbouring suite
+  EXPECT_EQ(err, Error::bad_key_len);
+}
+
+}  // namespace
+
+// --- What the decrypt session retains, observed through the test seam ------------------
+
+namespace {
+
+TEST(DecryptSession, GivenWarmSession_WhenValidEnvelopeOpened_ThenKeyIsRetained) {
+  // Given
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed sealed = seal_random(key, {0x01, 0x02, 0x03}, {});
+  ASSERT_EQ(sealed.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, sealed, {}), Error::ok);
+  // When
+  const Error err = warm(session.get(), key, sealed, {});
+  // Then
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_TRUE(gcm::decrypt_session_has_key(session.get()));
+}
+
+TEST(DecryptSession, GivenWarmSession_WhenTagBitFlipped_ThenKeyIsForgotten) {
+  // Given
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed sealed = seal_random(key, {0x01, 0x02, 0x03}, {});
+  ASSERT_EQ(sealed.err, Error::ok);
+  Sealed tampered = sealed;
+  tampered.envelope.back() ^= 0x01;
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, sealed, {}), Error::ok);
+  // When
+  const Error err = warm(session.get(), key, tampered, {});
+  // Then: a failed Final is never trusted for the next row
+  EXPECT_EQ(err, Error::bad_tag);
+  EXPECT_FALSE(gcm::decrypt_session_has_key(session.get()));
+}
+
+TEST(DecryptSession, GivenWarmSession_WhenKeyLengthIsWrong_ThenKeyIsRetained) {
+  // Given
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed sealed = seal_random(key, {0x01, 0x02, 0x03}, {});
+  ASSERT_EQ(sealed.err, Error::ok);
+  const std::vector<unsigned char> short_key(key.begin(), key.begin() + 31);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, sealed, {}), Error::ok);
+  // When
+  const Error err = warm(session.get(), short_key, sealed, {});
+  // Then: the pre-check rejects the row before the session is consulted, and the
+  //       schedule for the valid key stays for the next row
+  EXPECT_EQ(err, Error::bad_key_len);
+  EXPECT_TRUE(gcm::decrypt_session_has_key(session.get()));
+}
+
+TEST(DecryptSession, GivenFreshSession_WhenNothingOpened_ThenNoKeyIsHeld) {
+  // Given
+  SessionPtr session = new_session();
+  // When
+  const bool held = gcm::decrypt_session_has_key(session.get());
+  // Then
+  EXPECT_FALSE(held);
+}
+
+}  // namespace
+
+// --- Cache hits where something other than the key changes between rows -----------------
+
+namespace {
+
+TEST(DecryptSession, GivenWarmSessionWithAad_WhenNextRowHasNoAad_ThenPlaintextMatches) {
+  // Given: a row with AAD opened through the session, then a row sealed without AAD
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed with_aad = seal_random(key, kSessionTextOne, kSessionAad);
+  const Sealed without_aad = seal_random(key, kSessionTextTwo, {});
+  ASSERT_EQ(with_aad.err, Error::ok);
+  ASSERT_EQ(without_aad.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, with_aad, kSessionAad), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(without_aad.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When: the kept context opens the no-AAD row
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(key), span_of(without_aad.envelope),
+                                gcm::Bytes{nullptr, 0}, out.data(), &out_len);
+  // Then: nothing of the previous row's AAD is carried into this one
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), kSessionTextTwo);
+}
+
+TEST(DecryptSession, GivenWarmSessionWithoutAad_WhenNextRowHasAad_ThenPlaintextMatches) {
+  // Given
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed without_aad = seal_random(key, kSessionTextOne, {});
+  const Sealed with_aad = seal_random(key, kSessionTextTwo, kSessionAad);
+  ASSERT_EQ(without_aad.err, Error::ok);
+  ASSERT_EQ(with_aad.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, without_aad, {}), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(with_aad.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(key), span_of(with_aad.envelope),
+                                span_of(kSessionAad), out.data(), &out_len);
+  // Then
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), kSessionTextTwo);
+}
+
+TEST(DecryptSession, GivenWarmSessionOnShortRow_WhenNextRowIsLonger_ThenPlaintextMatches) {
+  // Given: a 3-byte row, then a 300-byte row under the same key
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const std::vector<unsigned char> longer(300, 0x5A);
+  const Sealed short_row = seal_random(key, kSessionTextTwo, {});
+  const Sealed long_row = seal_random(key, longer, {});
+  ASSERT_EQ(short_row.err, Error::ok);
+  ASSERT_EQ(long_row.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, short_row, {}), Error::ok);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(long_row.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When
+  const Error err =
+      gcm::decrypt_with_session(session.get(), span_of(key), span_of(long_row.envelope),
+                                gcm::Bytes{nullptr, 0}, out.data(), &out_len);
+  // Then: the message length counters of the previous row are gone with its nonce
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), longer);
+}
+
+}  // namespace
+
+// --- A rebuild that fails part-way leaves no key material (fault injection) -------------
+
+namespace {
+
+class RebuildFault : public ::testing::TestWithParam<int> {};
+
+TEST_P(RebuildFault, GivenWarmSessionAndAKeyChange_WhenRebuildFailsAtStep_ThenNothingIsRetained) {
+  // Given: a session warmed under key A, and a row under key B whose rebuild will fail at
+  //        this step after the real OpenSSL call succeeded
+  const std::vector<unsigned char> key_a(kSessionKeyA.begin(), kSessionKeyA.end());
+  const std::vector<unsigned char> key_b(gcm::kKeyLen256, 0xB2);
+  const Sealed under_a = seal_random(key_a, kSessionTextOne, {});
+  const Sealed under_b = seal_random(key_b, kSessionTextTwo, {});
+  ASSERT_EQ(under_a.err, Error::ok);
+  ASSERT_EQ(under_b.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key_a, under_a, {}), Error::ok);
+  gcm::fault_inject_decrypt_init(GetParam());
+  // When
+  const Error err = warm(session.get(), key_b, under_b, {});
+  // Then: an error, and neither the copy nor a scheduled context survives it
+  EXPECT_EQ(err, Error::openssl);
+  EXPECT_FALSE(gcm::decrypt_session_has_key(session.get()));
+}
+
+INSTANTIATE_TEST_SUITE_P(Steps, RebuildFault, ::testing::Values(1, 2, 3));
+
+TEST(RebuildFault, GivenOneFailedRebuild_WhenTheNextRowArrives_ThenTheSessionStillWorks) {
+  // Given: a first open whose key-and-nonce step fails after scheduling the key. This pins that
+  //        one fault does not break the session; that the fault leaves no key material is the
+  //        parameterised case above.
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed sealed = seal_random(key, kSessionTextOne, {});
+  ASSERT_EQ(sealed.err, Error::ok);
+  SessionPtr session = new_session();
+  gcm::fault_inject_decrypt_init(3);
+  ASSERT_EQ(warm(session.get(), key, sealed, {}), Error::openssl);
+  std::vector<unsigned char> out(gcm::decrypt_out_len(sealed.envelope.size()) + 1, 0);
+  size_t out_len = 0;
+  // When: the next row, same key
+  const Error err = gcm::decrypt_with_session(session.get(), span_of(key), span_of(sealed.envelope),
+                                              gcm::Bytes{nullptr, 0}, out.data(), &out_len);
+  // Then: it rebuilds from scratch and opens, and the session holds the key again
+  EXPECT_EQ(err, Error::ok);
+  EXPECT_EQ(std::vector<unsigned char>(out.begin(), out.begin() + out_len), kSessionTextOne);
+  EXPECT_TRUE(gcm::decrypt_session_has_key(session.get()));
+}
+
+}  // namespace
+
+namespace {
+
+TEST(RebuildFault, GivenWarmSession_WhenTheNonceOnlyReinitFails_ThenNothingIsRetained) {
+  // Given: a session holding key A's schedule, and the next same-key row's nonce-only init
+  //        failing after the real call succeeded
+  const std::vector<unsigned char> key(kSessionKeyA.begin(), kSessionKeyA.end());
+  const Sealed first = seal_random(key, kSessionTextOne, {});
+  const Sealed second = seal_random(key, kSessionTextTwo, {});
+  ASSERT_EQ(first.err, Error::ok);
+  ASSERT_EQ(second.err, Error::ok);
+  SessionPtr session = new_session();
+  ASSERT_EQ(warm(session.get(), key, first, {}), Error::ok);
+  gcm::fault_inject_decrypt_init(4);
+  // When
+  const Error err = warm(session.get(), key, second, {});
+  // Then
+  EXPECT_EQ(err, Error::openssl);
+  EXPECT_FALSE(gcm::decrypt_session_has_key(session.get()));
 }
 
 }  // namespace

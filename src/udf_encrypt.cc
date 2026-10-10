@@ -15,8 +15,20 @@ using gcm::Bytes;
 using gcm::Error;
 using gcm::UdfState;
 
-using EncryptFn = Error (*)(Bytes key, Bytes plaintext, Bytes aad, unsigned char *out,
-                            size_t *out_len);
+using EncryptFn = Error (*)(UdfState *state, Bytes key, Bytes plaintext, Bytes aad,
+                            unsigned char *out, size_t *out_len);
+
+Error seal_random(UdfState *, Bytes key, Bytes plaintext, Bytes aad, unsigned char *out,
+                  size_t *out_len) {
+  return gcm::encrypt_random(key, plaintext, aad, out, out_len);
+}
+
+/* design A11: the nonce_key is cached in the UDF item's state across rows and
+   re-derived only when the key bytes change. */
+Error seal_det(UdfState *state, Bytes key, Bytes plaintext, Bytes aad, unsigned char *out,
+               size_t *out_len) {
+  return gcm::encrypt_det_with_session(&state->det, key, plaintext, aad, out, out_len);
+}
 
 bool encrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *msg, const char *usage,
                   bool deterministic) {
@@ -59,6 +71,20 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   const Bytes key = gcm::arg_bytes(args, 1);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
 
+  /* design A10: the suite follows the key length, so a key that was truncated in
+     transit is a *valid* key for a weaker suite and would seal successfully. The
+     floor is what puts that check back, and it is an encryption-side policy — a
+     SQL policy, so it lives here and not in the core (architecture rule §2).
+     gcm_decrypt deliberately does not consult it. */
+  /* Only for a key whose length a suite actually has. A 5-byte key is not a
+     policy violation, it is not a key — letting the floor answer first would
+     report "below gcm.min_key_bytes" for a length no setting could ever allow. */
+  if (gcm::suite_for_key_len(key.size) != nullptr && key.size < state->min_key_bytes) {
+    gcm::raise_below_floor(func, key.size, state->min_key_bytes);
+    *error = 1;
+    return nullptr;
+  }
+
   /* Checked before the envelope size is computed, so that addition cannot wrap. */
   if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);
@@ -73,7 +99,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   }
 
   size_t out_len = 0;
-  const Error err = seal(key, plaintext, aad, state->out, &out_len);
+  const Error err = seal(state, key, plaintext, aad, state->out, &out_len);
   if (err != Error::ok) {
     /* Encryption failures are always errors — gcm.strict only governs tag
        verification (spec/envelope.md §4). */
@@ -99,7 +125,7 @@ bool gcm_encrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
 
 char *gcm_encrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *length,
                       unsigned char *is_null, unsigned char *error) {
-  return encrypt_row("gcm_encrypt", gcm::encrypt_random, initid, args, length, is_null, error);
+  return encrypt_row("gcm_encrypt", seal_random, initid, args, length, is_null, error);
 }
 
 void gcm_encrypt_deinit(UDF_INIT *initid) { gcm::free_state(initid); }
@@ -113,7 +139,7 @@ bool gcm_encrypt_det_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
    MUST NOT be used for free text (spec/envelope.md §2.2). */
 char *gcm_encrypt_det_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *length,
                           unsigned char *is_null, unsigned char *error) {
-  return encrypt_row("gcm_encrypt_det", gcm::encrypt_det, initid, args, length, is_null, error);
+  return encrypt_row("gcm_encrypt_det", seal_det, initid, args, length, is_null, error);
 }
 
 void gcm_encrypt_det_deinit(UDF_INIT *initid) { gcm::free_state(initid); }

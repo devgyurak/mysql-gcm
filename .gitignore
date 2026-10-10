@@ -14,3 +14,6 @@ load-result.json
 # genuinely local belongs in .claude/settings.local.json, excluded below.
 !.claude/
 .claude/settings.local.json
+
+# Agent worktrees are checkouts of this repository, never content of it.
+.claude/worktrees/

@@ -29,30 +29,24 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # caches the configured tree — a cold server build is expensive (ci-release skill).
 container="${GCM_MTR_CONTAINER:-gcm-mtr-${ver}}"
 
-# shellcheck disable=SC2034  # src_sha256 and toolset are read for the shared parser
-read -r src_version src_sha256 toolset <<<"$(
-  python3 - "${root}/docker/versions.json" "${ver}" <<'PY'
-import json, sys
-
-path, major = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8") as fh:
-    versions = json.load(fh)
-if major not in versions:
-    sys.exit(f"unknown MySQL major {major!r}; known: {', '.join(versions)}")
-print(versions[major]["source"], versions[major]["source_sha256"], versions[major]["rhel9_toolset"])
-PY
-)"
-image="mysql-gcm-build:${ver}-${src_version}"
+# Two images can serve this. `mtr` already holds a compiled server, which is what the
+# CI job pulls; `build` only has a configured tree and means compiling it here. The
+# whole point of the first is that the server build is the job: the suite itself runs
+# in about 16 seconds, against roughly an hour of cmake (measured).
+mtr_image="$("${root}/scripts/image-ref.sh" "${ver}" mtr || true)"
+if [ -n "${mtr_image}" ]; then
+  image="${mtr_image}"
+  prebuilt=1
+else
+  image="$("${root}/scripts/image-ref.sh" "${ver}" build)"
+  prebuilt=0
+fi
 
 if [ "${ver}" != "8.4" ]; then
   echo "warning: the committed .result files were recorded against 8.4;" >&2
   echo "         expect diffs on ${ver} (see the comment at the top of this script)" >&2
 fi
 
-if ! docker image inspect "${image}" >/dev/null 2>&1; then
-  echo "build image missing; run scripts/build-in-docker.sh ${ver} first" >&2
-  exit 1
-fi
 
 # A long-lived container so the compiled server survives between runs.
 if ! docker inspect "${container}" >/dev/null 2>&1; then
@@ -74,11 +68,22 @@ docker exec "${container}" sh -c 'rm -f "${MYSQL_SRC}/components/gcm/AGENTS.md"'
 
 # group_replication is not built: its xcom sources need a generated XDR header that is
 # expensive to produce and the gcm suite never touches it.
-docker exec "${container}" sh -c '
-  set -eu
-  cmake -S "${MYSQL_SRC}" -B "${MYSQL_BUILD}" -DWITHOUT_GROUP_REPLICATION=1 >/dev/null
-  cmake --build "${MYSQL_BUILD}" -- -j "${GCM_MTR_JOBS:-3}"
-'
+# A prebuilt image already carries the server, so only the component is compiled --
+# the gcm sources changed, the server did not. Without one the whole tree is built,
+# which is the hour the mtr image exists to remove.
+if [ "${prebuilt}" = "1" ]; then
+  docker exec "${container}" sh -c '
+    set -eu
+    cmake -S "${MYSQL_SRC}" -B "${MYSQL_BUILD}" -DWITHOUT_GROUP_REPLICATION=1 >/dev/null
+    cmake --build "${MYSQL_BUILD}" --target component_gcm -- -j "${GCM_MTR_JOBS:-3}"
+  '
+else
+  docker exec "${container}" sh -c '
+    set -eu
+    cmake -S "${MYSQL_SRC}" -B "${MYSQL_BUILD}" -DWITHOUT_GROUP_REPLICATION=1 >/dev/null
+    cmake --build "${MYSQL_BUILD}" -- -j "${GCM_MTR_JOBS:-3}"
+  '
+fi
 
 record=""
 if [ "${GCM_RECORD:-0}" = "1" ]; then

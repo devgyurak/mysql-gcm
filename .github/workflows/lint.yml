@@ -18,6 +18,8 @@ jobs:
       # would otherwise be split into two arguments and silently skipped.
       - run: |
           git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
+                         'tests/bench/*.cc' 'tests/bench/*.h' \
+                         'tests/adapter/*.cc' 'tests/adapter/*.h' \
             | xargs -0 clang-format-18 --dry-run --Werror
   python:
     runs-on: ubuntu-24.04
@@ -26,8 +28,14 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: pip install ruff mypy -r scripts/requirements.txt && ruff check . && ruff format --check .
-      - run: mypy --strict scripts/gen-vectors.py scripts/import-nist.py scripts/check-architecture.py scripts/check-action-pins.py
-      - run: pip install PyMySQL types-PyMySQL && mypy --strict tests/load/run.py tests/e2e/runner.py tests/e2e/scenarios/ scripts/check-architecture.py
+      - run: mypy --strict scripts/gen-vectors.py scripts/import-nist.py scripts/check-architecture.py scripts/check-action-pins.py scripts/test_check_architecture.py
+      - run: pip install PyMySQL types-PyMySQL && mypy --strict tests/load/ tests/e2e/runner.py tests/e2e/scenarios/ scripts/check-architecture.py
+      - run: python -m unittest discover -s tests/load -p 'test_*.py'
+      - run: python -m unittest discover -s scripts -p 'test_*.py'
+      # The README chart must match its committed data; the redraw is byte-identical across
+      # platforms because the font is matplotlib's bundled DejaVu Sans, drawn as outlines.
+      - run: pip install -r scripts/requirements-docs.txt && python scripts/plot-perf.py --check
+      - run: python -m unittest discover -s tests/bench -p 'test_*.py'
       - run: python3 scripts/check-architecture.py
   agents-sync:
     runs-on: ubuntu-24.04

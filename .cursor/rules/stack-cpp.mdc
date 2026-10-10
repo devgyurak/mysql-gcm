@@ -1,5 +1,5 @@
 ---
-description: "C++ / CMake / OpenSSL 관례"
+description: "C++ / CMake / OpenSSL conventions"
 globs: "src/**, tests/unit/**, **/*.cc, **/*.h"
 alwaysApply: false
 ---

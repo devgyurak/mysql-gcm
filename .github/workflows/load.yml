@@ -2,7 +2,16 @@ name: load
 on:
   schedule: [{ cron: "0 18 * * *" }]   # 03:00 KST nightly
   workflow_dispatch:
-    inputs: { rows: { default: "300000" } }
+    inputs:
+      rows: { default: "300000" }
+      # The nightly measures AES-256, the default and the recommendation. The other two
+      # suites are measured on dispatch, against the same aes-256-cbc baseline, so their
+      # ratios are comparable with the nightly's.
+      suite:
+        description: "GCM suite for the encrypted column"
+        type: choice
+        options: [aes256, aes192, aes128]
+        default: aes256
 permissions: { contents: read }
 jobs:
   load:
@@ -20,8 +29,8 @@ jobs:
           docker cp build/8.4/component_gcm.so "mysql-dev-8.4:${dir}component_gcm.so"
           docker exec mysql-dev-8.4 mysql -uroot -e "INSTALL COMPONENT 'file://component_gcm'"
           echo "MYSQL_PORT=$(docker port mysql-dev-8.4 3306/tcp | head -1 | cut -d: -f2)" >> "$GITHUB_ENV"
-      - run: pip install PyMySQL && python tests/load/run.py --rows "${{ inputs.rows || '300000' }}" --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json --out load-result.json
+      - run: pip install PyMySQL && python tests/load/run.py --rows "${{ inputs.rows || '300000' }}" --suite "${{ inputs.suite || 'aes256' }}" --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json --out load-result.json
         env: { MYSQL_HOST: "127.0.0.1" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
-        with: { name: load-result, path: load-result.json }
+        with: { name: "load-result-${{ inputs.suite || 'aes256' }}", path: load-result.json }

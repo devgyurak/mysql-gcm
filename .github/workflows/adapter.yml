@@ -1,0 +1,67 @@
+name: adapter
+# The component's install and uninstall paths, driven against stub services (tests/adapter).
+#
+# This is the layer the project was missing. `unit` covers the server-independent core, `smoke`
+# and `mtr` cover SQL behaviour against a real server, and nothing covered registration order,
+# rollback, or what happens to the fetched algorithms when a rollback is refused — the code where
+# two defects escaped and were caught by review rather than by a test.
+#
+# A matrix over all three majors, not one: `component.cc` and `sysvar.cc` compile different code
+# per version behind `GCM_HAS_SESSION_SYSVAR`, and the set of services the stubs have to provide
+# changes with it.
+#
+# It runs in the build image because these sources include server headers, so it needs a
+# configured MySQL tree. build-in-docker.sh resolves that image through scripts/image-ref.sh:
+# local, then a GHCR pull when images.yml has published the tag, then a local build. The local
+# build is the path a PR that changes docker/** takes, and it is measured rather than assumed:
+# the `smoke` jobs, which do image build plus component build plus a server round trip, took
+# 2m52s to 3m27s on 2026-10-02. This job is that minus the server and plus a few seconds of
+# tests.
+#
+# Deliberately **not** a required check, and not a candidate for becoming one while it is
+# path-filtered. A required check that does not report blocks the merge button indefinitely, and a
+# filtered workflow does not report on a pull request that misses the filter — a documentation-only
+# PR, for instance. Having run once on `develop` does not change that; the filter is evaluated per
+# pull request. This is the constraint stack-ci-docker states, and `mtr` and `compose` sit outside
+# the required list for the same reason. Making it required would mean giving it a job that always
+# reports, which is a different design and not obviously worth it.
+on:
+  pull_request:
+    paths: &adapter_paths
+      - "src/**"
+      - "tests/adapter/**"
+      - "scripts/adapter-tests.sh"
+      - "scripts/build-in-docker.sh"
+      - "docker/**"
+      - ".github/workflows/adapter.yml"
+  push:
+    branches: [main, develop]
+    paths: *adapter_paths
+permissions: { contents: read, packages: read }
+# A new push supersedes the run before it; see integration.yml for why. Pushes to main and
+# develop are never cancelled — they are the gate on the branch, not a preview of it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  lifecycle:
+    strategy: { fail-fast: false, matrix: { mysql: ["8.0", "8.4", "9"] } }
+    runs-on: ubuntu-24.04
+    env:
+      GCM_REGISTRY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # adapter-tests.sh deliberately refuses to build the image, the same split mtr.sh uses:
+      # building it is expensive and build-in-docker.sh owns it.
+      - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
+      - run: scripts/adapter-tests.sh "${{ matrix.mysql }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: "adapter-${{ matrix.mysql }}"
+          path: "build/adapter-${{ matrix.mysql }}/Testing/"

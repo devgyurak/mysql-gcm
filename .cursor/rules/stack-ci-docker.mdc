@@ -1,5 +1,5 @@
 ---
-description: "CI · Docker · 스크립트 관례"
+description: "CI · Docker · script conventions"
 globs: ".github/**, docker/**, scripts/**, tests/e2e/compose*.yml"
 alwaysApply: false
 ---

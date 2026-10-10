@@ -1,5 +1,5 @@
 ---
-description: "아키텍처 — 책임·의존 방향·자원 수명"
+description: "Architecture — responsibilities, dependency direction, resource lifetimes"
 globs: "src/**, tests/**, mysql-test/**, spec/**, docs/design.md, **/CMakeLists.txt, scripts/check-architecture.py, .github/**"
 alwaysApply: false
 ---

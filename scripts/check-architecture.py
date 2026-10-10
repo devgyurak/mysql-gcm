@@ -12,7 +12,7 @@ CORE_HEADERS = {
     "envelope": {"envelope.h"},
 }
 STANDARD_HEADERS = {"climits", "cstddef", "cstring", "memory"}
-TEST_SEAMS = {"encrypt_with_nonce"}
+TEST_SEAMS = {"encrypt_with_nonce", "decrypt_session_has_key", "fault_inject_decrypt_init"}
 TOKENS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/')
 
 
@@ -54,6 +54,45 @@ def check(root: Path) -> list[str]:
                     problems.append(
                         f"{path.relative_to(root)}:{number}: test seam in server adapter: {seam}"
                     )
+    problems += fault_macro_problems(root)
+    return problems
+
+
+FAULT_MACRO = "GCM_FAULT_INJECTION"
+# The only uses a source file may make of the macro: testing whether it is defined.
+FAULT_MACRO_TEST = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef|elif|endif)\b")
+
+
+def fault_macro_problems(root: Path) -> list[str]:
+    """The fault seam must only ever be compiled into tests/unit.
+
+    Defining GCM_FAULT_INJECTION anywhere the component is built from -- a #define in a
+    header or source file, a compile definition in CMake, a flag in a docker script --
+    would ship an injection point in the .so. Source files may *test* the macro
+    (#ifdef / #if defined / #endif); every other mention under src/ and docker/ is
+    refused, comments excepted. Judged per line, not per file type, so a #define in a
+    header is caught as surely as one in CMakeLists.txt.
+    """
+    problems: list[str] = []
+    for path in [*sorted((root / "src").rglob("*")), *sorted((root / "docker").rglob("*"))]:
+        if not path.is_file() or path.suffix == ".png":
+            continue
+        text = path.read_text(errors="ignore")
+        is_source = path.suffix in {".h", ".cc"}
+        if is_source:
+            text = without_comments(text)
+        for number, line in enumerate(text.splitlines(), 1):
+            if FAULT_MACRO not in line:
+                continue
+            if is_source and FAULT_MACRO_TEST.match(line):
+                continue
+            # CMake, shell and Dockerfile comments start with '#'; a source line starting
+            # with '#' is a directive and is judged above, not skipped here.
+            if not is_source and line.lstrip().startswith("#"):
+                continue
+            problems.append(
+                f"{path.relative_to(root)}:{number}: {FAULT_MACRO} defined outside tests"
+            )
     return problems
 
 

@@ -25,8 +25,10 @@
 -- safe on every major is a *materialised* value — a column, a literal, a user
 -- variable or a bound parameter — which is how an application calls these
 -- functions anyway. Wrapping in CAST is NOT a general fix: on 8.4 it fails at a
--- 16-byte plaintext, a String reallocation boundary. Scenario 3 pins the safe
--- shapes; docs/ops-constraints.md and README carry the constraint.
+-- 16-byte plaintext, a String reallocation boundary. Neither is a *derived* table,
+-- which the default derived_merge=on folds back into the outer query: scenario 4
+-- pins that. Scenario 3 pins the safe shapes; docs/ops-constraints.md and README
+-- carry the constraint.
 --
 -- The assertions are booleans, so this file records "is the server still wrong"
 -- instead of baking in corrupted bytes. A 0 turning into a 1 means that server
@@ -65,4 +67,28 @@ FROM ready r ORDER BY r.id;
 SELECT '# Then: all 1 on every major — a column, a literal or a variable is always';
 SELECT '#       safe, and that is what an application with bound parameters sends (above)';
 DROP TEMPORARY TABLE ready;
+
+SELECT '# Scenario 4 — Given: the same computed expression wrapped in a derived table';
+-- A derived table was documented as a way to materialise the value, and it is not one.
+-- `derived_merge=on` is the default, so the optimizer merges the derived table's expression
+-- back into the outer query and the argument is computed per row after all — which is the
+-- defect, reached through the workaround that was supposed to avoid it.
+--
+-- The three sub-cases are the same query three ways, so the .expected files record which of
+-- them a given server actually protects. Forcing materialisation works, by hint or by
+-- optimizer_switch, but both are the optimizer's discretion; a real table is not. That is why
+-- the constraint now says "a real table" and this case exists to keep it honest.
+SELECT '# When: it is read merged, with NO_MERGE, and with derived_merge=off';
+SELECT d.id, gcm_decrypt(gcm_encrypt_det(v, @k), @k) = v AS merged
+FROM (SELECT id, CONCAT(nm, id) AS v FROM defect) d ORDER BY d.id;
+SELECT /*+ NO_MERGE(d) */ d.id, gcm_decrypt(gcm_encrypt_det(v, @k), @k) = v AS no_merge_hint
+FROM (SELECT id, CONCAT(nm, id) AS v FROM defect) d ORDER BY d.id;
+SET @saved_switch = @@SESSION.optimizer_switch;
+SET SESSION optimizer_switch = 'derived_merge=off';
+SELECT d.id, gcm_decrypt(gcm_encrypt_det(v, @k), @k) = v AS derived_merge_off
+FROM (SELECT id, CONCAT(nm, id) AS v FROM defect) d ORDER BY d.id;
+SET SESSION optimizer_switch = @saved_switch;
+SELECT '# Then: on 8.4 the merged form corrupts rows 2 and 3 while both forced-materialisation';
+SELECT '#       forms are correct — so a derived table is not a workaround (above)';
+
 DROP TEMPORARY TABLE defect;

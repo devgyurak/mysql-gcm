@@ -20,6 +20,6 @@
 --- errors, in statement order ---
 ERROR 1123 (HY000) at line 14: Can't initialize function 'gcm_encrypt'; gcm_encrypt(plaintext, key [, aad]) needs 2 or 3 arguments
 ERROR 1123 (HY000) at line 19: Can't initialize function 'gcm_decrypt'; gcm_decrypt(ciphertext, key [, aad]) needs 2 or 3 arguments
-ERROR 3200 (HY000) at line 24: gcm_encrypt UDF failed; key must be exactly 32 bytes, got 5
-ERROR 3200 (HY000) at line 29: gcm_decrypt UDF failed; key must be exactly 32 bytes, got 31
-ERROR 3200 (HY000) at line 34: gcm_encrypt_det UDF failed; key must be exactly 32 bytes, got 33
+ERROR 3200 (HY000) at line 24: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 5
+ERROR 3200 (HY000) at line 29: gcm_decrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 31
+ERROR 3200 (HY000) at line 34: gcm_encrypt_det UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 33

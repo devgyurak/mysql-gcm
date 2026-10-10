@@ -4,6 +4,7 @@
 
 #include "nonce.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <random>
 #include <set>
@@ -102,7 +103,7 @@ TEST(DetNonce, GivenTheLabel_WhenRead_ThenItIsTheSpecString) {
 
 TEST(DetNonce, GivenSameKeyAndPlaintext_WhenDerivedTwice_ThenIdentical) {
   // Given
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x2A);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x2A);
   const std::vector<unsigned char> plaintext = {'h', 'e', 'l', 'l', 'o'};
   unsigned char first[gcm::kNonceLen] = {0};
   unsigned char second[gcm::kNonceLen] = {0};
@@ -115,7 +116,7 @@ TEST(DetNonce, GivenSameKeyAndPlaintext_WhenDerivedTwice_ThenIdentical) {
 
 TEST(DetNonce, GivenDifferentPlaintexts_WhenDerived_ThenNoncesDiffer) {
   // Given
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x2A);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x2A);
   const std::vector<unsigned char> a = {'a'};
   const std::vector<unsigned char> b = {'b'};
   unsigned char na[gcm::kNonceLen] = {0};
@@ -129,8 +130,8 @@ TEST(DetNonce, GivenDifferentPlaintexts_WhenDerived_ThenNoncesDiffer) {
 
 TEST(DetNonce, GivenDifferentKeys_WhenDerivedForSamePlaintext_ThenNoncesDiffer) {
   // Given
-  const std::vector<unsigned char> key_a(gcm::kKeyLen, 0x01);
-  const std::vector<unsigned char> key_b(gcm::kKeyLen, 0x02);
+  const std::vector<unsigned char> key_a(gcm::kKeyLen256, 0x01);
+  const std::vector<unsigned char> key_b(gcm::kKeyLen256, 0x02);
   const std::vector<unsigned char> plaintext = {'x'};
   unsigned char na[gcm::kNonceLen] = {0};
   unsigned char nb[gcm::kNonceLen] = {0};
@@ -141,10 +142,77 @@ TEST(DetNonce, GivenDifferentKeys_WhenDerivedForSamePlaintext_ThenNoncesDiffer) 
   EXPECT_NE(gcm_test::to_hex(na, sizeof(na)), gcm_test::to_hex(nb, sizeof(nb)));
 }
 
+/* The property issue #22 asks a reviewer to decide on, pinned so that a change to it is visible:
+   HMAC zero-pads a key shorter than its 64-byte block (RFC 2104 §2), so a key and the same key
+   followed by zero bytes are the same HMAC key. Where both lengths are suite lengths, the two keys
+   derive the same nonce_key and therefore the same deterministic nonce for a given plaintext.
+   (short length, long length) pairs that a suite can hold. */
+struct ZeroExtension {
+  size_t short_len;
+  size_t long_len;
+};
+
+class CrossSuiteZeroExtension : public ::testing::TestWithParam<ZeroExtension> {};
+
+TEST_P(CrossSuiteZeroExtension, GivenAKeyAndItsZeroExtension_WhenNonceKeysDerived_ThenIdentical) {
+  // Given: a short key, and the same bytes followed by zeros to the next suite length
+  const ZeroExtension pair = GetParam();
+  std::vector<unsigned char> short_key(pair.short_len, 0x5A);
+  std::vector<unsigned char> long_key(pair.long_len, 0x00);
+  std::copy(short_key.begin(), short_key.end(), long_key.begin());
+  unsigned char nk_short[gcm::kHmacLen] = {0};
+  unsigned char nk_long[gcm::kHmacLen] = {0};
+  // When
+  ASSERT_EQ(gcm::derive_nonce_key(span_of(short_key), nk_short), Error::ok);
+  ASSERT_EQ(gcm::derive_nonce_key(span_of(long_key), nk_long), Error::ok);
+  // Then: one nonce_key, so the suites are not separated for this pair
+  EXPECT_EQ(gcm_test::to_hex(nk_short, sizeof(nk_short)),
+            gcm_test::to_hex(nk_long, sizeof(nk_long)));
+}
+
+TEST_P(CrossSuiteZeroExtension,
+       GivenAKeyAndItsZeroExtension_WhenSealedDet_ThenNoncesMatchAndCiphertextsDiffer) {
+  // Given
+  const ZeroExtension pair = GetParam();
+  std::vector<unsigned char> short_key(pair.short_len, 0x5A);
+  std::vector<unsigned char> long_key(pair.long_len, 0x00);
+  std::copy(short_key.begin(), short_key.end(), long_key.begin());
+  const std::vector<unsigned char> plaintext = {'h', 'o', 'n', 'g'};
+  std::vector<unsigned char> env_short(gcm::encrypt_out_len(plaintext.size()));
+  std::vector<unsigned char> env_long(gcm::encrypt_out_len(plaintext.size()));
+  size_t len_short = 0;
+  size_t len_long = 0;
+  // When
+  ASSERT_EQ(gcm::encrypt_det(span_of(short_key), span_of(plaintext), gcm::Bytes{nullptr, 0},
+                             env_short.data(), &len_short),
+            Error::ok);
+  ASSERT_EQ(gcm::encrypt_det(span_of(long_key), span_of(plaintext), gcm::Bytes{nullptr, 0},
+                             env_long.data(), &len_long),
+            Error::ok);
+  // Then: the stored nonces are equal, which is what links the two columns; the AES keys
+  //       differ, so the ciphertext and tag differ and this is not a nonce reuse under one key
+  const auto nonce_of = [](const std::vector<unsigned char> &e) {
+    return gcm_test::to_hex(e.data() + gcm::kVersionLen, gcm::kNonceLen);
+  };
+  const auto body_of = [](const std::vector<unsigned char> &e, size_t len) {
+    return gcm_test::to_hex(e.data() + gcm::kVersionLen + gcm::kNonceLen,
+                            len - gcm::kVersionLen - gcm::kNonceLen);
+  };
+  EXPECT_EQ(nonce_of(env_short), nonce_of(env_long));
+  EXPECT_NE(body_of(env_short, len_short), body_of(env_long, len_long));
+  EXPECT_NE(env_short[0], env_long[0]);
+}
+
+INSTANTIATE_TEST_SUITE_P(SuitePairs, CrossSuiteZeroExtension,
+                         ::testing::Values(ZeroExtension{gcm::kKeyLen128, gcm::kKeyLen192},
+                                           ZeroExtension{gcm::kKeyLen128, gcm::kKeyLen256},
+                                           ZeroExtension{gcm::kKeyLen192, gcm::kKeyLen256}));
+
 class BadKeyLen : public ::testing::TestWithParam<size_t> {};
 
 TEST_P(BadKeyLen, GivenKeyOfWrongLength_WhenDeriveNonceKey_ThenBadKeyLen) {
-  // Given: any length but 32; never folded or padded (design A1)
+  // Given: a length no suite has; never folded or padded (design A1, A10).
+  // 16, 24 and 32 are all valid keys now, so what is left brackets each of them.
   const std::vector<unsigned char> key(GetParam(), 0x11);
   unsigned char out[gcm::kHmacLen] = {0};
   // When
@@ -153,7 +221,8 @@ TEST_P(BadKeyLen, GivenKeyOfWrongLength_WhenDeriveNonceKey_ThenBadKeyLen) {
   EXPECT_EQ(err, Error::bad_key_len);
 }
 
-INSTANTIATE_TEST_SUITE_P(Lengths, BadKeyLen, ::testing::Values(0u, 1u, 16u, 31u, 33u, 64u),
+INSTANTIATE_TEST_SUITE_P(Lengths, BadKeyLen,
+                         ::testing::Values(0u, 1u, 15u, 17u, 23u, 25u, 31u, 33u, 64u),
                          [](const ::testing::TestParamInfo<size_t> &info) {
                            return "len" + std::to_string(info.param);
                          });
@@ -162,7 +231,7 @@ INSTANTIATE_TEST_SUITE_P(Lengths, BadKeyLen, ::testing::Values(0u, 1u, 16u, 31u,
    The loop lives here and not in the test body (testing rule); the seed is fixed so
    a failure is reproducible. */
 std::set<std::string> distinct_nonces(size_t n) {
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x5C);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x5C);
   std::mt19937_64 rng(20260928);
   std::set<std::string> seen;
   for (size_t i = 0; i < n; ++i) {
@@ -188,7 +257,7 @@ TEST(DetNonce, GivenManyDistinctPlaintexts_WhenDerived_ThenNoNonceCollision) {
 
 TEST(Hmac, GivenEmptyMessage_WhenHmacSha256_ThenSucceedsWithFullLength) {
   // Given: empty plaintext is legal and must not hit a null-pointer path
-  const std::vector<unsigned char> key(gcm::kKeyLen, 0x33);
+  const std::vector<unsigned char> key(gcm::kKeyLen256, 0x33);
   unsigned char out[gcm::kHmacLen] = {0};
   // When
   const Error err = gcm::hmac_sha256(span_of(key), Bytes{nullptr, 0}, out);

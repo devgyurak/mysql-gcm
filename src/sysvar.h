@@ -11,6 +11,8 @@
 #ifndef MYSQL_GCM_SYSVAR_H
 #define MYSQL_GCM_SYSVAR_H
 
+#include <cstddef>
+
 #include <mysql_version.h>
 
 #ifndef MYSQL_VERSION_ID
@@ -21,8 +23,18 @@
 
 namespace gcm {
 
-/* MySQL service convention: true means failure. */
-bool sysvar_register();
+/* MySQL service convention: true means failure.
+
+   Both variables are registered and unregistered as a unit: sysvar_register()
+   rolls the first back if the second fails, and sysvar_unregister() attempts
+   both and combines the failures. The component sees one step, which keeps the
+   A9 ordering in component.cc about functions-then-variables rather than about
+   how many variables there happen to be. */
+/* On failure, rolls back anything it registered and reports through
+   *fully_rolled_back whether that succeeded. False means a variable is still in
+   the server's dictionary pointing at this component, so the caller must keep
+   the crypto handles (design A9). */
+bool sysvar_register(bool *fully_rolled_back);
 bool sysvar_unregister();
 
 /* The effective gcm.strict for the calling session — the GLOBAL value on
@@ -33,6 +45,16 @@ bool sysvar_unregister();
    the system-variable hash under a read lock and converts the value to a
    string. SET SESSION only takes effect at statement boundaries anyway. */
 bool strict_enabled();
+
+/* The smallest key gcm_encrypt and gcm_encrypt_det accept, in bytes
+   (gcm.min_key_bytes, design A10). GLOBAL on every version, so this is an
+   administrator policy and not something a session can lower for itself.
+
+   Read once per statement from a UDF init, like strict_enabled(), and never on
+   the row path. Any failure answers kKeyLen256 — for a floor, failing closed
+   means refusing the weaker suites. Decryption never consults it, so raising the
+   floor cannot lock out data that was written under a lower one. */
+size_t min_key_bytes();
 
 }  // namespace gcm
 

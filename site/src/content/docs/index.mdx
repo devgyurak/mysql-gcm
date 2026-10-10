@@ -3,8 +3,8 @@ title: mysql-gcm
 description: AES-GCM for MySQL as a server component, with server-side LIKE on the decrypted value.
 template: splash
 hero:
-  title: Encrypted columns you can still <code>LIKE</code>.
-  tagline: Authenticated AES-GCM for MySQL 8.0, 8.4 and 9.x, as a server component. The decrypted value is tagged utf8mb4, so a partial-match search on an encrypted column runs inside the server with MySQL's own collation.
+  title: <code>AES-GCM</code> for MySQL.
+  tagline: MySQL's AES_ENCRYPT has no GCM mode. mysql-gcm adds authenticated AES-GCM to MySQL 8.0, 8.4 and 9.x as a server component, and the decrypted value is tagged utf8mb4, so LIKE on an encrypted column still runs inside the server.
   actions:
     - text: Try it
       link: overview/#try-it

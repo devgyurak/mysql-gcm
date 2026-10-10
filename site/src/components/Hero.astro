@@ -69,6 +69,8 @@ const hex = [
     line-height: 1.02;
     letter-spacing: -0.035em;
     color: var(--sl-color-white);
+    /* Break Korean at spaces, not inside a word ("더합 / 니다"). */
+    word-break: keep-all;
   }
   h1 :global(code) {
     font-family: var(--sl-font-mono);
@@ -85,6 +87,7 @@ const hex = [
     color: var(--sl-color-gray-2);
     max-width: 44rem;
     text-wrap: pretty;
+    word-break: keep-all;
   }
   .gcm-chips {
     display: flex;

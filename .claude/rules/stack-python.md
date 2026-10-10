@@ -10,7 +10,9 @@ paths:
 
 - 3.10+, with as few dependencies as possible. Python is used only for internal development tools and
   SQL test runners. Do not build a shippable encryption package in it.
-- The vector generator depends on `cryptography`, from `scripts/requirements.txt`. The SQL E2E and load
+- The vector generator depends on `cryptography`, from `scripts/requirements.txt`. The documentation
+  chart script depends on `matplotlib`, pinned exactly in `scripts/requirements-docs.txt` because its
+  output is checked byte for byte; it reads committed JSON and draws SVG, nothing else. The SQL E2E and load
   runners standardise on `PyMySQL` and do their encryption and decryption through the server's SQL
   functions.
 - `ruff` (lint + format) and `mypy --strict`, both enforced in CI. A `# type: ignore` needs a comment

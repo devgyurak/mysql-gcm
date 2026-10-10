@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Source data for docs/assets/perf/load-ratio-{light,dark}.svg, drawn by scripts/plot-perf.py.",
+    "p95 of gcm_decrypt(col) LIKE '%김%' divided by p95 of AES_DECRYPT(col) LIKE '%김%', measured in",
+    "the same sessions with the queries interleaved. 300,000 rows, 29,918 matching, MySQL 8.4.11,",
+    "GitHub-hosted ubuntu-24.04 runners, 2026-10-07. Copied from docs/perf.md (CI per-suite SQL",
+    "runs); change both together. Each run landed on its own hosted machine, so the ratio, not the",
+    "milliseconds, is what compares across runs."
+  ],
+  "rows": 300000,
+  "server": "MySQL 8.4.11",
+  "gate": 1.10,
+  "sessions": [1, 8, 32],
+  "suites": {
+    "aes256": {
+      "label": "AES-256",
+      "runs": ["37572651145", "37576805707", "37576899175"],
+      "ratios": {"1": [0.751, 0.905, 0.960], "8": [0.871, 0.884, 0.891], "32": [0.892, 0.885, 0.886]}
+    },
+    "aes192": {
+      "label": "AES-192",
+      "runs": ["37572645828", "37576799151", "37576837466"],
+      "ratios": {"1": [0.880, 0.823, 0.820], "8": [0.922, 0.900, 0.865], "32": [0.925, 0.894, 0.879]}
+    },
+    "aes128": {
+      "label": "AES-128",
+      "runs": ["37572648637", "37576802634", "37576868446"],
+      "ratios": {"1": [0.836, 0.832, 0.821], "8": [0.910, 0.835, 0.864], "32": [0.891, 0.861, 0.852]}
+    }
+  }
+}

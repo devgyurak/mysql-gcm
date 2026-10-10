@@ -151,8 +151,10 @@ different build method on your own.
   client/SDK.
 - Applications call the SQL functions through their existing MySQL driver. Driver integration is out of
   scope.
-- Python is used only for vector generation and verification and for the SQL E2E and load runners.
-  Vector generation uses `cryptography` only; hand-rolled crypto primitives are forbidden.
+- Python is used only for vector generation and verification, for the SQL E2E and load runners, and
+  for drawing documentation charts from committed measurements (`scripts/plot-perf.py`, which
+  encrypts nothing and reads no database). Vector generation uses `cryptography` only; hand-rolled
+  crypto primitives are forbidden.
 - `scripts/gen-vectors.py` is an internal tool and exposes no public encrypt/decrypt/parse API. The E2E
   runner does its encryption and decryption through the server's SQL functions.
 

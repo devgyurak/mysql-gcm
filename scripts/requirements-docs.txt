@@ -1,0 +1,4 @@
+# Documentation charts only (scripts/plot-perf.py); not a runtime dependency of component_gcm.
+# Pinned exactly: the committed SVGs are compared byte for byte with a redraw, and a different
+# matplotlib can lay the same figure out differently.
+matplotlib==3.10.7

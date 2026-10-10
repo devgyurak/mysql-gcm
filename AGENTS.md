@@ -172,11 +172,11 @@ different build method on your own.
 
 ## 6. Current phase and roadmap
 
-Current: **Phase 4 (distribution) — waiting to tag 0.1.0**. Phases S, 1, 2 and 3 are complete and the
+Current: **Phase 4 (distribution) — releasing 0.1.0**, cut from develop with amendments A10–A12 in it (design A10, "Sequencing"). Phases S, 1, 2 and 3 are complete and the
 results are in `docs/design.md` §8. The load baseline was settled from three CI runner measurements and
 is recorded in `docs/perf.md` and `tests/load/baseline.json`, and the release pipeline was verified
-end-to-end with a dry run (`gh workflow run release.yml -f version=...`). What remains is the tag itself
-and the Docker Hub secrets. The MTR `.result` files were recorded with `scripts/mtr.sh 8.4` and are in
+end-to-end with a dry run (`gh workflow run release.yml -f version=...`). What remains is the develop → main merge,
+the tag and the Docker Hub secrets, all the maintainer's. The MTR `.result` files were recorded with `scripts/mtr.sh 8.4` and are in
 `mysql-test/suite/gcm/r/` (against 8.4 — the other majors were not recorded).
 
 | Phase | Deliverable | Done when |

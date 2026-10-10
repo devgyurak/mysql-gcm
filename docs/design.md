@@ -513,11 +513,14 @@
 > producing GCM. If it is wanted it needs its own amendment and its own version bytes, and it should be
 > decided on migration evidence rather than bundled here.
 >
-> **Sequencing.** This lands after 0.1.0 is tagged, as 0.2.0. The envelope is frozen for 0.1.0 and the
-> release pipeline has been dry-run against it; adding version bytes is backward compatible — every
-> 0.1.0 envelope still decodes, and a 0.1.0 component rejects `0x04`–`0x07` with `bad_envelope` as
-> `spec/envelope.md` §2.4 requires — but it is a spec version bump and does not belong in a release
-> that is one tag away.
+> **Sequencing.** Planned to land after 0.1.0 was tagged, as 0.2.0. *Revised 2026-10-10:* 0.1.0 had
+> not been tagged when this amendment, A11 and A12 were implemented, and the commit prepared for it
+> carries two component defects fixed since — the unsynchronised `gcm.strict` read on 8.0 and 8.4,
+> and an init rollback that freed cipher handles it might not own. Tagging that commit would publish
+> known defects, so 0.1.0 is cut from the later state and includes `0x04`–`0x07`. Nothing had been
+> published, so no released component rejects these version bytes. Adding them stays backward
+> compatible: every `0x02`/`0x03` envelope decodes unchanged, and an older build would reject
+> `0x04`–`0x07` with `bad_envelope` as `spec/envelope.md` §2.4 requires.
 >
 > **Impact, for the implementation PRs:**
 >

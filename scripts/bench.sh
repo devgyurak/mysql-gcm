@@ -21,7 +21,10 @@ environment:
                           quickly makes the ratios noisy enough to breach the gate on their
                           own — measured: 0.05s produced ratios up to 1.11 where 0.5s on the
                           same machine produced 1.02. Do not use --gate with a shorter budget.
-  GCM_BENCH_REPS=1        --benchmark_repetitions
+  GCM_BENCH_REPS          --benchmark_repetitions; default 5 with --gate, 1 without. Above 1, repetitions are also randomly
+                          interleaved across all cases (--benchmark_enable_random_interleaving),
+                          so a case and its reference are sampled over the same stretch of time
+                          rather than minutes apart (#24), and gate.py judges their medians.
 
 Writes build/bench/results.json (raw Google Benchmark) and build/bench/ratios.json.
 USAGE
@@ -39,7 +42,17 @@ esac
 cd "$(dirname "$0")/.."
 
 min_time=${GCM_BENCH_MIN_TIME:-0.5s}
-reps=${GCM_BENCH_REPS:-1}
+# Gating judges the median of five interleaved repetitions (#24): a single repetition, or
+# repetitions run back to back, let one slow stretch on a shared runner decide a ratio. A
+# recording run without --gate stays at one, which is quick.
+default_reps=1
+[ -n "${gate_arg}" ] && default_reps=5
+reps=${GCM_BENCH_REPS:-${default_reps}}
+# Registration order runs every gcm/* case before every ref/* reference, and a case's
+# repetitions back to back, so a slow stretch on a shared runner lands on one side of a ratio.
+# Interleaving spreads each case's repetitions, and its reference's, across the whole run.
+interleave=false
+[ "${reps}" -gt 1 ] && interleave=true
 
 build_and_run() {
   cmake -S tests/bench -B build/bench -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
@@ -47,6 +60,7 @@ build_and_run() {
   ./build/bench/gcm_bench \
     --benchmark_min_time="${min_time}" \
     --benchmark_repetitions="${reps}" \
+    --benchmark_enable_random_interleaving="${interleave}" \
     --benchmark_out=build/bench/results.json \
     --benchmark_out_format=json
 }
@@ -69,6 +83,7 @@ else
     ./build/bench/gcm_bench \
       --benchmark_min_time='"${min_time}"' \
       --benchmark_repetitions='"${reps}"' \
+      --benchmark_enable_random_interleaving='"${interleave}"' \
       --benchmark_out=build/bench/results.json \
       --benchmark_out_format=json
   '

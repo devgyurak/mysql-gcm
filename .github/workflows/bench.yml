@@ -21,6 +21,12 @@ on:
       min_time:
         description: "Per-case measurement budget, e.g. 0.5s"
         default: "0.5s"
+      # Five interleaved repetitions, judged on their median, are what the gate is calibrated on
+      # (#24); it takes the bench step from ~2.5 to ~9.5 minutes, which a merge and nightly job
+      # can afford. Fewer is for a quick look, not for gating.
+      reps:
+        description: "Repetitions per case, interleaved (gate.py uses the median)"
+        default: "5"
   # Path-filtered so it runs only when there is something to measure. A merge that touches none of
   # these has nothing to compare, and the job not running is the correct outcome rather than a gap.
   push:
@@ -46,6 +52,7 @@ jobs:
       # container path in scripts/bench.sh exists for developers whose host is not ubuntu-24.04.
       GCM_BENCH_LOCAL: "1"
       GCM_BENCH_MIN_TIME: ${{ inputs.min_time || '0.5s' }}
+      GCM_BENCH_REPS: ${{ inputs.reps || '5' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install the toolchain
@@ -55,6 +62,21 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends build-essential cmake libssl-dev
           cmake --version
           openssl version
+      # The ratio divides the machine out only as far as the reference and the case run the same
+      # instruction path. The hosted fleet mixes CPU generations whose AES throughput differs by
+      # 5x (#24), so every run records which CPU it got, beside the numbers it produced.
+      - name: Record the runner's CPU
+        run: |
+          set -euo pipefail
+          mkdir -p build/bench
+          {
+            lscpu
+            echo
+            echo "aes-related flags:"
+            grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' \
+              | grep -E '^(aes|vaes|vpclmulqdq|pclmulqdq|avx2|avx512f|avx512vl|sha_ni|sha)$' | sort | tr '\n' ' '
+            echo
+          } | tee build/bench/cpu.txt
       - name: Build and run
         run: scripts/bench.sh --gate
       # Uploaded whether or not the gate passed: a failing run is the one whose numbers someone
@@ -66,3 +88,4 @@ jobs:
           path: |
             build/bench/results.json
             build/bench/ratios.json
+            build/bench/cpu.txt

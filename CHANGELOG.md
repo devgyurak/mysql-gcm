@@ -5,6 +5,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Fixed
+- **The bench gate failed on fast runners because of how it measured, not what it measured** (#24).
+  Benchmarks ran in registration order, so every case was measured minutes before its reference and
+  a slow stretch on a shared runner landed on one side of a ratio; and `gate.py` kept only the last
+  repetition of each case. Thirty-four CI runs, each now recording its CPU, showed six runner classes
+  from Zen 3 (bare 64 KiB seal ~17,000 ns) to Zen 5 (~3,000), no one-call difference before and after
+  A11 on the three classes both met, and failures that reached even 64 KiB ratios. The gate now
+  judges the median of five randomly interleaved repetitions; eight such runs, three on Zen 5, passed
+  every ceiling unchanged. The bench step takes ~9.5 minutes instead of ~2.5.
+
 ### Documented
 - **Amendment A12: the two questions A10 left open, analysed and decided** (issue #22). A key and
   its zero-extension derive one nonce key (RFC 2104 §2), which links equal plaintexts across two

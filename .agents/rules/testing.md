@@ -143,6 +143,11 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   merge from develop and the benchmark runs on both sides, so it surfaces before a tag. **Do not put it
   in the required checks** (a required check that does not report on a PR blocks merges forever). The
   thresholds live in `tests/bench/baseline.json` and the measurements accumulate in `docs/perf.md`.
+- **Gate on five randomly interleaved repetitions, judged by their medians** (`bench.yml` default,
+  `scripts/bench.sh --gate`). Run in registration order, every case is measured minutes before its
+  reference and a slow stretch on a shared runner decides a ratio (#24). Each run records the
+  runner's CPU in `cpu.txt`; read ratios against it, since the hosted fleet spans a 5x range of AES
+  throughput.
 
 ## E2E (`tests/e2e`)
 - compose: mysql (ROW binlog) + replica + a Python runner. Scenarios: store encrypted via SQL → server

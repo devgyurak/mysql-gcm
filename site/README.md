@@ -27,7 +27,7 @@ copy it in again. To preview the production build: `npm run build && npm run pre
 
 `npm run build` syncs the documents, builds, and fails if any internal link does not resolve.
 
-## Deploy on Cloudflare Pages with your own domain
+## Deploy on Cloudflare Pages at mysql-gcm.devgyurak.com
 
 Cloudflare builds from this repository itself, so no Cloudflare credential is stored on GitHub,
 and every pull request gets a preview URL.
@@ -38,7 +38,7 @@ and every pull request gets a preview URL.
 
    | Setting | Value |
    |---|---|
-   | Production branch | `main` |
+   | Production branch | `main` (the site exists there only once `develop` is merged into it) |
    | Framework preset | Astro |
    | Root directory | `site` |
    | Build command | `npm run build` |
@@ -50,11 +50,12 @@ and every pull request gets a preview URL.
    |---|---|
    | `NODE_VERSION` | `22` |
    | `SITE_BASE` | `/` |
-   | `SITE_URL` | `https://<your domain>` |
+   | `SITE_URL` | `https://mysql-gcm.devgyurak.com` |
 
-4. After the first deploy: the project → **Custom domains → Set up a custom domain** → enter the
-   domain. If its DNS is on Cloudflare, the record is created for you; otherwise add the CNAME it
-   shows at your DNS provider.
+4. After the first deploy: the project → **Custom domains → Set up a custom domain** →
+   `mysql-gcm.devgyurak.com`. The `devgyurak.com` zone is on Cloudflare, so the CNAME to
+   `<project>.pages.dev` is created for you and the certificate is issued within minutes. Do not
+   add the record by hand first; Pages only activates a domain it was asked to set up.
 
 `public/_headers` sets the response headers Cloudflare Pages serves (no framing, no MIME sniffing,
 HSTS, immutable caching for hashed assets).

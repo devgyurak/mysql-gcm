@@ -5,3 +5,4 @@ dist/
 src/content/docs/*.md
 src/content/docs/ko/*.md
 public/assets/
+.wrangler/

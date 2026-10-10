@@ -21,7 +21,8 @@
   "devDependencies": {
     "@astrojs/check": "0.9.10",
     "opentype.js": "2.0.0",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "wrangler": "4.149.0"
   },
   "overrides": {
     "postcss-selector-parser": "7.1.6"

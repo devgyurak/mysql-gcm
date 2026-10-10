@@ -1,0 +1,20 @@
+/* Accent taken from the banner's teal, stepped for each theme so links and buttons keep
+   their contrast: a light teal on the dark surface, a deep teal on the light one. */
+:root {
+  --sl-color-accent-low: #0f3b36;
+  --sl-color-accent: #2a9d8c;
+  --sl-color-accent-high: #a8eadf;
+}
+:root[data-theme="light"] {
+  --sl-color-accent-low: #c9efe8;
+  --sl-color-accent: #0f7a6c;
+  --sl-color-accent-high: #0a4a41;
+}
+
+/* The hero banner and the README chart scale down with the viewport instead of widening
+   the page on a phone. */
+.hero img,
+.sl-markdown-content picture img {
+  max-width: 100%;
+  height: auto;
+}

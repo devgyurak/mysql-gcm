@@ -1,0 +1,28 @@
+{
+  "name": "mysql-gcm-site",
+  "private": true,
+  "type": "module",
+  "description": "Landing page and documentation for mysql-gcm, built from the repository's own Markdown.",
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build && node scripts/check-links.mjs",
+    "preview": "astro preview",
+    "check": "npm run sync && astro check"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.6",
+    "astro": "7.3.8",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "postcss-selector-parser": "7.1.6"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

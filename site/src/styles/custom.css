@@ -1,19 +1,85 @@
-/* Accent taken from the banner's teal, stepped for each theme so links and buttons keep
-   their contrast: a light teal on the dark surface, a deep teal on the light one. */
+/* Theme from the README banner (Claude Design "README Banner"): 1a Dark for the dark theme,
+   1b Light for the light one. IBM Plex Sans and Mono as in the banner, with IBM Plex Sans KR so
+   Korean pages stay in the same family. Fonts are self-hosted (@fontsource), not fetched from
+   Google, so a page view sends nothing to a third party. */
+
 :root {
-  --sl-color-accent-low: #0f3b36;
-  --sl-color-accent: #2a9d8c;
-  --sl-color-accent-high: #a8eadf;
-}
-:root[data-theme="light"] {
-  --sl-color-accent-low: #c9efe8;
-  --sl-color-accent: #0f7a6c;
-  --sl-color-accent-high: #0a4a41;
+  --sl-font: "IBM Plex Sans", "IBM Plex Sans KR", system-ui, sans-serif;
+  --sl-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* 1a Dark. Starlight's dark scale runs white (brightest text) -> black (page). */
+  --sl-color-white: #f4f6f7;
+  --sl-color-gray-1: #e9ebec;
+  --sl-color-gray-2: #b7bdc1;
+  --sl-color-gray-3: #8b9397;
+  --sl-color-gray-4: #4f585e;
+  --sl-color-gray-5: #2a3237;
+  --sl-color-gray-6: #1a1f23;
+  --sl-color-black: #111417;
+
+  --sl-color-accent-low: #12302d;
+  --sl-color-accent: #3fa79b;
+  --sl-color-accent-high: #7fd6cc;
+
+  --gcm-grid: rgb(255 255 255 / 0.035);
+  --gcm-chip-fill: #7fd6cc;
+  --gcm-chip-fill-text: #0d1a19;
+  --gcm-chip-line: #2f4f4c;
+  --gcm-chip-text: #7fd6cc;
+  --gcm-chip-neutral-line: #3a4248;
+  --gcm-chip-neutral-text: #b7bdc1;
+  --gcm-hex: #2a3237;
+  --gcm-hex-lit: #2f5a55;
 }
 
-/* The hero banner and the README chart scale down with the viewport instead of widening
-   the page on a phone. */
-.hero img,
+:root[data-theme="light"] {
+  /* 1b Light. The light scale is inverted: white is the darkest text, black the page. */
+  --sl-color-white: #16191b;
+  --sl-color-gray-1: #26292b;
+  --sl-color-gray-2: #4a4d50;
+  --sl-color-gray-3: #6c6f71;
+  --sl-color-gray-4: #9b9d9b;
+  --sl-color-gray-5: #c9c7bf;
+  --sl-color-gray-6: #e9e8e4;
+  --sl-color-gray-7: #f1f0ec;
+  --sl-color-black: #f6f5f1;
+
+  --sl-color-accent-low: #d6ece8;
+  --sl-color-accent: #2a7d75;
+  --sl-color-accent-high: #1f625c;
+
+  --gcm-grid: rgb(0 0 0 / 0.04);
+  --gcm-chip-fill: #1f625c;
+  --gcm-chip-fill-text: #f6f5f1;
+  --gcm-chip-line: #9cc7c1;
+  --gcm-chip-text: #1f625c;
+  --gcm-chip-neutral-line: #c9c7bf;
+  --gcm-chip-neutral-text: #4a4d50;
+  --gcm-hex: #dcdad3;
+  --gcm-hex-lit: #9cc7c1;
+}
+
+/* The banner's 40px grid behind the whole page, faint enough to stay out of the text's way. */
+body {
+  background-image:
+    linear-gradient(var(--gcm-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--gcm-grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Headings in the banner's weight and tracking. */
+.sl-markdown-content :is(h1, h2, h3),
+h1#_top {
+  letter-spacing: -0.02em;
+}
+
+/* The header wordmark is an outlined SVG; give it the banner's proportions. */
+.site-title img {
+  height: 1.35rem;
+  width: auto;
+}
+
+/* Images in content scale down with the viewport instead of widening the page on a phone. */
 .sl-markdown-content picture img {
   max-width: 100%;
   height: auto;

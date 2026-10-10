@@ -15,6 +15,12 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "mysql-gcm",
+      // The wordmark outlined from the banner's IBM Plex Sans Bold (scripts/make-logo.mjs).
+      logo: {
+        dark: "./src/assets/logo-dark.svg",
+        light: "./src/assets/logo-light.svg",
+        replacesTitle: true,
+      },
       description:
         "AES-GCM for MySQL as a server component, with server-side LIKE on the decrypted value.",
       defaultLocale: "root",
@@ -52,7 +58,20 @@ export default defineConfig({
       // The landing pages live in site/; synced pages set their own editUrl to the source file.
       editLink: { baseUrl: "https://github.com/devgyurak/mysql-gcm/edit/develop/site/" },
       lastUpdated: false,
-      customCss: ["./src/styles/custom.css"],
+      customCss: [
+        "@fontsource/ibm-plex-sans/400.css",
+        "@fontsource/ibm-plex-sans/500.css",
+        "@fontsource/ibm-plex-sans/600.css",
+        "@fontsource/ibm-plex-sans/700.css",
+        "@fontsource/ibm-plex-sans-kr/400.css",
+        "@fontsource/ibm-plex-sans-kr/600.css",
+        "@fontsource/ibm-plex-sans-kr/700.css",
+        "@fontsource/ibm-plex-mono/400.css",
+        "@fontsource/ibm-plex-mono/500.css",
+        "@fontsource/ibm-plex-mono/600.css",
+        "./src/styles/custom.css",
+      ],
+      components: { Hero: "./src/components/Hero.astro" },
     }),
   ],
 });

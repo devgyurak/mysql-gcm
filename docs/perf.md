@@ -477,6 +477,10 @@ cryptographic work. Profiling or an experiment that separates those costs is nee
 
 ### CI per-suite SQL runs — three per suite
 
+The README's chart is drawn from these nine runs by `scripts/plot-perf.py`, from
+`docs/assets/perf/load-ratios.json`; change the table, the JSON and the SVGs together (lint runs
+`plot-perf.py --check`).
+
 On 2026-10-07 each suite completed three `load.yml` dispatches, each on its own GitHub-hosted
 `ubuntu-24.04` runner: MySQL 8.4.11, 300,000 rows, 29,918 matches, 40 measured iterations per session
 after three warm-ups, the first run on commit `e420a5b` and the other two on `develop` after #20

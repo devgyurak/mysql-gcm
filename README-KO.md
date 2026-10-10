@@ -169,6 +169,16 @@ sha256sum -c SHA256SUMS
 | 평문이 디스크에 남지 않는다 | 모든 load run 에서 `Created_tmp_disk_tables` 변화 없음 | 이 워크로드 한정. 정렬이나 큰 `GROUP BY` 는 넘칠 수 있음 |
 | 설계가 버틴다 | 근거를 적은 개정 A1–A12. A12 의 두 질문은 AI 설계 검토로 결정 | **사람의 암호 감사 없음** |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/perf/load-ratio-dark.svg">
+  <img src="docs/assets/perf/load-ratio-light.svg" width="100%"
+       alt="30만 행에서 gcm_decrypt LIKE 의 p95 를 AES_DECRYPT LIKE 로 나눈 비율을 CI 9회, 1·8·32 세션, AES-256·192·128 별로 찍은 점 그래프. 모든 점이 0.75~0.96 으로 1.0 아래에 있고, 1.10 에 회귀 게이트 선이 있다.">
+</picture>
+
+점 하나가 CI run 하나의 p95 비율이며, 실선 아래는 빌트인보다 빠르다는 뜻입니다. 수치, run 링크, 이
+그래프의 데이터 파일: `docs/perf.md`,
+[`docs/assets/perf/load-ratios.json`](docs/assets/perf/load-ratios.json).
+
 함수를 고르기 전에 알아 둘 두 가지: **`gcm_encrypt_det` 은 쓰기 비용이 평범한 봉인의 몇 배**이고
 (HMAC 두 번), AES 가속이 있는 하드웨어에서 **작은 수트는 속도를 거의 사지 못합니다** — 성능이 아니라
 상호운용성 때문에 고르세요. 모든 숫자, run 링크, 단서: [`docs/perf.md`](docs/perf.md).
@@ -192,7 +202,7 @@ PR 로 들어옵니다. 암호 경로는 리뷰어 두 명이 필요합니다.
 `CLAUDE.md`)에서 시작하세요.
 
 애플리케이션은 기존 MySQL 드라이버로 이 함수를 부릅니다. 클라이언트 SDK 는 없습니다. 이 저장소의
-Python 은 테스트와 벡터 도구에만 씁니다.
+Python 은 테스트, 벡터, 문서용 그래프 도구에만 씁니다.
 
 ## 라이선스
 

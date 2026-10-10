@@ -177,6 +177,16 @@ not slower than `AES_DECRYPT` in any CI run.** What that covers, and what it doe
 | Plaintext stays off disk | `Created_tmp_disk_tables` unchanged in every load run | This workload; a sort or large `GROUP BY` can still spill |
 | The design holds up | Amendments A1–A12 with their rationale; A12's two questions decided by an AI design review | **No human cryptographic audit** |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/perf/load-ratio-dark.svg">
+  <img src="docs/assets/perf/load-ratio-light.svg" width="100%"
+       alt="Dot chart of the p95 ratio of gcm_decrypt LIKE to AES_DECRYPT LIKE over 300,000 rows, nine CI runs, at 1, 8 and 32 sessions, for AES-256, AES-192 and AES-128. Every point is below 1.0, between 0.75 and 0.96, under a regression gate drawn at 1.10.">
+</picture>
+
+Every point is one CI run's p95 ratio; below the solid line is faster than the builtin. The values,
+run links and the data file behind this chart: `docs/perf.md` and
+[`docs/assets/perf/load-ratios.json`](docs/assets/perf/load-ratios.json).
+
 Two things worth knowing before you choose a function: **`gcm_encrypt_det` costs several times a
 plain seal to write** (two HMAC passes), and **a smaller suite buys little speed** on hardware with
 AES acceleration — pick it for interoperability, not performance. Every number, run link and caveat:
@@ -201,7 +211,7 @@ with `spec/`, unit and server tests in the same PR. Crypto paths need two review
 [Changelog](CHANGELOG.md). Working with an AI agent: start at `AGENTS.md` (or `CLAUDE.md`).
 
 Applications call these functions through their existing MySQL driver; there is no client SDK.
-Python in this repository is test and vector tooling only.
+Python in this repository is test, vector and documentation-chart tooling only.
 
 ## License
 

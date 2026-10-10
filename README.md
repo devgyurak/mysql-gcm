@@ -175,7 +175,6 @@ not slower than `AES_DECRYPT` in any CI run.** What that covers, and what it doe
 | Server-side `LIKE` is fast enough | `gcm_decrypt(col) LIKE` p95 **0.75–0.96×** `AES_DECRYPT` over 300k rows, nine CI runs across three suites | Hosted runners; a developer laptop measured above 1.0 at times. Re-measure on your hardware |
 | No hidden per-call work | 60 gated core benchmarks against a straight-line OpenSSL implementation, five interleaved repetitions | Ratios, not absolute times |
 | Plaintext stays off disk | `Created_tmp_disk_tables` unchanged in every load run | This workload; a sort or large `GROUP BY` can still spill |
-| The design holds up | Amendments A1–A12 with their rationale; A12's two questions decided by an AI design review | **No human cryptographic audit** |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/perf/load-ratio-dark.svg">

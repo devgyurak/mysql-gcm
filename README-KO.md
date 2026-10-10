@@ -167,7 +167,6 @@ sha256sum -c SHA256SUMS
 | 서버측 `LIKE` 가 쓸 만하다 | 30만 행 `gcm_decrypt(col) LIKE` p95 가 `AES_DECRYPT` 의 **0.75~0.96배**, 세 수트에 걸친 CI 9회 | 호스팅 러너 기준. 개발 노트북에서는 1.0 을 넘은 적도 있음. 배포 하드웨어에서 다시 재세요 |
 | 숨은 호출당 작업이 없다 | 같은 알고리즘의 직선 구현 OpenSSL 대비 코어 벤치 60개 게이트, 반복 5회를 섞어서 | 비율이지 절대 시간이 아님 |
 | 평문이 디스크에 남지 않는다 | 모든 load run 에서 `Created_tmp_disk_tables` 변화 없음 | 이 워크로드 한정. 정렬이나 큰 `GROUP BY` 는 넘칠 수 있음 |
-| 설계가 버틴다 | 근거를 적은 개정 A1–A12. A12 의 두 질문은 AI 설계 검토로 결정 | **사람의 암호 감사 없음** |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/perf/load-ratio-dark.svg">

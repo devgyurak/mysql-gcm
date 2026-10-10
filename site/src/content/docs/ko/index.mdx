@@ -6,13 +6,13 @@ hero:
   title: 암호화한 컬럼에도 <code>LIKE</code> 가 됩니다.
   tagline: MySQL 8.0 · 8.4 · 9.x 용 인증 암호화 AES-GCM 을 서버 component 로 제공합니다. 복호화 결과에 utf8mb4 를 태깅하므로, 암호화된 컬럼의 부분일치 검색이 MySQL 자신의 collation 으로 서버 안에서 돕니다.
   image:
-    html: '<img src="/mysql-gcm/assets/banner.png" alt="mysql-gcm — MySQL 용 AES-GCM. 서버 component 로, 평문에 대한 서버측 LIKE 를 유지합니다." width="640" style="max-width:100%;height:auto" />'
+    html: '<img src="../assets/banner.png" alt="mysql-gcm — MySQL 용 AES-GCM. 서버 component 로, 평문에 대한 서버측 LIKE 를 유지합니다." width="640" style="max-width:100%;height:auto" />'
   actions:
     - text: 바로 해 보기
-      link: /mysql-gcm/ko/overview/#바로-해-보기
+      link: overview/#바로-해-보기
       icon: right-arrow
     - text: 운영 제약부터 읽기
-      link: /mysql-gcm/ko/ops-constraints/
+      link: ops-constraints/
       variant: secondary
     - text: GitHub
       link: https://github.com/devgyurak/mysql-gcm
@@ -24,7 +24,7 @@ import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
 
 <Aside type="caution" title="릴리스 전">
 아직 공개된 것이 없고, 이 구성은 사람의 암호 감사를 받지 않았습니다. 기대기 전에
-[운영 제약](/mysql-gcm/ko/ops-constraints/)을 먼저 읽으세요.
+[운영 제약](ops-constraints/)을 먼저 읽으세요.
 </Aside>
 
 ```sql
@@ -51,11 +51,11 @@ SELECT id, gcm_decrypt(name_enc, @k) AS name FROM patients
   </Card>
   <Card title="측정했고, 한계도 적었습니다" icon="document">
     암호화된 30만 행에 대한 서버측 `LIKE` 가 CI 9회에서 `AES_DECRYPT` 의 0.75~0.96배였습니다.
-    [어떻게 쟀고 무엇은 보여 주지 않는지](/mysql-gcm/ko/performance/).
+    [어떻게 쟀고 무엇은 보여 주지 않는지](performance/).
   </Card>
 </CardGrid>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/mysql-gcm/assets/perf/load-ratio-dark.svg" />
-  <img src="/mysql-gcm/assets/perf/load-ratio-light.svg" width="100%" alt="30만 행에서 gcm_decrypt LIKE 의 p95 를 AES_DECRYPT LIKE 로 나눈 비율을 CI 9회, 1·8·32 세션, AES-256·192·128 별로 찍은 점 그래프. 모든 점이 0.75~0.96 으로 1.0 아래에 있고, 1.10 에 회귀 게이트 선이 있다." />
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/perf/load-ratio-dark.svg" />
+  <img src="../assets/perf/load-ratio-light.svg" width="100%" alt="30만 행에서 gcm_decrypt LIKE 의 p95 를 AES_DECRYPT LIKE 로 나눈 비율을 CI 9회, 1·8·32 세션, AES-256·192·128 별로 찍은 점 그래프. 모든 점이 0.75~0.96 으로 1.0 아래에 있고, 1.10 에 회귀 게이트 선이 있다." />
 </picture>

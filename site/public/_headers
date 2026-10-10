@@ -1,0 +1,12 @@
+# Response headers for Cloudflare Pages (read from the build output; ignored elsewhere).
+# A documentation site for a security component should not be frameable, sniffable or chatty
+# about where readers came from.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

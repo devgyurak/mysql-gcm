@@ -3,9 +3,11 @@ name: site
 # written there: site/scripts/sync-docs.mjs builds them from README.md, README-KO.md, docs/,
 # spec/ and CHANGELOG.md at build time, so the site can never disagree with the repository.
 #
-# A pull request that touches any of those sources builds the site and checks its internal
-# links, so a broken page fails here rather than after publication. A push to main -- the
-# release branch -- deploys to GitHub Pages. Path-filtered, so it is never a required check
+# A pull request or a push to main that touches any of those sources builds the site and checks
+# its internal links, so a broken page fails here rather than after publication. Publishing is
+# not done here: Cloudflare Pages builds and deploys from its own Git integration
+# (site/README.md), which keeps Cloudflare credentials out of this repository. The build below
+# uses the same SITE_BASE as production, "/". Path-filtered, so it is never a required check
 # (stack-ci-docker: a filtered workflow does not report on an unrelated PR).
 on:
   pull_request:
@@ -41,19 +43,4 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run build
-      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        if: github.event_name != 'pull_request'
-        with: { path: site/dist }
-
-  deploy:
-    # Only main publishes; a dispatch on another branch builds and stops here.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions: { pages: write, id-token: write }
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        env: { SITE_BASE: "/" }

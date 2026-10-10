@@ -6,13 +6,13 @@ hero:
   title: Encrypted columns you can still <code>LIKE</code>.
   tagline: Authenticated AES-GCM for MySQL 8.0, 8.4 and 9.x, as a server component. The decrypted value is tagged utf8mb4, so a partial-match search on an encrypted column runs inside the server with MySQL's own collation.
   image:
-    html: '<img src="/mysql-gcm/assets/banner.png" alt="mysql-gcm — AES-GCM for MySQL, as a server component, with server-side LIKE on the plaintext." width="640" style="max-width:100%;height:auto" />'
+    html: '<img src="assets/banner.png" alt="mysql-gcm — AES-GCM for MySQL, as a server component, with server-side LIKE on the plaintext." width="640" style="max-width:100%;height:auto" />'
   actions:
     - text: Try it
-      link: /mysql-gcm/overview/#try-it
+      link: overview/#try-it
       icon: right-arrow
     - text: Read the constraints first
-      link: /mysql-gcm/ops-constraints/
+      link: ops-constraints/
       variant: secondary
     - text: GitHub
       link: https://github.com/devgyurak/mysql-gcm
@@ -24,7 +24,7 @@ import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
 
 <Aside type="caution" title="Pre-release">
 Nothing is published yet, and the construction has not had a human cryptographic audit. Read the
-[operational constraints](/mysql-gcm/ops-constraints/) before you rely on it.
+[operational constraints](ops-constraints/) before you rely on it.
 </Aside>
 
 ```sql
@@ -51,11 +51,11 @@ SELECT id, gcm_decrypt(name_enc, @k) AS name FROM patients
   </Card>
   <Card title="Measured, with the limits stated" icon="document">
     Server-side `LIKE` over 300,000 encrypted rows measured 0.75–0.96× `AES_DECRYPT` in nine CI
-    runs. [How it was measured, and what that does not show](/mysql-gcm/performance/).
+    runs. [How it was measured, and what that does not show](performance/).
   </Card>
 </CardGrid>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/mysql-gcm/assets/perf/load-ratio-dark.svg" />
-  <img src="/mysql-gcm/assets/perf/load-ratio-light.svg" width="100%" alt="Dot chart of the p95 ratio of gcm_decrypt LIKE to AES_DECRYPT LIKE over 300,000 rows, nine CI runs, at 1, 8 and 32 sessions, for AES-256, AES-192 and AES-128. Every point is below 1.0, between 0.75 and 0.96, under a regression gate drawn at 1.10." />
+  <source media="(prefers-color-scheme: dark)" srcset="assets/perf/load-ratio-dark.svg" />
+  <img src="assets/perf/load-ratio-light.svg" width="100%" alt="Dot chart of the p95 ratio of gcm_decrypt LIKE to AES_DECRYPT LIKE over 300,000 rows, nine CI runs, at 1, 8 and 32 sessions, for AES-256, AES-192 and AES-128. Every point is below 1.0, between 0.75 and 0.96, under a regression gate drawn at 1.10." />
 </picture>

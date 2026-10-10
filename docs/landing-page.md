@@ -1,13 +1,14 @@
-# mysql-gcm site
+# Landing page and docs site
 
-The landing page and documentation, built with [Astro Starlight](https://starlight.astro.build).
-Only the two landing pages (`src/content/docs/index.mdx`, `ko/index.mdx`) are written here. Every
-other page is generated at build time from the repository's own Markdown by
-`scripts/sync-docs.mjs` — edit `README.md`, `docs/`, `spec/` or `CHANGELOG.md`, never the copies.
+The landing page and documentation live in [`site/`](../site/), built with
+[Astro Starlight](https://starlight.astro.build). Only the two landing pages
+(`site/src/content/docs/index.mdx`, `ko/index.mdx`) are written there. Every other page is
+generated at build time from the repository's own Markdown by `site/scripts/sync-docs.mjs` — edit
+`README.md`, `docs/`, `spec/` or `CHANGELOG.md`, never the copies.
 
 ## Preview locally
 
-Node 22 or later (`.nvmrc`).
+Node 22 or later (`site/.nvmrc`).
 
 ```sh
 cd site
@@ -29,7 +30,7 @@ copy it in again. To preview the production build: `npm run build && npm run pre
 
 ## Deploy on Cloudflare Workers at mysql-gcm.devgyurak.com
 
-The site is static, so it is served as Workers static assets (`wrangler.jsonc`) with no Worker
+The site is static, so it is served as Workers static assets (`site/wrangler.jsonc`) with no Worker
 script. Cloudflare builds from this repository itself (Workers Builds), so no Cloudflare
 credential is stored on GitHub, and every other branch gets a preview URL.
 
@@ -39,7 +40,7 @@ credential is stored on GitHub, and every other branch gets a preview URL.
 
    | Setting | Value |
    |---|---|
-   | Project name | `mysql-gcm` (must match `name` in `wrangler.jsonc`) |
+   | Project name | `mysql-gcm` (must match `name` in `site/wrangler.jsonc`) |
    | Production branch | `main` (the site exists there only once `develop` is merged into it) |
    | Build command | `npm run build` |
    | Deploy command | `npx wrangler deploy` |
@@ -61,5 +62,5 @@ credential is stored on GitHub, and every other branch gets a preview URL.
 `wrangler` is a pinned dev dependency, so `npx wrangler` uses the locked version. To check the
 bundle without deploying: `npm run build && npx wrangler deploy --dry-run`.
 
-`public/_headers` sets the response headers Cloudflare serves (no framing, no MIME sniffing, HSTS,
+`site/public/_headers` sets the response headers Cloudflare serves (no framing, no MIME sniffing, HSTS,
 immutable caching for hashed assets).

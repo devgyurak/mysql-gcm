@@ -84,6 +84,7 @@ scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.
   gen-vectors.py               The internal vector generation and verification tool (cryptography; not a shipped API)
   check-architecture.py        Checks the core dependency and test entry point boundaries (amendment A6)
 docker/                        build.Dockerfile (a configured server source tree) + build-component.sh + versions.json
+docs/landing-page.md           The site: local preview, configuration, deploying on Cloudflare Workers
 docs/perf.md                   Accumulated load measurements — replacing design §1.2's estimates with measured numbers
 CHANGELOG.md                   Changes per release. An envelope change comes with a compatibility note
 site/                          Landing page and docs site (Astro Starlight, Node). Its pages are generated at

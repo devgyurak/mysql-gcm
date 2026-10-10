@@ -21,7 +21,7 @@ The rule is `.agents/rules/stack-ci-docker.md`. The skeletons already exist in
 | `bench.yml` | push to main/develop (path-filtered), nightly, dispatch | the core micro-benchmarks and the ratio gate | not required |
 | `load.yml` | nightly cron, dispatch | `tests/load/run.py --gate`, with the results as an artifact | nightly |
 | `release.yml` | tag `v*`, dispatch (dry run) | `guard` → `build` → `image` → `manifest` → `package` → `publish` | — |
-| `site.yml` | PR and push to main touching `site/`, README, `docs/`, `spec/`, CHANGELOG; dispatch | builds the Starlight site from the repository's Markdown with `SITE_BASE=/`, audits npm, checks internal links. Deployment is Cloudflare Workers Builds' Git integration, serving `dist/` as static assets (`site/wrangler.jsonc`) (`site/README.md`) | — |
+| `site.yml` | PR and push to main touching `site/`, README, `docs/`, `spec/`, CHANGELOG; dispatch | builds the Starlight site from the repository's Markdown with `SITE_BASE=/`, audits npm, checks internal links. Deployment is Cloudflare Workers Builds' Git integration, serving `dist/` as static assets (`site/wrangler.jsonc`) (`docs/landing-page.md`) | — |
 | `images.yml` | push to main/develop (`docker/**`, `image-ref.sh`), weekly, dispatch | `mysql-gcm-build` per major and `mysql-gcm-mtr` for 8.4 to GHCR; skips a tag that exists | — |
 
 **`mtr`, `adapter` and `bench` are path-filtered and therefore must never be made required.** A

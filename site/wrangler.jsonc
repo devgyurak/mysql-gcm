@@ -1,5 +1,5 @@
 // Cloudflare Workers static assets: the built site in dist/, served with no Worker script.
-// Workers Builds runs `npm run build` and then `npx wrangler deploy` from site/ (README.md).
+// Workers Builds runs `npm run build` and then `npx wrangler deploy` from site/ (docs/landing-page.md).
 // `name` must match the Worker's name in the dashboard, or the build refuses to deploy.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",

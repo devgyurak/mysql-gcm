@@ -1,0 +1,13 @@
+// Cloudflare Workers static assets: the built site in dist/, served with no Worker script.
+// Workers Builds runs `npm run build` and then `npx wrangler deploy` from site/ (docs/landing-page.md).
+// `name` must match the Worker's name in the dashboard, or the build refuses to deploy.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mysql-gcm",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // Starlight writes dist/404.html; serve it, with a 404 status, for any unknown path.
+    "not_found_handling": "404-page"
+  }
+}

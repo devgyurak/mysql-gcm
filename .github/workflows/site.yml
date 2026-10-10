@@ -1,0 +1,46 @@
+name: site
+# The landing page and documentation site under site/ (Astro Starlight). Its pages are not
+# written there: site/scripts/sync-docs.mjs builds them from README.md, README-KO.md, docs/,
+# spec/ and CHANGELOG.md at build time, so the site can never disagree with the repository.
+#
+# A pull request or a push to main that touches any of those sources builds the site and checks
+# its internal links, so a broken page fails here rather than after publication. Publishing is
+# not done here: Cloudflare Workers Builds builds and deploys from its own Git integration
+# (docs/landing-page.md), which keeps Cloudflare credentials out of this repository. The build below
+# uses the same SITE_BASE as production, "/". Path-filtered, so it is never a required check
+# (stack-ci-docker: a filtered workflow does not report on an unrelated PR).
+on:
+  pull_request:
+    paths: &site_paths
+      - "site/**"
+      - "README.md"
+      - "README-KO.md"
+      - "docs/**"
+      - "spec/**"
+      - "CHANGELOG.md"
+      - ".github/workflows/site.yml"
+  push:
+    branches: [main]
+    paths: *site_paths
+  workflow_dispatch: {}
+permissions: { contents: read }
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: site } }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      # `npm ci` installs exactly the lockfile; the build runs sync-docs, astro build and the
+      # internal link check (package.json "build").
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=moderate
+      - run: npm run build
+        env: { SITE_BASE: "/" }

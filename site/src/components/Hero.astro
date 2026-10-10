@@ -1,0 +1,150 @@
+---
+// The splash hero, laid out like the README banner's 1a Dark: a large Plex Sans title, a muted
+// subtitle, a row of Plex Mono chips, the actions, and a column of hex on the right with one
+// line lit in teal. Title, tagline and actions come from the page's front matter as usual.
+import { LinkButton } from "@astrojs/starlight/components";
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero ?? {};
+
+const chips = [
+  { text: "AES-GCM", kind: "fill" },
+  { text: "AEAD", kind: "line" },
+  { text: "Server component", kind: "line" },
+  { text: "Server-side LIKE", kind: "line" },
+  { text: "Open source", kind: "neutral" },
+];
+const hex = [
+  "9f3a 0c71 e2b4 58d0",
+  "a61c 7e09 33f2 bd17",
+  "04e8 c95a 1f6b 2d8e",
+  "4c0b 8a3e f17d 0972",
+  "e5d1 6b20 98ac 3f4e",
+  "71c3 0a5f d84b 26e9",
+];
+---
+
+<div class="gcm-hero">
+  <div class="gcm-hero-copy">
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="gcm-tagline" set:html={tagline} />}
+    <ul class="gcm-chips" aria-label="Properties">
+      {chips.map((chip) => <li class={`gcm-chip gcm-chip-${chip.kind}`}>{chip.text}</li>)}
+    </ul>
+    {
+      actions.length > 0 && (
+        <div class="gcm-actions">
+          {actions.map(({ attrs, icon, link: href, text, variant }) => (
+            <LinkButton {href} {variant} icon={icon?.name} {...attrs}>
+              {text}
+            </LinkButton>
+          ))}
+        </div>
+      )
+    }
+  </div>
+  <div class="gcm-hex" aria-hidden="true">
+    {hex.map((row, i) => <div class={i === 3 ? "lit" : undefined}>{row}</div>)}
+  </div>
+</div>
+
+<style>
+  .gcm-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3rem;
+    padding-block: clamp(2.5rem, 7vw, 5.5rem) clamp(2rem, 5vw, 4rem);
+  }
+  .gcm-hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+    max-width: 52rem;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.6rem, 6vw, 4.6rem);
+    font-weight: 700;
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    color: var(--sl-color-white);
+    /* Break Korean at spaces, not inside a word ("더합 / 니다"). */
+    word-break: keep-all;
+  }
+  h1 :global(code) {
+    font-family: var(--sl-font-mono);
+    font-size: 0.92em;
+    letter-spacing: -0.02em;
+    background: none;
+    padding: 0;
+    color: var(--sl-color-accent-high);
+  }
+  .gcm-tagline {
+    margin: 0;
+    font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+    line-height: 1.5;
+    color: var(--sl-color-gray-2);
+    max-width: 44rem;
+    text-wrap: pretty;
+    word-break: keep-all;
+  }
+  .gcm-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--sl-font-mono);
+    font-weight: 500;
+    font-size: 0.875rem;
+  }
+  .gcm-chip {
+    margin: 0;
+    padding: 0.3rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .gcm-chip-fill {
+    background: var(--gcm-chip-fill);
+    color: var(--gcm-chip-fill-text);
+    font-weight: 600;
+  }
+  .gcm-chip-line {
+    border-color: var(--gcm-chip-line);
+    color: var(--gcm-chip-text);
+  }
+  .gcm-chip-neutral {
+    border-color: var(--gcm-chip-neutral-line);
+    color: var(--gcm-chip-neutral-text);
+  }
+  .gcm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    align-items: center;
+  }
+  .gcm-hex {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-family: var(--sl-font-mono);
+    font-size: 1.05rem;
+    line-height: 1.5;
+    text-align: right;
+    color: var(--gcm-hex);
+    user-select: none;
+  }
+  .gcm-hex .lit {
+    color: var(--gcm-hex-lit);
+  }
+  @media (max-width: 50rem) {
+    .gcm-hero {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .gcm-hex {
+      display: none;
+    }
+  }
+</style>

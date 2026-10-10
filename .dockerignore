@@ -1,0 +1,6 @@
+# The release server image is built with the repository root as its context
+# (release.yml, docker/server.Dockerfile) and copies only the component .so and the install
+# SQL. Keep the documentation site's Node tree out of that context: it is large, it is not
+# part of any image, and nothing in it belongs in a server.
+site/
+**/node_modules/

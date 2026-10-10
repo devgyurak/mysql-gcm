@@ -13,7 +13,7 @@ Node 22 or later (`site/.nvmrc`).
 ```sh
 cd site
 npm ci
-npm run dev        # http://localhost:4321/mysql-gcm/  (Korean: /mysql-gcm/ko/)
+npm run dev        # http://localhost:4321/  (Korean: /ko/)
 ```
 
 The landing pages reload as you edit. After editing a repository document, run `npm run sync` to
@@ -23,8 +23,8 @@ copy it in again. To preview the production build: `npm run build && npm run pre
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SITE_URL` | `https://devgyurak.github.io` | the origin the site is served from (canonical URLs, sitemap) |
-| `SITE_BASE` | `/mysql-gcm` | the path under that origin; `/` when the site has its own domain |
+| `SITE_URL` | `https://mysql-gcm.devgyurak.com` | the origin the site is served from (canonical URLs, sitemap) |
+| `SITE_BASE` | `/` | the path under that origin; set it, e.g. `/mysql-gcm`, only to serve the site under a path |
 
 `npm run build` syncs the documents, builds, and fails if any internal link does not resolve.
 
@@ -52,8 +52,8 @@ credential is stored on GitHub, and every other branch gets a preview URL.
    | Name | Value |
    |---|---|
    | `NODE_VERSION` | `22` |
-   | `SITE_BASE` | `/` |
-   | `SITE_URL` | `https://mysql-gcm.devgyurak.com` |
+
+   `SITE_URL` and `SITE_BASE` need not be set: their defaults are this domain and the root.
 
 4. After the first deploy: the Worker → **Settings → Domains & Routes → Add → Custom domain** →
    `mysql-gcm.devgyurak.com`. The `devgyurak.com` zone is on Cloudflare, so the DNS record and the

@@ -2,12 +2,12 @@
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
-// Where the site is served. On its own domain (Cloudflare Workers) set SITE_URL to that origin and
-// SITE_BASE to "/"; the defaults describe a project page at devgyurak.github.io/mysql-gcm.
+// Where the site is served. The defaults are production: its own domain, at the root. Set SITE_BASE
+// (and SITE_URL) only to serve it under a path elsewhere, e.g. "/mysql-gcm" for a GitHub project page.
 // scripts/sync-docs.mjs and scripts/check-links.mjs read the same SITE_BASE, so rewritten and
 // checked links always agree with what Astro serves.
-const site = process.env.SITE_URL ?? "https://devgyurak.github.io";
-const base = process.env.SITE_BASE ?? "/mysql-gcm";
+const site = process.env.SITE_URL ?? "https://mysql-gcm.devgyurak.com";
+const base = process.env.SITE_BASE ?? "/";
 
 export default defineConfig({
   site,

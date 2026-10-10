@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(SITE, "..");
-const BASE = (process.env.SITE_BASE ?? "/mysql-gcm").replace(/\/$/, "");
+const BASE = (process.env.SITE_BASE ?? "/").replace(/\/$/, "");
 const GITHUB = "https://github.com/devgyurak/mysql-gcm/blob/main";
 
 // Repository file -> site route. The page list, in one place.

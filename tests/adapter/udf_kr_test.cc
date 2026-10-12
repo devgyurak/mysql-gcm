@@ -716,7 +716,45 @@ TEST_F(KrUdf, GivenADeterministicRowSucceeded_WhenTheNextRowFails_ThenTheNonceKe
   EXPECT_TRUE(all_zero(state_of(item)->det.key, sizeof(state_of(item)->det.key)));
   EXPECT_TRUE(all_zero(state_of(item)->det.nonce_key, sizeof(state_of(item)->det.nonce_key)));
   EXPECT_TRUE(all_zero(state_of(item)->kr.key, sizeof(state_of(item)->kr.key)));
+  EXPECT_TRUE(all_zero(state_of(item)->out, state_of(item)->capacity));
   gcm_encrypt_det_kr_deinit(&item);
+}
+
+TEST_F(KrUdf, GivenAPlaintextOverTheLimit_WhenSealed_ThenRefusedBeforeTheKeyringIsRead) {
+  // Given: the check looks at the declared length only, so no 2 GB buffer is needed
+  Args args(&kName, &kId);
+  args.lengths[0] = static_cast<unsigned long>(gcm::kMaxArgLen) + 1;
+  UDF_INIT item{};
+  ASSERT_FALSE(gcm_encrypt_kr_init(&item, &args.args, message_)) << message_;
+
+  // When
+  const Row row = call(gcm_encrypt_kr_udf, &item, &args);
+
+  // Then: an argument this function cannot process does not cost a keyring read
+  EXPECT_FALSE(row.returned);
+  EXPECT_EQ(row.error, 1);
+  EXPECT_TRUE(details_for("keyring_init").empty());
+  EXPECT_TRUE(state_of(item)->kr.spent);
+  gcm_encrypt_kr_deinit(&item);
+}
+
+TEST_F(KrUdf, GivenAnEnvelopeOverTheLimit_WhenOpened_ThenRefusedBeforeTheKeyringIsRead) {
+  // Given
+  Args args(&kName, &kId);
+  args.lengths[0] = static_cast<unsigned long>(gcm::kMaxArgLen) + 1;
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_kr_init(&opener, &args.args, message_)) << message_;
+
+  // When
+  const Row row = call(gcm_decrypt_kr_udf, &opener, &args);
+
+  // Then: refused, nothing read, and the session the item was given is released with it
+  EXPECT_FALSE(row.returned);
+  EXPECT_EQ(row.error, 1);
+  EXPECT_TRUE(details_for("keyring_init").empty());
+  EXPECT_TRUE(state_of(opener)->kr.spent);
+  EXPECT_EQ(state_of(opener)->decrypt, nullptr);
+  gcm_decrypt_kr_deinit(&opener);
 }
 
 TEST_F(KrUdf, GivenARowRaisedAnError_WhenTheItemIsCalledAgain_ThenRefusedWithoutAKeyringRead) {

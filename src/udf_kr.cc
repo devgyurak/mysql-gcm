@@ -87,6 +87,8 @@ bool fail_key(const char *func, UdfState *state, KeySource failure) {
    keyring. */
 bool resolve_key(const char *func, UdfState *state, Bytes id, Bytes *key) {
   KeyHold *hold = &state->kr;
+  /* Two refusals for a call made after an error, which only a test can make: a
+     key-source failure is reported again as itself, any other error as "spent". */
   if (hold->failure != KeySource::ok) return fail_key(func, state, hold->failure);
   if (hold->spent) {
     gcm::raise_message(func, "this call already raised an error and cannot be used again");

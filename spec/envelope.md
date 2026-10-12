@@ -286,7 +286,8 @@ Rules that follow, in addition to those of §4:
    key id.
 5. Rule 4 of §4 is extended: messages MUST NOT contain the key id, the account, or the type or
    length of a keyring entry. A key shorter than `gcm.min_key_bytes` is reported with the floor and
-   without the key's length; a key whose length disagrees with the envelope's version byte is
+   without the key's length — which, the floor being a public setting, still bounds the length (with
+   a floor of 24 the refusal means a 16-byte key); this is accepted; a key whose length disagrees with the envelope's version byte is
    reported without either length.
 6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
    keyring: the following rows are decrypted without a second read.

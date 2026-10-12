@@ -43,8 +43,9 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   are compared on every row and a difference is an error; it is **not** discarded on a `bad_tag` that
   `gcm.strict=OFF` turns into NULL — the A11 context and nonce-key copies still are — because the
   next row needs it and a second read would be a per-row keyring call; **every row that raises an
-  error wipes it before returning**, because the server does not always call `deinit` after an
-  error; a key-source failure is latched; it is
+  error wipes it before returning, together with the A11 context, the A11 nonce key and the
+  result buffer**, because the server does not always call `deinit` after an error and makes no
+  further row call that could need them; a call made after an error anyway is refused; it is
   cleansed in `deinit`; and it is never shared across threads or `UDF_INIT`s. An entry whose data
   length or type length disqualifies it is never copied out of the keyring; any other rejected
   entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as

@@ -81,8 +81,62 @@ SELECT gcm_decrypt_kr(name_enc, 'mtr_absent') FROM patients;
 --echo # Then: still an error — a missing key is not hidden by a setting
 SET GLOBAL gcm.strict = DEFAULT;
 
+--echo # Given: NULL in each argument position
+--echo # When: the functions are called
+SELECT gcm_encrypt_kr(NULL, 'mtr_name_v1') IS NULL AS null_plaintext,
+       gcm_encrypt_det_kr('x', NULL) IS NULL AS null_id,
+       gcm_decrypt_kr(@c, 'mtr_name_v1', NULL) IS NULL AS null_aad;
+
+--echo # Then: NULL each time, with no error
+
+--echo # Given: the empty string
+--echo # When: it is sealed and opened by key id
+SELECT LENGTH(gcm_encrypt_kr('', 'mtr_name_v1')) AS envelope_length,
+       gcm_decrypt_kr(gcm_encrypt_kr('', 'mtr_name_v1'), 'mtr_name_v1') = '' AS round_trip;
+
+--echo # Then: a 29 byte envelope that opens to the empty string
+
+--echo # Given: a value sealed by key id with an AAD
+SET @with_aad = gcm_encrypt_det_kr('홍길동', 'mtr_name_v1', 'patients.name');
+
+--echo # When: it is opened with the same AAD
+SELECT gcm_decrypt_kr(@with_aad, 'mtr_name_v1', 'patients.name') AS same_aad;
+
+--echo # Then: the name
+
+--echo # Given: the same value
+--echo # When: it is opened with a different AAD
+--error ER_UDF_ERROR
+SELECT gcm_decrypt_kr(@with_aad, 'mtr_name_v1', 'patients.other');
+
+--echo # Then: a tag error — the AAD is authenticated
+
+--echo # Given: a malformed envelope and a usable key
+--echo # When: it is opened by key id
+--error ER_UDF_ERROR
+SELECT gcm_decrypt_kr(UNHEX('02'), 'mtr_name_v1');
+
+--echo # Then: an envelope error
+
+--echo # Given: an AES-128 key in the keyring, and an AES-256 envelope
+DO keyring_key_generate('mtr_short', 'AES', 16);
+
+--echo # When: the key is used to seal under the default floor of 32
+--error ER_UDF_ERROR
+SELECT gcm_encrypt_kr('x', 'mtr_short');
+
+--echo # Then: refused by gcm.min_key_bytes
+
+--echo # Given: the same AES-128 key
+--echo # When: it is used to open the AES-256 envelope
+--error ER_UDF_ERROR
+SELECT gcm_decrypt_kr(@c, 'mtr_short');
+
+--echo # Then: a suite mismatch that does not state the key length
+
 DROP TABLE patients;
 --disable_query_log
+DO keyring_key_remove('mtr_short');
 DO keyring_key_remove('mtr_name_v1');
 DROP FUNCTION keyring_key_generate;
 DROP FUNCTION keyring_key_fetch;

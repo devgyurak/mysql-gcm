@@ -28,6 +28,9 @@
 # When: the statements are executed
 홍길동
 # Then: the name — a parameter is not visible in init, so the key is read on the first row (above)
+# Scenario 13 — Given: a usable key, and envelopes that are malformed rather than unauthentic
+# When: each is opened by key id
+# Then: each is an envelope error carrying the envelope length and nothing about the key (errors section)
 # Scenario 10 — Given: the three functions
 # When: each is called with one argument and with four
 # Then: each is refused when the statement is prepared, with its usage (errors section)
@@ -51,7 +54,10 @@ ERROR 3200 (HY000) at line 23: gcm_encrypt_kr UDF failed; no usable AES key unde
 ERROR 3200 (HY000) at line 39: gcm_encrypt_kr UDF failed; the key id must be 1 to 255 bytes without a NUL byte and the same on every row
 ERROR 3200 (HY000) at line 57: gcm_decrypt_kr UDF failed; authentication tag verification failed
 ERROR 3200 (HY000) at line 66: gcm_decrypt_kr UDF failed; the key's length does not match the envelope version
-ERROR 1123 (HY000) at line 83: Can't initialize function 'gcm_encrypt_kr'; gcm_encrypt_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
-ERROR 1123 (HY000) at line 84: Can't initialize function 'gcm_encrypt_det_kr'; gcm_encrypt_det_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
-ERROR 1123 (HY000) at line 85: Can't initialize function 'gcm_decrypt_kr'; gcm_decrypt_kr(ciphertext, key_id [, aad]) needs 2 or 3 arguments
-ERROR 3200 (HY000) at line 108: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 83: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 0)
+ERROR 3200 (HY000) at line 84: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 1)
+ERROR 3200 (HY000) at line 85: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 4)
+ERROR 1123 (HY000) at line 90: Can't initialize function 'gcm_encrypt_kr'; gcm_encrypt_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 1123 (HY000) at line 91: Can't initialize function 'gcm_encrypt_det_kr'; gcm_encrypt_det_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 1123 (HY000) at line 92: Can't initialize function 'gcm_decrypt_kr'; gcm_decrypt_kr(ciphertext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 3200 (HY000) at line 115: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account

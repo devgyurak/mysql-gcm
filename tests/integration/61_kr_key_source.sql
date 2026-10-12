@@ -78,6 +78,13 @@ SELECT '# Then: the name — a parameter is not visible in init, so the key is r
 DEALLOCATE PREPARE seal;
 DEALLOCATE PREPARE open_it;
 
+SELECT '# Scenario 13 — Given: a usable key, and envelopes that are malformed rather than unauthentic';
+SELECT '# When: each is opened by key id';
+SELECT gcm_decrypt_kr('', 'it_good') AS empty_envelope;
+SELECT gcm_decrypt_kr(UNHEX('02'), 'it_good') AS too_short;
+SELECT gcm_decrypt_kr(UNHEX('08000000'), 'it_good') AS unknown_version;
+SELECT '# Then: each is an envelope error carrying the envelope length and nothing about the key (errors section)';
+
 SELECT '# Scenario 10 — Given: the three functions';
 SELECT '# When: each is called with one argument and with four';
 SELECT gcm_encrypt_kr('x') AS never_reached;
@@ -87,8 +94,8 @@ SELECT '# Then: each is refused when the statement is prepared, with its usage (
 
 SELECT '# Scenario 11 — Given: three sealed rows, the middle one with a bit of its tag flipped, and gcm.strict OFF';
 -- A table, not user variables: the strict setting is read per session on 9.x and
--- GLOBAL-only before it (docs/design.md amendment A5), so the one way to turn it
--- off that works on every major is SET GLOBAL followed by a new connection.
+-- GLOBAL-only before it (docs/design.md amendment A5). SET GLOBAL followed by a new
+-- connection turns it off on every major, and a new connection has no user variables.
 CREATE TABLE strict_rows (id INT PRIMARY KEY, name_enc VARBINARY(128));
 INSERT INTO strict_rows VALUES
   (1, gcm_encrypt_kr('김철수', 'it_good')),

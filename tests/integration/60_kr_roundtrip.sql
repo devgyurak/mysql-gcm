@@ -67,3 +67,13 @@ SET @v1 = CONCAT(UNHEX('01'), @iv, AES_ENCRYPT('홍길동', keyring_key_fetch('i
 SELECT '# When: it is opened by key id';
 SELECT gcm_decrypt_kr(@v1, 'it_name_v1') AS legacy_plaintext;
 SELECT '# Then: the name — gcm_decrypt_kr reads everything gcm_decrypt reads (above)';
+
+SELECT '# Scenario 9 — Given: the empty string and a 64 KB value';
+SET @empty = gcm_encrypt_kr('', 'it_name_v1');
+SET @big = gcm_encrypt_det_kr(REPEAT('가', 21845), 'it_name_v1');
+SELECT '# When: each is sealed and opened by key id';
+SELECT LENGTH(@empty) AS empty_envelope_length,
+       gcm_decrypt_kr(@empty, 'it_name_v1') = '' AS empty_round_trip,
+       LENGTH(@big) - 65535 AS big_overhead,
+       gcm_decrypt_kr(@big, 'it_name_v1') = REPEAT('가', 21845) AS big_round_trip;
+SELECT '# Then: a 29 byte envelope that opens to the empty string, and 29 bytes over 65535 that open intact (above)';

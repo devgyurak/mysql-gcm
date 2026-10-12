@@ -45,6 +45,7 @@ KeySource caller_account(CallerAccount *out) {
   }
   /* An anonymous account is not one principal (design A13). */
   if (user.str == nullptr || user.length == 0) return KeySource::no_account;
+  /* An empty host is passed through, as keyring_udf does: "user@". */
   if (host.str == nullptr) host.length = 0;
   /* `>=`, not `>`: the '@' needs a byte too, and with `>` a user name of exactly
      kMaxAccountLen would make the subtraction below wrap. */
@@ -70,6 +71,10 @@ KeySource fetch_key(const char *key_id, const CallerAccount &account, unsigned c
                     size_t *out_len) {
   *out_len = 0;
 
+  /* The caller has validated the id. This is for a caller that has not: the
+     server's keyring asserts on an empty id in a debug build. */
+  if (key_id == nullptr || key_id[0] == '\0') return KeySource::invalid_id;
+
   my_h_keyring_reader_object reader = nullptr;
   if (mysql_service_keyring_reader_with_status->init(key_id, account.text, &reader)) {
     return KeySource::unavailable;
@@ -86,8 +91,9 @@ KeySource fetch_key(const char *key_id, const CallerAccount &account, unsigned c
   if (mysql_service_keyring_reader_with_status->fetch_length(reader, &key_len, &type_len)) {
     result = KeySource::unavailable;
   } else if (suite_for_key_len(key_len) == nullptr || type_len != kAesTypeLen) {
-    /* Decided on the lengths alone, so a secret of another type or size is never
-       copied out of the keyring at all. */
+    /* Decided on the lengths alone, so this component never asks the reader for
+       the bytes of an entry of another type or size. What a keyring backend loads
+       into its own memory to answer the length call is the backend's business. */
     result = KeySource::no_usable_key;
   } else if (mysql_service_keyring_reader_with_status->fetch(reader, key, sizeof(key), &key_len,
                                                              type, sizeof(type), &type_len)) {
@@ -105,7 +111,8 @@ KeySource fetch_key(const char *key_id, const CallerAccount &account, unsigned c
 
   wipe(key, sizeof(key));
   /* Released here, on every path, never kept: see the header. A failed release
-     leaves nothing this component can act on. */
+     leaves nothing this component can act on, so its result is not consulted and
+     a key that was fetched successfully is still returned. */
   (void)mysql_service_keyring_reader_with_status->deinit(reader);
   return result;
 }

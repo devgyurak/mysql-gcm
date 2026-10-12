@@ -38,7 +38,8 @@ Style comes last.
 - [ ] A session sysvar is actually read as the session value
 - [ ] `_kr` functions (amendment A13): one keyring read per `UDF_INIT` and none in init, the reader
       released on every path, id and account compared on every row, failures latched and never NULL,
-      the fetched key wiped by every row that raises an error,
+      every secret of the instance (fetched key, A11 states, result buffer) wiped by a row that
+      raises an error,
       no key id, account or entry length or type in a message
 
 **Safety (P1)** — grep for the blocked patterns in `crypto-safety.md`, check for keys or plaintext in

@@ -79,9 +79,9 @@ std::string g_caller_user;
 std::string g_caller_host;
 std::map<std::pair<std::string, std::string>, KeyringEntry> g_keyring;
 int g_open_readers = 0;
-/* What the next keyring_fetch reports instead of the stored entry, once. Lets a case make
-   the second call disagree with keyring_fetch_length, which the real reader's lock is
-   supposed to prevent and the component checks for anyway. */
+/* What keyring_fetch reports instead of the stored entry, until clear_key_source(). Lets a case
+   make the second call disagree with keyring_fetch_length, which the real reader's lock is supposed
+   to prevent and the component checks for anyway. */
 bool g_fetch_override = false;
 KeyringEntry g_fetch_override_entry;
 

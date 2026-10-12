@@ -262,9 +262,8 @@ account is the definer; inside a view it is the invoker.
 
 **The key id.** 1 to 255 bytes after conversion to `utf8mb4`, with no NUL byte.
 
-**One key per statement instance.** The keyring is read once per instance of a function in an
-executing statement, on the first row whose arguments are all non-NULL, and again only after a row
-that raised an error (rule 7). Every later row of that
+**One key per statement instance.** The keyring is read at most once per instance of a function in
+an executing statement, on the first row whose arguments are all non-NULL. Every later row of that
 instance MUST bring the same `key_id` bytes and run as the same account. A different id is an error,
 so a `key_id` taken from a column is accepted only while every row names the same id.
 
@@ -281,8 +280,8 @@ Rules that follow, in addition to those of §4:
    turned into NULL.
 2. The three "no usable key" conditions MUST be reported identically, so that an entry of another
    type or an odd length is not revealed.
-3. A key-source failure is latched: later rows of the same instance report the same error without
-   reading the keyring again.
+3. An error is final for the instance. The server makes no further row call after one; an
+   implementation MUST NOT serve a call made anyway, and MUST NOT read the keyring again for it.
 4. SQL NULL in any argument yields SQL NULL (§4 rule 3) with no keyring access and no check of the
    key id.
 5. Rule 4 of §4 is extended: messages MUST NOT contain the key id, the account, or the type or
@@ -291,9 +290,10 @@ Rules that follow, in addition to those of §4:
    reported without either length.
 6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
    keyring: the following rows are decrypted without a second read.
-7. A row that raises any error discards the key read from the keyring before it returns. A statement
-   that continues past the error reads the keyring again on its next row, so two rows of one
-   statement are not guaranteed the same key if the keyring changed in between.
+7. A row that raises any error MUST discard, before it returns, every secret its instance holds: the
+   key read from the keyring, any context or derived key kept for later rows, and the result buffer.
+   It MUST NOT leave that to the function's de-initialisation, which the server does not always
+   run after an error.
 
 ## 5. Worked examples
 

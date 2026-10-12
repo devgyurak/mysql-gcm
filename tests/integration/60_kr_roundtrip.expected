@@ -30,6 +30,10 @@
 # When: it is opened by key id
 홍길동
 # Then: the name — gcm_decrypt_kr reads everything gcm_decrypt reads (above)
+# Scenario 9 — Given: the empty string and a 64 KB value
+# When: each is sealed and opened by key id
+29	1	29	1
+# Then: a 29 byte envelope that opens to the empty string, and 29 bytes over 65535 that open intact (above)
 --- errors, in statement order ---
 ERROR 3200 (HY000) at line 46: gcm_decrypt_kr UDF failed; authentication tag verification failed
 ERROR 3200 (HY000) at line 52: gcm_encrypt_kr UDF failed; the key is below gcm.min_key_bytes = 32; decryption of existing data is unaffected

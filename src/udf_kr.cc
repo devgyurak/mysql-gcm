@@ -42,25 +42,39 @@ const char *describe(KeySource failure) {
   return "the key source failed";
 }
 
-/* Forgets the fetched key without latching anything. Every row that raises an error
-   does this before it returns, and does not wait for deinit: the server does not
-   always call deinit after an error — a loadable function that is an argument of
-   another one and fails while the outer one is being initialised never gets it
-   (design A13, "Implementation notes") — and a key left for a deinit that never
-   comes would stay in memory, unwiped, for the life of the server. An error
-   normally ends the statement; one that continues past it (INSERT IGNORE, a
-   handler) reads the keyring again on its next row. */
-void forget_key(KeyHold *hold) {
+/* What every row that raises an error does before it returns: gives up every
+   secret this UDF_INIT holds, without waiting for deinit.
+
+   Nothing is lost by it. The server does not call a function's row callback again
+   once it has reported an error — udf_handler::get_arguments returns early on the
+   handler's error flag, in 8.0.43, 8.4.11 and 9.4.0 alike — so nothing here will be
+   used again. And deinit cannot be relied on to do the wiping: a loadable function
+   that is an argument of another one and fails while the outer one is being
+   initialised never gets its deinit (design A13, "Implementation notes"), and what
+   it held would stay in memory, unwiped, for the life of the server.
+
+   That means the fetched key, and also the two A11 states and the result buffer: a
+   row can fail after earlier rows succeeded, and an error the core raises from a
+   pre-check leaves its scheduled context and nonce key as they were. `spent` makes
+   a further call — which only a test can make — an error instead of a use of the
+   released session. */
+void give_up_secrets(UdfState *state) {
+  KeyHold *hold = &state->kr;
   gcm::wipe(hold->key, sizeof(hold->key));
   hold->key_len = 0;
   hold->loaded = false;
+  hold->spent = true;
+  gcm::det_session_clear(&state->det);
+  gcm::decrypt_session_free(state->decrypt);
+  state->decrypt = nullptr;
+  if (state->out != nullptr) gcm::wipe(state->out, state->capacity);
 }
 
-/* Latches and raises. Every key-source failure is an error whatever gcm.strict
-   says, and stays the answer for the rest of this UDF_INIT (design A13). */
-bool fail_key(const char *func, KeyHold *hold, KeySource failure) {
-  forget_key(hold);
-  hold->failure = failure;
+/* Records and raises a key-source failure. It is an error whatever gcm.strict
+   says, and the answer for the rest of this UDF_INIT (design A13). */
+bool fail_key(const char *func, UdfState *state, KeySource failure) {
+  give_up_secrets(state);
+  state->kr.failure = failure;
   gcm::raise_message(func, describe(failure));
   return true;
 }
@@ -73,24 +87,28 @@ bool fail_key(const char *func, KeyHold *hold, KeySource failure) {
    keyring. */
 bool resolve_key(const char *func, UdfState *state, Bytes id, Bytes *key) {
   KeyHold *hold = &state->kr;
-  if (hold->failure != KeySource::ok) return fail_key(func, hold, hold->failure);
+  if (hold->failure != KeySource::ok) return fail_key(func, state, hold->failure);
+  if (hold->spent) {
+    gcm::raise_message(func, "this call already raised an error and cannot be used again");
+    return true;
+  }
 
   if (id.size == 0 || id.size > gcm::kMaxKeyIdLen || std::memchr(id.data, '\0', id.size)) {
-    return fail_key(func, hold, KeySource::invalid_id);
+    return fail_key(func, state, KeySource::invalid_id);
   }
   gcm::CallerAccount account;
   if (gcm::caller_account(&account) != KeySource::ok) {
-    return fail_key(func, hold, KeySource::no_account);
+    return fail_key(func, state, KeySource::no_account);
   }
 
   if (hold->loaded) {
     /* Neither is secret, so a plain comparison. */
     if (id.size != hold->id_len || std::memcmp(id.data, hold->id, id.size) != 0) {
-      return fail_key(func, hold, KeySource::invalid_id);
+      return fail_key(func, state, KeySource::invalid_id);
     }
     if (account.len != hold->account.len ||
         std::memcmp(account.text, hold->account.text, account.len) != 0) {
-      return fail_key(func, hold, KeySource::no_account);
+      return fail_key(func, state, KeySource::no_account);
     }
   } else {
     std::memcpy(hold->id, id.data, id.size);
@@ -98,7 +116,7 @@ bool resolve_key(const char *func, UdfState *state, Bytes id, Bytes *key) {
     hold->id_len = id.size;
     hold->account = account;
     const KeySource fetched = gcm::fetch_key(hold->id, hold->account, hold->key, &hold->key_len);
-    if (fetched != KeySource::ok) return fail_key(func, hold, fetched);
+    if (fetched != KeySource::ok) return fail_key(func, state, fetched);
     hold->loaded = true;
   }
 
@@ -163,6 +181,17 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
 
   const Bytes plaintext = gcm::arg_bytes(args, 0);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
+
+  /* Before the key is resolved, so that an argument this function cannot process
+     does not cost a keyring read; and before the envelope size is computed, so
+     that addition cannot wrap. */
+  if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
+    gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);
+    give_up_secrets(state);
+    *error = 1;
+    return nullptr;
+  }
+
   Bytes key{nullptr, 0};
   if (resolve_key(func, state, gcm::arg_bytes(args, 1), &key)) {
     *error = 1;
@@ -179,20 +208,14 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
              "unaffected",
              state->min_key_bytes);
     gcm::raise_message(func, detail);
-    forget_key(&state->kr);
+    give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
 
-  if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
-    gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);
-    forget_key(&state->kr);
-    *error = 1;
-    return nullptr;
-  }
   if (gcm::reserve(state, gcm::encrypt_out_len(plaintext.size))) {
     gcm::raise_message(func, "out of memory");
-    forget_key(&state->kr);
+    give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -201,7 +224,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   const Error err = seal(state, key, plaintext, aad, state->out, &out_len);
   if (err != Error::ok) {
     raise_core(func, err, 0);
-    forget_key(&state->kr);
+    give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -275,21 +298,23 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
 
   const Bytes envelope = gcm::arg_bytes(args, 0);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
+
+  /* Before the key is resolved, as in encrypt_row. */
+  if (gcm::too_long(envelope.size) || gcm::too_long(aad.size)) {
+    gcm::raise_too_long(kFunc, envelope.size > aad.size ? envelope.size : aad.size);
+    give_up_secrets(state);
+    *error = 1;
+    return nullptr;
+  }
+
   Bytes key{nullptr, 0};
   if (resolve_key(kFunc, state, gcm::arg_bytes(args, 1), &key)) {
     *error = 1;
     return nullptr;
   }
-
-  if (gcm::too_long(envelope.size) || gcm::too_long(aad.size)) {
-    gcm::raise_too_long(kFunc, envelope.size > aad.size ? envelope.size : aad.size);
-    forget_key(&state->kr);
-    *error = 1;
-    return nullptr;
-  }
   if (gcm::reserve(state, gcm::decrypt_out_len(envelope.size) + 1)) {
     gcm::raise_message(kFunc, "out of memory");
-    forget_key(&state->kr);
+    give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -302,14 +327,14 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
      forgotten its scheduled copy of the key. With strict OFF this row is a NULL and
      not an error, so the fetched key in state->kr stays and the next row decrypts
      without another keyring read (design A13). With strict ON it is an error like
-     any other and falls through to the forget below. */
+     any other and falls through to give_up_secrets below. */
   if (err == Error::bad_tag && !state->strict) {
     *is_null = 1;
     return nullptr;
   }
   if (err != Error::ok) {
     raise_core(kFunc, err, envelope.size);
-    forget_key(&state->kr);
+    give_up_secrets(state);
     *error = 1;
     return nullptr;
   }

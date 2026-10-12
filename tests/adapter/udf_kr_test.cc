@@ -20,6 +20,7 @@
 #include "envelope.h"
 #include "key_source.h"
 #include "service_stubs.h"
+#include "udf_glue.h"
 
 extern "C" {
 bool gcm_encrypt_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
@@ -61,6 +62,7 @@ const std::string kNoUsableKey = "no usable AES key under this id for the callin
 const std::string kUnavailable = "the keyring is unavailable or the read failed";
 const std::string kInvalidId =
     "the key id must be 1 to 255 bytes without a NUL byte and the same on every row";
+const std::string kSpent = "this call already raised an error and cannot be used again";
 const std::string kNoAccount =
     "the calling account could not be established or changed during the statement";
 
@@ -95,6 +97,18 @@ struct Row {
   unsigned char is_null = 0;
   unsigned char error = 0;
 };
+
+/* The state an item hangs off UDF_INIT::ptr. src/udf_glue.h is an ordinary header of the
+   component, so looking at it needs no seam in src/. */
+const gcm::UdfState *state_of(const UDF_INIT &item) {
+  return reinterpret_cast<const gcm::UdfState *>(item.ptr);
+}
+
+bool all_zero(const unsigned char *bytes, size_t len) {
+  size_t nonzero = 0;
+  for (size_t i = 0; i < len; ++i) nonzero += bytes[i] != 0 ? 1 : 0;
+  return nonzero == 0;
+}
 
 Row call(RowFn fn, UDF_INIT *item, Args *args) {
   Row row;
@@ -634,8 +648,9 @@ TEST_F(KrUdf, GivenStrictOn_WhenATamperedEnvelopeIsOpened_ThenATagErrorNotNull) 
   gcm_decrypt_kr_deinit(&opener);
 }
 
-TEST_F(KrUdf, GivenStrictOnAndATagError_WhenAGoodRowFollows_ThenTheKeyIsReadAgain) {
-  // Given: one item; its first row is a tampered envelope and raises
+TEST_F(KrUdf, GivenAKeyWasRead_WhenARowRaisesATagError_ThenEverySecretOfTheItemIsGone) {
+  // Given: one item that has opened a good row, so it holds the fetched key and a
+  //        scheduled context
   const std::string good = seal(kName);
   std::string bad = good;
   bad.back() = static_cast<char>(bad.back() ^ 0x01);
@@ -643,37 +658,126 @@ TEST_F(KrUdf, GivenStrictOnAndATagError_WhenAGoodRowFollows_ThenTheKeyIsReadAgai
   Args bad_row(&bad, &kId);
   UDF_INIT opener{};
   ASSERT_FALSE(gcm_decrypt_kr_init(&opener, &good_row.args, message_)) << message_;
-  ASSERT_EQ(call(gcm_decrypt_kr_udf, &opener, &bad_row).error, 1);
+  ASSERT_TRUE(call(gcm_decrypt_kr_udf, &opener, &good_row).returned);
+  ASSERT_TRUE(state_of(opener)->kr.loaded);
 
-  // When: execution continues past the error to a good row
-  const Row second = call(gcm_decrypt_kr_udf, &opener, &good_row);
+  // When: strict is ON and the next row does not authenticate
+  const Row row = call(gcm_decrypt_kr_udf, &opener, &bad_row);
 
-  // Then: the error row gave the key up, so this row fetched it again — the key does not
-  //       wait in memory for a deinit the server may never call after an error
-  EXPECT_EQ(second.text, kName);
-  EXPECT_EQ(second.error, 0);
-  EXPECT_EQ(details_for("keyring_init").size(), 2u);
+  // Then: the key does not wait for a deinit the server may never call after an error
+  EXPECT_EQ(row.error, 1);
+  EXPECT_FALSE(state_of(opener)->kr.loaded);
+  EXPECT_TRUE(state_of(opener)->kr.spent);
+  EXPECT_EQ(state_of(opener)->kr.key_len, 0u);
+  EXPECT_TRUE(all_zero(state_of(opener)->kr.key, sizeof(state_of(opener)->kr.key)));
+  EXPECT_EQ(state_of(opener)->decrypt, nullptr);
+  EXPECT_TRUE(all_zero(state_of(opener)->out, state_of(opener)->capacity));
   gcm_decrypt_kr_deinit(&opener);
 }
 
-TEST_F(KrUdf, GivenAnAes128Key_WhenUsedToSealUnderTheDefaultFloor_ThenRefusedByTheFloor) {
+TEST_F(KrUdf, GivenAGoodRow_WhenAMalformedEnvelopeFollows_ThenTheScheduledContextIsGoneToo) {
+  // Given: a pre-check error is the case the core leaves its session untouched for
+  const std::string good = seal(kName);
+  const std::string malformed = "\x02";
+  Args good_row(&good, &kId);
+  Args malformed_row(&malformed, &kId);
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_kr_init(&opener, &good_row.args, message_)) << message_;
+  ASSERT_TRUE(call(gcm_decrypt_kr_udf, &opener, &good_row).returned);
+
+  // When
+  const Row row = call(gcm_decrypt_kr_udf, &opener, &malformed_row);
+
+  // Then
+  EXPECT_EQ(row.error, 1);
+  EXPECT_EQ(error_messages(),
+            std::vector<std::string>{"malformed or unsupported envelope (length 1)"});
+  EXPECT_EQ(state_of(opener)->decrypt, nullptr);
+  EXPECT_TRUE(all_zero(state_of(opener)->kr.key, sizeof(state_of(opener)->kr.key)));
+  gcm_decrypt_kr_deinit(&opener);
+}
+
+TEST_F(KrUdf, GivenADeterministicRowSucceeded_WhenTheNextRowFails_ThenTheNonceKeyIsGoneToo) {
+  // Given: gcm_encrypt_det_kr has cached its nonce key (design A11) on a good row
+  const std::string other = "another_key";
+  Args good_row(&kName, &kId);
+  Args other_row(&kName, &other);
+  UDF_INIT item{};
+  ASSERT_FALSE(gcm_encrypt_det_kr_init(&item, &good_row.args, message_)) << message_;
+  ASSERT_TRUE(call(gcm_encrypt_det_kr_udf, &item, &good_row).returned);
+  ASSERT_NE(state_of(item)->det.key_len, 0u);
+
+  // When: the next row fails on the key source
+  const Row row = call(gcm_encrypt_det_kr_udf, &item, &other_row);
+
+  // Then: the A11 state goes with the fetched key
+  EXPECT_EQ(row.error, 1);
+  EXPECT_EQ(state_of(item)->det.key_len, 0u);
+  EXPECT_TRUE(all_zero(state_of(item)->det.key, sizeof(state_of(item)->det.key)));
+  EXPECT_TRUE(all_zero(state_of(item)->det.nonce_key, sizeof(state_of(item)->det.nonce_key)));
+  EXPECT_TRUE(all_zero(state_of(item)->kr.key, sizeof(state_of(item)->kr.key)));
+  gcm_encrypt_det_kr_deinit(&item);
+}
+
+TEST_F(KrUdf, GivenARowRaisedAnError_WhenTheItemIsCalledAgain_ThenRefusedWithoutAKeyringRead) {
+  // Given: the server never makes this call — it stops calling a function that reported an
+  //        error — so this pins only that a call made anyway is not served
+  std::string bad = seal(kName);
+  bad.back() = static_cast<char>(bad.back() ^ 0x01);
+  const std::string good = seal(kName);
+  Args bad_row(&bad, &kId);
+  Args good_row(&good, &kId);
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_kr_init(&opener, &bad_row.args, message_)) << message_;
+  ASSERT_EQ(call(gcm_decrypt_kr_udf, &opener, &bad_row).error, 1);
+
+  // When
+  const Row second = call(gcm_decrypt_kr_udf, &opener, &good_row);
+
+  // Then
+  EXPECT_FALSE(second.returned);
+  EXPECT_EQ(second.error, 1);
+  EXPECT_EQ(error_messages().back(), kSpent);
+  EXPECT_EQ(details_for("keyring_init").size(), 1u);
+  gcm_decrypt_kr_deinit(&opener);
+}
+
+/* gcm.min_key_bytes is an encryption-side policy: both encryption functions, and only they. */
+struct EncryptFunction {
+  const char *name;
+  bool (*init)(UDF_INIT *, UDF_ARGS *, char *);
+  RowFn row;
+  void (*deinit)(UDF_INIT *);
+};
+
+class Floor : public KrUdf, public ::testing::WithParamInterface<EncryptFunction> {};
+
+TEST_P(Floor, GivenAnAes128Key_WhenUsedToSealUnderTheDefaultFloor_ThenRefusedByTheFloor) {
   // Given
   const std::string id = "short_key";
   gcm_adapter::put_keyring_entry(kAccount, id, "AES", std::string(16, 'k'));
   Args args(&kName, &id);
   UDF_INIT item{};
-  ASSERT_FALSE(gcm_encrypt_kr_init(&item, &args.args, message_)) << message_;
+  ASSERT_FALSE(GetParam().init(&item, &args.args, message_)) << message_;
 
   // When
-  const Row row = call(gcm_encrypt_kr_udf, &item, &args);
+  const Row row = call(GetParam().row, &item, &args);
 
   // Then: the message names the floor, a public setting, and not the length of the entry
   EXPECT_EQ(row.error, 1);
   EXPECT_EQ(error_messages(),
             std::vector<std::string>{"the key is below gcm.min_key_bytes = 32; decryption of "
                                      "existing data is unaffected"});
-  gcm_encrypt_kr_deinit(&item);
+  GetParam().deinit(&item);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    KrUdf, Floor,
+    ::testing::Values(EncryptFunction{"Random", gcm_encrypt_kr_init, gcm_encrypt_kr_udf,
+                                      gcm_encrypt_kr_deinit},
+                      EncryptFunction{"Deterministic", gcm_encrypt_det_kr_init,
+                                      gcm_encrypt_det_kr_udf, gcm_encrypt_det_kr_deinit}),
+    [](const ::testing::TestParamInfo<EncryptFunction> &info) { return info.param.name; });
 
 TEST_F(KrUdf, GivenAnAes128KeyAndAnAes256Envelope_WhenOpened_ThenNoLengthInTheMessage) {
   // Given
@@ -713,9 +817,8 @@ TEST_F(KrUdf, GivenTheLongestAccountThatFits_WhenARowRuns_ThenTheKeyringIsAskedU
   gcm_encrypt_kr_deinit(&item);
 }
 
-/* Only the release is observable here. That the fetched key is wiped before it is freed
-   (free_state in src/udf_glue.cc) is confirmed by reading, not by this case: seeing it
-   would need a seam in src/, which the architecture rule does not allow for a test. */
+/* The release itself. That the secrets are wiped is pinned where it can be seen, on the
+   error path above; after deinit the memory is gone and there is nothing left to look at. */
 TEST_F(KrUdf, GivenAnItemThatReadAKey_WhenDeinit_ThenItsStateIsReleased) {
   // Given
   Args args(&kName, &kId);

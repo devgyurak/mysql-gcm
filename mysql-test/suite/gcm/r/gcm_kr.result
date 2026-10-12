@@ -57,6 +57,49 @@ SELECT gcm_decrypt_kr(name_enc, 'mtr_absent') FROM patients;
 ERROR HY000: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account
 # Then: still an error — a missing key is not hidden by a setting
 SET GLOBAL gcm.strict = DEFAULT;
+# Given: NULL in each argument position
+# When: the functions are called
+SELECT gcm_encrypt_kr(NULL, 'mtr_name_v1') IS NULL AS null_plaintext,
+gcm_encrypt_det_kr('x', NULL) IS NULL AS null_id,
+gcm_decrypt_kr(@c, 'mtr_name_v1', NULL) IS NULL AS null_aad;
+null_plaintext	null_id	null_aad
+1	1	1
+# Then: NULL each time, with no error
+# Given: the empty string
+# When: it is sealed and opened by key id
+SELECT LENGTH(gcm_encrypt_kr('', 'mtr_name_v1')) AS envelope_length,
+gcm_decrypt_kr(gcm_encrypt_kr('', 'mtr_name_v1'), 'mtr_name_v1') = '' AS round_trip;
+envelope_length	round_trip
+29	1
+# Then: a 29 byte envelope that opens to the empty string
+# Given: a value sealed by key id with an AAD
+SET @with_aad = gcm_encrypt_det_kr('홍길동', 'mtr_name_v1', 'patients.name');
+# When: it is opened with the same AAD
+SELECT gcm_decrypt_kr(@with_aad, 'mtr_name_v1', 'patients.name') AS same_aad;
+same_aad
+홍길동
+# Then: the name
+# Given: the same value
+# When: it is opened with a different AAD
+SELECT gcm_decrypt_kr(@with_aad, 'mtr_name_v1', 'patients.other');
+ERROR HY000: gcm_decrypt_kr UDF failed; authentication tag verification failed
+# Then: a tag error — the AAD is authenticated
+# Given: a malformed envelope and a usable key
+# When: it is opened by key id
+SELECT gcm_decrypt_kr(UNHEX('02'), 'mtr_name_v1');
+ERROR HY000: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 1)
+# Then: an envelope error
+# Given: an AES-128 key in the keyring, and an AES-256 envelope
+DO keyring_key_generate('mtr_short', 'AES', 16);
+# When: the key is used to seal under the default floor of 32
+SELECT gcm_encrypt_kr('x', 'mtr_short');
+ERROR HY000: gcm_encrypt_kr UDF failed; the key is below gcm.min_key_bytes = 32; decryption of existing data is unaffected
+# Then: refused by gcm.min_key_bytes
+# Given: the same AES-128 key
+# When: it is used to open the AES-256 envelope
+SELECT gcm_decrypt_kr(@c, 'mtr_short');
+ERROR HY000: gcm_decrypt_kr UDF failed; the key's length does not match the envelope version
+# Then: a suite mismatch that does not state the key length
 DROP TABLE patients;
 # ----------------------------------------------------------------------
 # Teardown

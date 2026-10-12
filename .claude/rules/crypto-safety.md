@@ -19,8 +19,10 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   Final *is* the tag verification result. When Final returns 0, discard the output buffer with
   `OPENSSL_cleanse` — never return unauthenticated plaintext.
 
-## Key handling (amendment A1: the key is a SQL argument)
-- The key arrives only as the UDF argument `key`, and is **exactly 32, 24 or 16 bytes** — the length
+## Key handling (amendment A1: the key is a SQL argument; A13: or a keyring entry named by id)
+- The key arrives as the UDF argument `key` — or, for the three `_kr` functions only, from the
+  keyring entry the argument `key_id` names for the calling account (amendment A13) — and is
+  **exactly 32, 24 or 16 bytes** — the length
   selects AES-256, AES-192 or AES-128 and nothing else does (amendment A10), and the two encryption
   functions additionally refuse anything below `gcm.min_key_bytes` (default 32). Any other length is
   an error. Do not fold (XOR), hash or pad it to length — that weakness of `AES_ENCRYPT` is not to be
@@ -34,6 +36,17 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   and cleansed before replacement; it is cleansed and forgotten on any failure of the cipher operation, `bad_tag`
   included, and the context is reset with it; it is cleansed in `deinit`; and it is never shared
   across threads.
+- **The key a `_kr` function fetched (amendment A13).** A `UDF_INIT` may also hold the key read from
+  the keyring (at most 32 bytes) with the key id and the account it was read under, from the first
+  non-NULL row to `deinit`, on these conditions and no others: it is read at most once per
+  `UDF_INIT`, through one reader object released before the read returns; the id and the account
+  are compared on every row and a difference is an error; it is **not** discarded on `bad_tag` —
+  the A11 context and nonce-key copies still are — because with `gcm.strict=OFF` the next row needs
+  it and a second read would be a per-row keyring call; a key-source failure is latched; it is
+  cleansed in `deinit`; and it is never shared across threads or `UDF_INIT`s. An entry whose data
+  length or type length disqualifies it is never copied out of the keyring; any other rejected
+  entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as
+  soon as a failure is latched.
 - Derive the deterministic nonce key as `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`. Never use the
   encryption key directly as an HMAC key (domain separation). The label string is a single constant in
   `nonce.h`.
@@ -50,6 +63,10 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   regardless of strict. Data corruption and misconfiguration are not hidden behind a setting.
 - Never put key, plaintext, nonce, tag or ciphertext bytes in an error message, a server log, an
   assertion or an exception string. Lengths and the version byte are as far as it goes.
+- A key that cannot be had from the keyring is **always** an error, regardless of strict
+  (amendment A13). Absent, wrong type and wrong length are one message. No `_kr` message carries
+  the key id, the account, or the type or length of a keyring entry — the length of a keyring key is
+  not "a length" in the sense of the line above.
 
 ## The deterministic variant
 - `nonce = HMAC-SHA256(nonce_key, plaintext)[:12]`. AAD is **not** an input to the nonce calculation
@@ -90,4 +107,7 @@ hardcoded key literal, any branch that accepts a key length outside {16, 24, 32}
 `gcm.min_key_bytes` check on encryption, any branch that turns a tag
 failure into NULL without consulting strict, an unchecked `EVP_DecryptFinal_ex` return value, a key
 copy that outlives its `UDF_INIT`, and a cross-row cache keyed on anything but the full key bytes
-(amendment A11).
+(amendment A11) — the one exception being the `_kr` functions' fetched key, keyed on the calling
+account and the key id and compared on both every row (amendment A13). Also blocked: a keyring
+reader object kept across rows, a keyring read in `init`, a `_kr` error message that names the key
+id, the account or a keyring entry's length or type, and any write to the keyring.

@@ -25,6 +25,7 @@ Three SQL functions — `gcm_encrypt`, `gcm_encrypt_det`, `gcm_decrypt` — that
 AES-GCM to MySQL 8.0, 8.4 and 9.x as a server **component**. The decrypted value comes back tagged
 `utf8mb4`, so `WHERE gcm_decrypt(name, @k) LIKE '%길%'` runs **inside the server** with MySQL's own
 collation. Partial-match search on an encrypted Korean column is the reason this project exists.
+Three optional `_kr` variants take a key id and read the key from the server's keyring instead.
 
 **0.1.0 is the first release, and the construction has not had a human cryptographic audit** — a
 scoped AI design review of two questions is recorded in `docs/design.md` A12
@@ -48,6 +49,7 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
    a different nonce on the replica. Not usable in generated columns or indexes.
 2. **Keys and plaintext are SQL arguments**, so they can reach the general and slow logs,
    `performance_schema` and an SBR binlog — `'%김%'` patterns too. Same exposure as `AES_ENCRYPT`.
+   The key-id functions (item 17) take the key out of the statement; the plaintext stays.
 3. **Self-managed MySQL only.** RDS, Aurora and Cloud SQL do not expose `plugin_dir`.
 4. **Use `loose_` in my.cnf** (`loose_gcm.strict=ON`), or the server refuses to start before the
    component is installed.
@@ -74,12 +76,19 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
     and usage limits are not enforced. No human cryptographic audit has been done; the A12 AI review
     covers two design questions only. Review the construction and your deployment before production.
 14. **Installing the component is not replicated.** Install it on every server that decrypts and on
-    every replica that could be promoted.
+    every replica that could be promoted. Keyring contents are not replicated either (item 17).
 15. **Shard on a stable identifier, never on ciphertext.** Comparing deterministic values across
     shards needs the same key, plaintext and AAD; count encryptions across every shard sharing a key.
 16. **A truncated key silently picks a weaker cipher unless `gcm.min_key_bytes` stops it.** The key
     length selects the suite. The floor is GLOBAL, defaults to `32`, and is ignored by decryption,
     so raising it never locks out data.
+17. **The key-id functions move the key into the keyring; they do not make it safe there.** The
+    boundary is the account, not a privilege. With the file keyring — the only one in MySQL
+    Community — the key sits beside the data; external backends are untested. Share a key through a
+    definer routine with the id hard-coded, never through a view.
+18. **Do not nest one of these functions inside another with a bound parameter.**
+    `gcm_decrypt(gcm_encrypt(?, ?), ?)` in a prepared statement fails, and afterwards
+    `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, seen on 8.4.
 
 ## Support matrix
 
@@ -160,6 +169,33 @@ would mean is ambiguous.
   shorter keys on encryption; set `24` or `16` to allow the smaller suites (constraint 16).
 - **A failed tag is an error** while `gcm.strict` is ON (the default) and NULL when it is OFF. A
   malformed envelope or a wrong key length is always an error.
+
+### Key-id functions (optional)
+
+| Function | Same envelopes and semantics as |
+|:--|:--|
+| `gcm_encrypt_kr(plaintext, key_id [, aad])` | `gcm_encrypt` |
+| `gcm_encrypt_det_kr(plaintext, key_id [, aad])` | `gcm_encrypt_det` |
+| `gcm_decrypt_kr(ciphertext, key_id [, aad])` | `gcm_decrypt` |
+
+These read the key from the server's keyring instead of taking it as an argument, so the key is not
+in the statement or in the logs the statement reaches (`docs/design.md` amendment A13). They need a
+keyring component loaded; without one the component still installs and only these three fail.
+
+```sql
+SELECT keyring_key_generate('patient_name_v1', 'AES', 32);   -- the key never appears in a statement
+
+INSERT INTO patients (name_enc) VALUES (gcm_encrypt_kr('홍길동', 'patient_name_v1'));
+SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'patient_name_v1') LIKE '%길%';
+```
+
+- **The key belongs to the calling account** (`user@host`), the namespace the server's
+  `keyring_key_generate` writes to. Another account cannot use it by naming the id.
+- **The envelope is the same**, so a column can move between the two families: a value sealed by
+  `gcm_encrypt(…, key)` opens with `gcm_decrypt_kr(…, id)` when the keyring holds the same key bytes.
+- **Every failure to get the key is an error**, whatever `gcm.strict` says, and the message never
+  names the id, the account or the stored entry.
+- **Read constraint 17 first.** The file keyring keeps the key next to the data.
 
 Byte layout, failure codes and test vectors: [`spec/envelope.md`](spec/envelope.md).
 

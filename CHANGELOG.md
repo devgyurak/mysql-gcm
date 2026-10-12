@@ -5,6 +5,21 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Added
+- **Key-id functions** (#34, design amendment A13): `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and
+  `gcm_decrypt_kr` take a key id and use the `AES` key stored under it in the MySQL keyring for the
+  calling account (`priv_user@priv_host`, the namespace of `keyring_key_generate`). The key is no
+  longer an argument of the statement. **No envelope change**: they produce and read the same
+  `0x02`–`0x07` bytes as the key-argument functions, which are unchanged, and either family opens
+  what the other sealed. Optional: the component installs without a keyring and only these three
+  functions then fail. Every failure to obtain the key is an error regardless of `gcm.strict`. The
+  component now requires `keyring_reader_with_status`, `mysql_thd_security_context` and
+  `mysql_security_context_options`, and `mysql_current_thread_reader` on 8.0 and 8.4 as well as 9.x.
+  All four were found in the 8.0.43, 8.4.11 and 9.4.0 trees it is built against; the oldest 8.0
+  release that has them all was not established (the keyring reader arrived in 8.0.24). Read
+  operational constraint 17 before using them — with the file keyring the key is stored beside the
+  data, and external keyring backends are untested.
+
 ### Documented
 - **Design amendment A13, proposed** (#34): three optional functions — `gcm_encrypt_kr`,
   `gcm_encrypt_det_kr`, `gcm_decrypt_kr` — that take a key id and read the key from the MySQL keyring

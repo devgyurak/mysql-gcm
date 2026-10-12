@@ -23,7 +23,7 @@ Style comes last.
 2. Automated review (the `code-reviewer` agent, plus `crypto-reviewer` on a crypto path): a
    prerequisite **before** human review, not a substitute for it.
 3. Human review: one reviewer for an ordinary PR. Two for the crypto, envelope and sysvar paths
-   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `spec/`).
+   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `key_source.cc`, `udf_kr.cc`, `spec/`).
 4. Merge conditions: CI green + the required approvals + zero open P1 + zero P2 that has not been
    explicitly deferred.
 
@@ -36,6 +36,9 @@ Style comes last.
 - [ ] NULL, empty-string and maximum-length arguments are handled
 - [ ] Result charset tagging (`gcm_decrypt`) / BLOB (`gcm_encrypt*`)
 - [ ] A session sysvar is actually read as the session value
+- [ ] `_kr` functions (amendment A13): one keyring read per `UDF_INIT` and none in init, the reader
+      released on every path, id and account compared on every row, failures latched and never NULL,
+      no key id, account or entry length or type in a message
 
 **Safety (P1)** — grep for the blocked patterns in `crypto-safety.md`, check for keys or plaintext in
 logs, check that memory is cleansed

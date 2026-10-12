@@ -8,10 +8,11 @@
 
 > ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
 >
-> **Status: proposed (issue #34). Nothing is implemented by this amendment.** Merging the PR that
-> adds this text records the proposal and decides nothing. It becomes the design when the
-> implementation PR merges, which needs the `crypto-reviewer` pass and two human reviewers: it
-> changes key handling and widens what amendment A11 lets a `UDF_INIT` keep.
+> **Status: implemented, awaiting review (issue #34).** The implementation is in the PR that carries
+> this revision of the text. It becomes the design when that PR merges, which needs the
+> `crypto-reviewer` pass and two human reviewers: it changes key handling and widens what amendment
+> A11 lets a `UDF_INIT` keep. "Implementation notes" at the end of this amendment records what the
+> implementation pinned, what it only observed, and one server defect it ran into.
 >
 > Amendment A1 withdrew the keyring design and left the door open: "the keyring approach can be
 > revisited later as an optional feature (something like `gcm_encrypt_kr`)". This is that revisit. It
@@ -265,6 +266,44 @@
 > - Per-key usage counters (issue #35), which this makes possible by giving a key a name.
 > - `tests/e2e`: a replica with its own keyring is a separate piece of test infrastructure.
 >
+> ### Implementation notes (2026-10-12)
+>
+> **Pinned by committed tests.** `tests/integration/60_kr_roundtrip`, `61_kr_key_source` and
+> `62_kr_accounts` run on 8.0, 8.4 and 9.4 with one expected output each: the round trip and Korean
+> `LIKE '%길%'`, interoperation with the key-argument functions in both directions and identical
+> deterministic bytes, the floor, a legacy `0x01` envelope, the one "no usable key" error for an
+> absent id, a `SECRET` and an 8-byte `AES` entry, invalid ids, NULL arguments, an id that varies by
+> row, a key id sent as a bound parameter, and the account table above — another account's id, a
+> definer function, an invoker function, a definer view. `tests/adapter/key_source_test.cc` pins
+> what a real server cannot be made to show: one keyring read per `UDF_INIT` and none in `init`, no
+> reader left open on any path, each keyring call failing, the latch, the account changing between
+> rows, and the fetched key surviving `bad_tag` under `gcm.strict=OFF`.
+>
+> **Not done: the MTR case.** A `gcm_kr` case for `mysql-test/suite/gcm` was written — it is the
+> layer that would show `gcm.strict=OFF` across the rows of one statement against a real server, and
+> that nothing lands in the error log — but its `.result` could not be recorded: the server tree
+> would not link in the memory available where this was implemented. It is left out rather than
+> committed with a hand-written result. Until it is recorded, the strict-OFF path of the `_kr`
+> functions is pinned against stub services only.
+>
+> **Observed by hand, not pinned.** On a server with no keyring loaded the component installs and
+> a `_kr` call raises *keyring unavailable*: run on 8.0.46, 8.4.11 and 9.4.0, which closes the gate
+> above, but no committed case starts such a server. The `UDF_INIT` counts in the third table come
+> from the probe's counter and are not reproduced by a committed test either.
+>
+> **A server defect found on the way, not specific to these functions.** When a loadable function is
+> an argument of another loadable function and takes a prepared-statement parameter, the outer
+> function's `init` evaluates the inner call before the parameter has its value. The inner function
+> sees an empty string: `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE`
+> with a 0-byte key, and the `_kr` form fails with *invalid id*. Worse, after that error
+> `UNINSTALL COMPONENT` is refused until the server restarts — a reference to the inner function is
+> evidently not released. Observed on 8.4.11 with the key-argument functions, so it predates this
+> amendment; not tried on 8.0 or 9.4. It is **not** pinned by a committed case, because a case that
+> triggers it leaves the server unable to uninstall the component for every case after it. It needs
+> its own issue: whether the inner function's `deinit` runs at all in that path decides whether A11's
+> "cleansed in `deinit`" holds there. Until then: do not nest one of these functions inside another
+> with a bound parameter. Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
+>
 > **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
 > backward compatible: no envelope a released build wrote or reads is affected.
 >
@@ -275,7 +314,7 @@
 > | `src/` | a keyring-and-caller adapter; the three `_kr` UDFs reusing `udf_glue` and the unchanged core; the per-instance key copy; three more service requirements in `component.cc`, with `mysql_current_thread_reader` required on every version |
 > | `spec/envelope.md` | the argument contract and failure semantics of the three functions. No byte layout and no vector changes |
 > | `tests/adapter` | stubs for the new services; every key-source failure injected |
-> | `tests/integration`, `mysql-test` | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
+> | `tests/integration` (and `mysql-test`, see "Implementation notes") | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
 > | `scripts/dev-up.sh`, `scripts/verify.sh` | the test servers load `component_keyring_file` and `keyring_udf` |
 > | `crypto-safety.md`, `architecture.md` §3 | the widened key-copy rule and its lifetime row |
 > | README, `docs/ops-constraints.md`, `AGENTS.md` | the function table, constraints 2 and 14, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
@@ -1529,6 +1568,7 @@ forward compatibility.
 | A UDF return value's charset can be set (8.0.19+) | `mysql_udf_metadata` (WL#12370) |
 | `AES_ENCRYPT` supports a KDF (hkdf/pbkdf2_hmac) from 8.0.30+ | the 8.0 reference — for information |
 | `udf_registration`, `mysql_udf_metadata`, `component_sys_variable_register`/`_unregister`, `mysql_runtime_error` and `mysql_current_thread_reader` are present in 8.0.43, 8.4.11 and 9.4.0 | measured in `include/mysql/components/services/` across the three tags |
+| The services behind the `_kr` functions have the same signatures in 8.0.43, 8.4.11 and 9.4.0: `keyring_reader_with_status` (introduced in 8.0.24), `mysql_thd_security_context` and `mysql_security_context_options` (in the tree at 8.0.4), `mysql_current_thread_reader` (present at 8.0.43; the release that introduced it was not established) | amendment A13 — read in `include/mysql/components/services/` across the three trees |
 | **The SESSION scope for a component sysvar, and `mysql_system_variable_reader`, are 9.0.0+ only** | amendment A5 — measured in `component_sys_var_service.cc` and `mysql_system_variable.h` across the three tags |
 | `CONFIGURE_COMPONENTS()` globs `components/*`, so placing the sources in `components/gcm` and re-running configure builds in-tree | `cmake/component.cmake` |
 | On the RHEL9 family, the compiler the server source requires is gcc-toolset-12 for 8.0/8.4 and **gcc-toolset-14 for 9.x** | the `ALTERNATIVE_PATHS` (`LINUX_RHEL9` branch) in each tag's `CMakeLists.txt`. Measured: with toolset-13, configuring 9.4.0 fails with "Could not find devtoolset compiler/linker". `rhel9_toolset` in `docker/versions.json` is the source of this value |

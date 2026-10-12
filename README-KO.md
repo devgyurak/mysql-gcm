@@ -25,6 +25,7 @@
 AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4` 문자셋을 태깅하므로
 `WHERE gcm_decrypt(name, @k) LIKE '%길%'` 가 MySQL 자신의 collation 으로 **서버 안에서** 돕니다.
 암호화된 한글 컬럼에서 부분일치 검색을 지키는 것이 이 프로젝트의 존재 이유입니다.
+선택 기능인 `_kr` 변형 세 개는 키 id 를 받아 서버의 keyring 에서 키를 읽습니다.
 
 **0.1.0 이 첫 릴리스이고, 이 구성은 사람의 암호 감사를 받지 않았습니다.** 두
 질문에 대한 범위 한정 AI 설계 검토가 `docs/design-KO.md` A12 에 기록돼 있습니다(제약 13). 기대기
@@ -47,7 +48,8 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
 1. **`gcm_encrypt` 는 비결정적입니다: ROW binlog 를 쓰세요.** 문장 기반 복제에서는 복제본이 다른
    nonce 를 계산합니다. 생성 컬럼과 인덱스에는 쓸 수 없습니다.
 2. **키와 평문은 SQL 인자**이므로 general·slow 로그, `performance_schema`, SBR binlog 에 남을 수
-   있습니다. `'%김%'` 같은 패턴도 마찬가지입니다. `AES_ENCRYPT` 와 같은 노출입니다.
+   있습니다. `'%김%'` 같은 패턴도 마찬가지입니다. `AES_ENCRYPT` 와 같은 노출입니다. 키 id 함수(제약
+   17)는 키를 문장에서 빼지만 평문은 그대로 남습니다.
 3. **직접 운영하는 MySQL 전용입니다.** RDS · Aurora · Cloud SQL 은 `plugin_dir` 를 열어 주지 않습니다.
 4. **my.cnf 에는 `loose_` 를 붙이세요**(`loose_gcm.strict=ON`). 붙이지 않으면 component 설치 전에는
    서버가 시작하지 않습니다.
@@ -72,10 +74,18 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
     강제하지 않습니다. 사람의 암호 감사는 없었고, A12 의 AI 검토는 설계 질문 둘만 다룹니다. 운영 전에
     구성과 배포를 검토하세요.
 14. **component 설치는 복제되지 않습니다.** 복호화하는 모든 서버와 승격될 수 있는 모든 복제본에 설치하세요.
+    keyring 내용도 복제되지 않습니다(제약 17).
 15. **샤드는 암호문이 아니라 안정된 식별자로 나누세요.** 샤드 간 결정적 값 비교에는 같은 키 · 평문 ·
     AAD 가 필요하고, 키를 공유하는 모든 샤드의 암호화 횟수를 합산해야 합니다.
 16. **잘린 키는 `gcm.min_key_bytes` 가 막지 않으면 조용히 약한 암호를 고릅니다.** 키 길이가 수트를
     정합니다. 이 하한은 GLOBAL 이고 기본값 `32` 이며 복호화는 무시하므로, 올려도 데이터가 잠기지 않습니다.
+17. **키 id 함수는 키를 keyring 으로 옮길 뿐, 거기서 안전하게 만들어 주지는 않습니다.** 경계는 권한이
+    아니라 계정입니다. file keyring — MySQL Community 에 있는 유일한 keyring — 에서는 키가 데이터 옆에
+    있고, 외부 백엔드는 검증되지 않았습니다. 키 공유는 id 를 하드코딩한 definer 루틴으로 하고, 뷰로는
+    하지 마세요.
+18. **바인딩 인자와 함께 이 함수들을 서로 중첩하지 마세요.** prepared statement 의
+    `gcm_decrypt(gcm_encrypt(?, ?), ?)` 는 실패하고, 그 뒤에는 서버를 재시작할 때까지
+    `UNINSTALL COMPONENT` 가 거부됩니다. 서버 결함이며 8.4 에서 확인했습니다.
 
 ## 지원 범위
 
@@ -152,6 +162,33 @@ sha256sum -c SHA256SUMS
   짧은 키를 거부합니다. 작은 수트를 쓰려면 `24` 나 `16` 으로 낮추세요(제약 16).
 - **태그 검증 실패**는 `gcm.strict` 가 ON(기본값)이면 오류, OFF 면 NULL 입니다. 잘못된 봉투나 키
   길이는 언제나 오류입니다.
+
+### 키 id 함수 (선택)
+
+| 함수 | 봉투와 동작이 같은 함수 |
+|:--|:--|
+| `gcm_encrypt_kr(plaintext, key_id [, aad])` | `gcm_encrypt` |
+| `gcm_encrypt_det_kr(plaintext, key_id [, aad])` | `gcm_encrypt_det` |
+| `gcm_decrypt_kr(ciphertext, key_id [, aad])` | `gcm_decrypt` |
+
+키를 인자로 받는 대신 서버의 keyring 에서 읽으므로, 키가 문장에도 그 문장이 닿는 로그에도 남지
+않습니다(`docs/design.md` 개정 A13). keyring component 가 로드돼 있어야 합니다. 없어도 component 는
+설치되고 이 세 함수만 실패합니다.
+
+```sql
+SELECT keyring_key_generate('patient_name_v1', 'AES', 32);   -- 키는 어떤 문장에도 나타나지 않습니다
+
+INSERT INTO patients (name_enc) VALUES (gcm_encrypt_kr('홍길동', 'patient_name_v1'));
+SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'patient_name_v1') LIKE '%길%';
+```
+
+- **키는 호출한 계정(`user@host`)의 것입니다.** 서버의 `keyring_key_generate` 가 쓰는 네임스페이스와
+  같습니다. 다른 계정은 id 를 안다고 해서 그 키를 쓸 수 없습니다.
+- **봉투가 같으므로** 컬럼이 두 계열 사이를 오갈 수 있습니다. `gcm_encrypt(…, key)` 로 봉인한 값은
+  keyring 에 같은 키 바이트가 있으면 `gcm_decrypt_kr(…, id)` 로 열립니다.
+- **키를 얻지 못한 모든 경우는 오류**이며 `gcm.strict` 와 무관합니다. 메시지에는 id 도 계정도 저장된
+  항목의 정보도 들어가지 않습니다.
+- **제약 17 을 먼저 읽으세요.** file keyring 은 키를 데이터 옆에 둡니다.
 
 바이트 배치, 실패 코드, 테스트 벡터: [`spec/envelope.md`](spec/envelope.md).
 

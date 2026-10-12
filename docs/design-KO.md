@@ -7,10 +7,10 @@
 
 > ## 개정 A13 (2026-10-12) — 키 id 를 받아 keyring 에서 키를 읽는 함수
 >
-> **상태: 제안됨 (이슈 #34). 이 개정으로 구현되는 것은 없다.** 이 문구를 추가하는 PR 의 머지는 제안을
-> 기록할 뿐 아무것도 결정하지 않는다. 구현 PR 이 머지될 때 설계가 되며, 그 머지에는 `crypto-reviewer`
-> 검토와 사람 검토자 두 명이 필요하다. 키 취급을 바꾸고, 개정 A11 이 `UDF_INIT` 에 허용한 보관 범위를
-> 넓히기 때문이다.
+> **상태: 구현됨, 검토 대기 (이슈 #34).** 구현은 이 문구의 이 판을 담은 PR 에 있다. 그 PR 이 머지될 때
+> 설계가 되며, 그 머지에는 `crypto-reviewer` 검토와 사람 검토자 두 명이 필요하다. 키 취급을 바꾸고, 개정
+> A11 이 `UDF_INIT` 에 허용한 보관 범위를 넓히기 때문이다. 이 개정 끝의 "구현 기록" 에 구현이 고정한 것,
+> 관찰만 한 것, 그리고 도중에 만난 서버 결함 하나를 적는다.
 >
 > 개정 A1 은 keyring 설계를 철회하면서 문을 열어 두었다: "keyring 방식은 향후 선택 기능
 > (`gcm_encrypt_kr` 류)으로 재검토할 수 있다". 이 개정이 그 재검토다. 함수 세 개를 **추가**하고 기존 세
@@ -237,6 +237,41 @@
 > - 키별 사용량 카운터(이슈 #35). 이 개정이 키에 이름을 줌으로써 가능해진다.
 > - `tests/e2e`: 자체 keyring 을 가진 replica 는 별도의 테스트 인프라다.
 >
+> ### 구현 기록 (2026-10-12)
+>
+> **커밋된 테스트로 고정한 것.** `tests/integration/60_kr_roundtrip`, `61_kr_key_source`,
+> `62_kr_accounts` 는 8.0, 8.4, 9.4 에서 각각 하나의 기대 출력으로 실행된다: 왕복과 한글
+> `LIKE '%길%'`, 키 인자 함수와의 양방향 상호 운용과 동일한 결정적 바이트, 하한, legacy `0x01` 봉투,
+> 없는 id·`SECRET`·8바이트 `AES` 항목에 대한 하나의 "쓸 수 있는 키 없음" 에러, 잘못된 id, NULL 인자,
+> 행마다 달라지는 id, 바인딩 인자로 보낸 키 id, 그리고 위의 계정 표 — 다른 계정의 id, definer 함수,
+> invoker 함수, definer 뷰. `tests/adapter/key_source_test.cc` 는 실제 서버로는 보여 줄 수 없는 것을
+> 고정한다: `UDF_INIT` 당 keyring 읽기 한 번과 `init` 에서의 읽기 없음, 어떤 경로에서도 reader 가 열린 채
+> 남지 않음, 각 keyring 호출의 실패, 고정(latch), 행 사이의 계정 변경, 그리고 `gcm.strict=OFF` 에서
+> `bad_tag` 뒤에도 남는 읽어 온 키.
+>
+> **하지 못한 것: MTR 케이스.** `mysql-test/suite/gcm` 용 `gcm_kr` 케이스를 작성했다 — 실제 서버에서 한
+> 문장의 여러 행에 걸친 `gcm.strict=OFF` 와, 에러 로그에 아무것도 남지 않음을 보여 줄 계층이다 — 그러나
+> `.result` 를 기록하지 못했다: 구현한 환경의 메모리로는 서버 트리가 링크되지 않았다. 손으로 쓴 결과와
+> 함께 커밋하는 대신 뺐다. 기록될 때까지 `_kr` 함수의 strict-OFF 경로는 스텁 서비스에 대해서만 고정돼
+> 있다.
+>
+> **손으로 관찰했고 고정하지 않은 것.** keyring 이 로드되지 않은 서버에서 컴포넌트는 설치되고 `_kr`
+> 호출은 *keyring 사용 불가* 를 낸다: 8.0.46, 8.4.11, 9.4.0 에서 실행했고 위의 관문은 닫혔지만, 그런
+> 서버를 띄우는 커밋된 케이스는 없다. 세 번째 표의 `UDF_INIT` 개수도 프로브의 카운터에서 나온 것이며
+> 커밋된 테스트로 재현하지 않는다.
+>
+> **도중에 발견한 서버 결함. 이 함수들에 한정되지 않는다.** loadable function 이 다른 loadable function
+> 의 인자이면서 prepared statement 의 매개변수를 받으면, 바깥 함수의 `init` 이 매개변수에 값이 들어오기
+> 전에 안쪽 호출을 평가한다. 안쪽 함수는 빈 문자열을 본다:
+> `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` 는 `EXECUTE` 에서 0바이트 키로 실패하고, `_kr`
+> 형태는 *잘못된 id* 로 실패한다. 더 나쁜 것은 그 에러 뒤에 `UNINSTALL COMPONENT` 가 서버를 재시작할
+> 때까지 거부된다는 점이다 — 안쪽 함수에 대한 참조가 해제되지 않는 것으로 보인다. 8.4.11 에서 키 인자
+> 함수로 관찰했으므로 이 개정 이전부터 있던 것이다. 8.0 과 9.4 에서는 시도하지 않았다. 커밋된 케이스로
+> 고정하지 **않는다**: 이를 유발하는 케이스는 그 뒤의 모든 케이스에서 서버가 컴포넌트를 언인스톨하지
+> 못하게 만든다. 별도 이슈가 필요하다: 그 경로에서 안쪽 함수의 `deinit` 이 실행되기는 하는지가 A11 의
+> "`deinit` 에서 cleanse" 가 거기서 성립하는지를 결정한다. 그때까지: 이 함수들을 바인딩 인자와 함께 서로
+> 중첩하지 말 것. builtin 안의 중첩(`LENGTH(gcm_encrypt(?, ?))`)은 영향받지 않는다.
+>
 > **순서.** 0.1.0 이후, 다음 마이너 릴리스의 선택 기능으로. 함수 추가는 하위 호환이다: 출시된 빌드가
 > 쓰거나 읽는 봉투는 영향받지 않는다.
 >
@@ -247,7 +282,7 @@
 > | `src/` | keyring·호출자 어댑터; `udf_glue` 와 바뀌지 않은 코어를 재사용하는 `_kr` UDF 세 개; 인스턴스별 키 복사본; `component.cc` 의 요구 서비스 세 개 추가, `mysql_current_thread_reader` 는 모든 버전에서 요구 |
 > | `spec/envelope.md` | 세 함수의 인자 계약과 실패 의미. 바이트 레이아웃과 벡터는 변경 없음 |
 > | `tests/adapter` | 새 서비스의 스텁; 키 출처의 모든 실패 주입 |
-> | `tests/integration`, `mysql-test` | 왕복, 한글 `LIKE '%길%'`, 키 인자 함수와의 상호 운용, 계정 격리, definer 루틴, 바인딩 인자, 행마다 달라지는 id, 하한 |
+> | `tests/integration` (`mysql-test` 는 "구현 기록" 참조) | 왕복, 한글 `LIKE '%길%'`, 키 인자 함수와의 상호 운용, 계정 격리, definer 루틴, 바인딩 인자, 행마다 달라지는 id, 하한 |
 > | `scripts/dev-up.sh`, `scripts/verify.sh` | 테스트 서버가 `component_keyring_file` 과 `keyring_udf` 를 로드 |
 > | `crypto-safety.md`, `architecture.md` §3 | 넓어진 키 복사본 규칙과 그 수명 행 |
 > | README, `docs/ops-constraints.md`, `AGENTS.md` | 함수 표, 제약 2 와 14, A1 의 "철회" 문구를 `gcm.key_id`·`gcm.nonce_key_id`·`gcm_key_id()` 로 한정 |
@@ -1367,6 +1402,7 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 | UDF 반환값 charset 지정 가능 (8.0.19+) | mysql_udf_metadata (WL#12370) |
 | AES_ENCRYPT 는 8.0.30+ 에서 KDF(hkdf/pbkdf2_hmac) 지원 | 8.0 레퍼런스 — 참고용 |
 | `udf_registration` · `mysql_udf_metadata` · `component_sys_variable_register`/`_unregister` · `mysql_runtime_error` · `mysql_current_thread_reader` 는 8.0.43 · 8.4.11 · 9.4.0 전부에 있다 | 세 태그의 `include/mysql/components/services/` 실측 |
+| `_kr` 함수 뒤의 서비스들은 8.0.43, 8.4.11, 9.4.0 에서 시그니처가 같다: `keyring_reader_with_status`(8.0.24 도입), `mysql_thd_security_context` 와 `mysql_security_context_options`(8.0.4 트리에 존재), `mysql_current_thread_reader`(8.0.43 에 존재. 도입 릴리스는 확인하지 못함) | 개정 A13 — 세 트리의 `include/mysql/components/services/` 에서 읽음 |
 | **component sysvar 의 SESSION 스코프와 `mysql_system_variable_reader` 는 9.0.0+ 전용** | 개정 A5 — 세 태그의 `component_sys_var_service.cc` · `mysql_system_variable.h` 실측 |
 | `CONFIGURE_COMPONENTS()` 가 `components/*` 를 glob 하므로 `components/gcm` 에 넣고 재-configure 하면 in-tree 빌드된다 | `cmake/component.cmake` |
 | RHEL9 계열에서 서버 소스가 요구하는 컴파일러는 8.0/8.4 = gcc-toolset-12, **9.x = gcc-toolset-14** | 각 태그 `CMakeLists.txt` 의 `ALTERNATIVE_PATHS`(`LINUX_RHEL9` 분기). 실측: toolset-13 으로는 9.4.0 configure 가 "Could not find devtoolset compiler/linker" 로 실패한다. `docker/versions.json` 의 `rhel9_toolset` 이 이 값의 원본 |

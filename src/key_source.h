@@ -31,8 +31,11 @@ enum class KeySource {
 inline constexpr size_t kMaxKeyIdLen = 255;
 
 /* priv_user@priv_host, the keyring namespace of the server's own keyring_udf
-   functions. A user name is at most 32 characters and a host 255, each up to four
-   bytes in utf8mb4, so this holds any account the server can report. */
+   functions. The server caps a user name at 32 characters of its three-byte system
+   charset (96 bytes) and a host at 255 bytes; this is sized for four bytes per
+   character in both, so it holds any account the server can report with room to
+   spare. A user name containing '@' makes the string ambiguous ('a@b'@'c' and
+   'a'@'b@c' are one namespace) — inherited from keyring_udf, see design A13. */
 inline constexpr size_t kMaxAccountLen = 4 * 32 + 1 + 4 * 255;
 
 struct CallerAccount {
@@ -49,6 +52,9 @@ KeySource caller_account(CallerAccount *out);
 
 /* Reads the key stored under (`key_id`, `account`) into `out`, which must hold
    kKeyLen256 bytes. `key_id` is NUL-terminated and already validated.
+
+   Returns the key as stored. gcm.min_key_bytes is not applied here — it is an
+   encryption-side SQL policy and belongs to the UDF (architecture rule §2).
 
    One reader object, released before returning on every path: it holds a read lock
    on the server's global keyring lock from its init to its deinit, so it is never

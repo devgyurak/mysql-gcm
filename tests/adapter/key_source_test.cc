@@ -138,6 +138,18 @@ TEST_F(KeySourceTest, GivenTheLongestAccountThatFits_WhenTheCallerIsRead_ThenItI
   EXPECT_EQ(std::string(account.text, account.len), user + "@h");
 }
 
+TEST_F(KeySourceTest, GivenAnEmptyId_WhenFetched_ThenInvalidIdAndTheKeyringIsNotAsked) {
+  // Given: the caller is meant to validate the id; this is the guard for one that has not
+
+  // When
+  const KeySource result = gcm::fetch_key("", account_, out_, &out_len_);
+
+  // Then: the server's keyring asserts on an empty id in a debug build, so it never gets one
+  EXPECT_EQ(result, KeySource::invalid_id);
+  EXPECT_EQ(out_len_, 0u);
+  EXPECT_TRUE(details_for("keyring_init").empty());
+}
+
 /* The key lengths a suite has: the length of the entry selects it (design A10). */
 class UsableKey : public KeySourceTest, public ::testing::WithParamInterface<size_t> {};
 

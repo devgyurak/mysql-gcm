@@ -1374,6 +1374,7 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 | UDF 반환값 charset 지정 가능 (8.0.19+) | mysql_udf_metadata (WL#12370) |
 | AES_ENCRYPT 는 8.0.30+ 에서 KDF(hkdf/pbkdf2_hmac) 지원 | 8.0 레퍼런스 — 참고용 |
 | `udf_registration` · `mysql_udf_metadata` · `component_sys_variable_register`/`_unregister` · `mysql_runtime_error` · `mysql_current_thread_reader` 는 8.0.43 · 8.4.11 · 9.4.0 전부에 있다 | 세 태그의 `include/mysql/components/services/` 실측 |
+| `_kr` 함수 뒤의 서비스들은 8.0.43, 8.4.11, 9.4.0 에서 시그니처가 같다: `keyring_reader_with_status`(8.0.24 도입), `mysql_thd_security_context` 와 `mysql_security_context_options`(8.0.4 트리에 존재), `mysql_current_thread_reader`(8.0.43 에 존재. 도입 릴리스는 확인하지 못함) | 개정 A13 — 세 트리의 `include/mysql/components/services/` 에서 읽음 |
 | **component sysvar 의 SESSION 스코프와 `mysql_system_variable_reader` 는 9.0.0+ 전용** | 개정 A5 — 세 태그의 `component_sys_var_service.cc` · `mysql_system_variable.h` 실측 |
 | `CONFIGURE_COMPONENTS()` 가 `components/*` 를 glob 하므로 `components/gcm` 에 넣고 재-configure 하면 in-tree 빌드된다 | `cmake/component.cmake` |
 | RHEL9 계열에서 서버 소스가 요구하는 컴파일러는 8.0/8.4 = gcc-toolset-12, **9.x = gcc-toolset-14** | 각 태그 `CMakeLists.txt` 의 `ALTERNATIVE_PATHS`(`LINUX_RHEL9` 분기). 실측: toolset-13 으로는 9.4.0 configure 가 "Could not find devtoolset compiler/linker" 로 실패한다. `docker/versions.json` 의 `rhel9_toolset` 이 이 값의 원본 |

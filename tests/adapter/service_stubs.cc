@@ -7,9 +7,13 @@
 
 #include <mysql/components/component_implementation.h>
 #include <mysql/components/services/component_sys_var_service.h>
+#include <mysql/components/services/keyring_reader_with_status.h>
+#include <mysql/components/services/mysql_current_thread_reader.h>
 #include <mysql/components/services/mysql_runtime_error.h>
+#include <mysql/components/services/security_context.h>
 #include <mysql/components/services/udf_metadata.h>
 #include <mysql/components/services/udf_registration.h>
+#include <mysql/mysql_lex_string.h>
 #include <mysql/udf_registration_types.h>
 
 #include "gcm.h"
@@ -17,7 +21,6 @@
 #include "sysvar.h"
 
 #if GCM_HAS_SESSION_SYSVAR
-#include <mysql/components/services/mysql_current_thread_reader.h>
 #include <mysql/components/services/mysql_system_variable.h>
 #endif
 
@@ -29,9 +32,12 @@ extern SERVICE_TYPE(component_sys_variable_register) *
 extern SERVICE_TYPE(component_sys_variable_unregister) *
     mysql_service_component_sys_variable_unregister;
 extern SERVICE_TYPE(mysql_runtime_error) * mysql_service_mysql_runtime_error;
+extern SERVICE_TYPE(mysql_current_thread_reader) * mysql_service_mysql_current_thread_reader;
+extern SERVICE_TYPE(mysql_thd_security_context) * mysql_service_mysql_thd_security_context;
+extern SERVICE_TYPE(mysql_security_context_options) * mysql_service_mysql_security_context_options;
+extern SERVICE_TYPE(keyring_reader_with_status) * mysql_service_keyring_reader_with_status;
 #if GCM_HAS_SESSION_SYSVAR
 extern SERVICE_TYPE(mysql_system_variable_reader) * mysql_service_mysql_system_variable_reader;
-extern SERVICE_TYPE(mysql_current_thread_reader) * mysql_service_mysql_current_thread_reader;
 #endif
 
 /* DECLARE_COMPONENT's struct, holding the init/deinit the loader calls. */
@@ -62,6 +68,22 @@ std::map<std::string, std::string> g_sysvar_values;
    without it the only observable is whether a re-registration happened, which is
    a weaker thing to assert. */
 std::map<std::string, std::string> g_startup_options;
+
+/* The key source of design A13: who the stubs say is calling, and what the stub keyring
+   holds, keyed by (auth_id, data_id) the way the real one is. */
+struct KeyringEntry {
+  std::string type;
+  std::string value;
+};
+std::string g_caller_user;
+std::string g_caller_host;
+std::map<std::pair<std::string, std::string>, KeyringEntry> g_keyring;
+int g_open_readers = 0;
+/* What the next keyring_fetch reports instead of the stored entry, once. Lets a case make
+   the second call disagree with keyring_fetch_length, which the real reader's lock is
+   supposed to prevent and the component checks for anyway. */
+bool g_fetch_override = false;
+KeyringEntry g_fetch_override_entry;
 
 /* Returns the matching rule, or nullptr. Counts only calls already recorded for this
    method+detail, so `nth` is 1-based over the sequence the component produces. */
@@ -188,8 +210,100 @@ DEFINE_BOOL_METHOD(stub_unregister_variable, (const char *component_name, const 
 /* ---- mysql_runtime_error: the component only raises SQL errors from UDF bodies, which
    these tests do not drive. Recorded so an unexpected one is visible. ---- */
 
-DEFINE_METHOD(void, stub_emit, (int, int, va_list)) {
-  g_calls.push_back(Call{"error_emit", "", ""});
+DEFINE_METHOD(void, stub_emit, (int, int, va_list args)) {
+  /* ER_UDF_ERROR is "%s UDF failed; %s" and is the only error the component raises, so the
+     two strings are the function and the message. Keeping the message is what lets a case
+     assert what a failure says — and what it does not say. */
+  va_list copy;
+  va_copy(copy, args);
+  const char *func = va_arg(copy, const char *);
+  const char *detail = va_arg(copy, const char *);
+  va_end(copy);
+  g_calls.push_back(
+      Call{"error_emit", func == nullptr ? "" : func, detail == nullptr ? "" : detail});
+}
+
+/* ---- the caller's account (design A13). The thread read is not recorded: on 9.x
+   strict_enabled() makes it too, and recording it would put a call in sequences that are
+   asserted exactly. It can still be failed. ---- */
+
+DEFINE_BOOL_METHOD(stub_current_thread_get, (MYSQL_THD * thd)) {
+  /* A non-null opaque handle: the callers only check it against nullptr. */
+  static int fake_thd = 0;
+  if (thd == nullptr || rule_for("current_thread_get", "") != nullptr) return true;
+  *thd = reinterpret_cast<MYSQL_THD>(&fake_thd);
+  return false;
+}
+
+DEFINE_BOOL_METHOD(stub_security_context_get, (void *, Security_context_handle *out_ctx)) {
+  static int fake_ctx = 0;
+  if (record_and_decide("security_context_get", "", nullptr)) return true;
+  *out_ctx = reinterpret_cast<Security_context_handle>(&fake_ctx);
+  return false;
+}
+DEFINE_BOOL_METHOD(stub_security_context_set, (void *, Security_context_handle)) { return true; }
+
+DEFINE_BOOL_METHOD(stub_security_option_get,
+                   (Security_context_handle, const char *name, void *inout_pvalue)) {
+  if (record_and_decide("security_option_get", name, nullptr)) return true;
+  const std::string &value = std::strcmp(name, "priv_user") == 0 ? g_caller_user : g_caller_host;
+  *static_cast<MYSQL_LEX_CSTRING *>(inout_pvalue) = MYSQL_LEX_CSTRING{value.data(), value.size()};
+  return false;
+}
+DEFINE_BOOL_METHOD(stub_security_option_set, (Security_context_handle, const char *, void *)) {
+  return true;
+}
+
+/* ---- keyring_reader_with_status, with the real service's shapes: init succeeds with a
+   null reader for an absent entry, and a reader stays open until deinit. ---- */
+
+DEFINE_BOOL_METHOD(stub_keyring_init, (const char *data_id, const char *auth_id,
+                                       my_h_keyring_reader_object *reader_object)) {
+  if (record_and_decide("keyring_init", data_id, nullptr, auth_id)) return true;
+  const auto it = g_keyring.find({auth_id == nullptr ? "" : auth_id, data_id});
+  if (it == g_keyring.end()) {
+    *reader_object = nullptr;
+    return false;
+  }
+  *reader_object = reinterpret_cast<my_h_keyring_reader_object>(&it->second);
+  ++g_open_readers;
+  return false;
+}
+
+DEFINE_BOOL_METHOD(stub_keyring_deinit, (my_h_keyring_reader_object)) {
+  g_calls.push_back(Call{"keyring_deinit", "", ""});
+  --g_open_readers;
+  return false;
+}
+
+DEFINE_BOOL_METHOD(stub_keyring_fetch_length, (my_h_keyring_reader_object reader_object,
+                                               size_t *data_size, size_t *data_type_size)) {
+  if (record_and_decide("keyring_fetch_length", "", nullptr)) return true;
+  const auto *entry = reinterpret_cast<const KeyringEntry *>(reader_object);
+  *data_size = entry->value.size();
+  *data_type_size = entry->type.size();
+  return false;
+}
+
+DEFINE_BOOL_METHOD(stub_keyring_fetch,
+                   (my_h_keyring_reader_object reader_object, unsigned char *data_buffer,
+                    size_t data_buffer_length, size_t *data_size, char *data_type,
+                    size_t data_type_buffer_length, size_t *data_type_size)) {
+  const auto *entry = reinterpret_cast<const KeyringEntry *>(reader_object);
+  if (g_fetch_override) entry = &g_fetch_override_entry;
+  if (record_and_decide("keyring_fetch", "", nullptr)) {
+    /* A failing read that had already written: the caller must not use the bytes. */
+    std::memset(data_buffer, 0x5a, data_buffer_length);
+    return true;
+  }
+  if (data_buffer_length < entry->value.size() || data_type_buffer_length < entry->type.size()) {
+    return true;
+  }
+  std::memcpy(data_buffer, entry->value.data(), entry->value.size());
+  std::memcpy(data_type, entry->type.data(), entry->type.size());
+  *data_size = entry->value.size();
+  *data_type_size = entry->type.size();
+  return false;
 }
 
 #if GCM_HAS_SESSION_SYSVAR
@@ -206,13 +320,6 @@ DEFINE_BOOL_METHOD(stub_system_variable_get,
   return write_sysvar_value(detail, val, len);
 }
 
-DEFINE_BOOL_METHOD(stub_current_thread_get, (MYSQL_THD * thd)) {
-  /* A non-null opaque handle: strict_enabled() only checks it against nullptr. */
-  static int fake_thd = 0;
-  if (thd == nullptr) return true;
-  *thd = reinterpret_cast<MYSQL_THD>(&fake_thd);
-  return false;
-}
 #endif
 
 SERVICE_TYPE(udf_registration) g_udf_registration{stub_udf_register, stub_udf_unregister};
@@ -222,9 +329,16 @@ SERVICE_TYPE(component_sys_variable_register)
 g_sysvar_register{stub_register_variable, stub_get_variable};
 SERVICE_TYPE(component_sys_variable_unregister) g_sysvar_unregister{stub_unregister_variable};
 SERVICE_TYPE(mysql_runtime_error) g_runtime_error{stub_emit};
+SERVICE_TYPE(mysql_current_thread_reader) g_thread_reader{stub_current_thread_get};
+SERVICE_TYPE(mysql_thd_security_context)
+g_thd_security_context{stub_security_context_get, stub_security_context_set};
+SERVICE_TYPE(mysql_security_context_options)
+g_security_context_options{stub_security_option_get, stub_security_option_set};
+SERVICE_TYPE(keyring_reader_with_status)
+g_keyring_reader{stub_keyring_init, stub_keyring_deinit, stub_keyring_fetch_length,
+                 stub_keyring_fetch};
 #if GCM_HAS_SESSION_SYSVAR
 SERVICE_TYPE(mysql_system_variable_reader) g_variable_reader{stub_system_variable_get};
-SERVICE_TYPE(mysql_current_thread_reader) g_thread_reader{stub_current_thread_get};
 #endif
 
 const unsigned char kKey[gcm::kKeyLen256] = {
@@ -239,9 +353,12 @@ void install() {
   mysql_service_component_sys_variable_register = &g_sysvar_register;
   mysql_service_component_sys_variable_unregister = &g_sysvar_unregister;
   mysql_service_mysql_runtime_error = &g_runtime_error;
+  mysql_service_mysql_current_thread_reader = &g_thread_reader;
+  mysql_service_mysql_thd_security_context = &g_thd_security_context;
+  mysql_service_mysql_security_context_options = &g_security_context_options;
+  mysql_service_keyring_reader_with_status = &g_keyring_reader;
 #if GCM_HAS_SESSION_SYSVAR
   mysql_service_mysql_system_variable_reader = &g_variable_reader;
-  mysql_service_mysql_current_thread_reader = &g_thread_reader;
 #endif
 }
 
@@ -263,6 +380,39 @@ void set_startup_option(const std::string &name, const std::string &value) {
 void forget_registrations() {
   g_registered_udfs.clear();
   g_registered_vars.clear();
+}
+
+void set_caller(const std::string &user, const std::string &host) {
+  g_caller_user = user;
+  g_caller_host = host;
+}
+
+void put_keyring_entry(const std::string &account, const std::string &id, const std::string &type,
+                       const std::string &value) {
+  g_keyring[{account, id}] = KeyringEntry{type, value};
+}
+
+void override_next_keyring_fetch(const std::string &type, const std::string &value) {
+  g_fetch_override = true;
+  g_fetch_override_entry = KeyringEntry{type, value};
+}
+
+void clear_key_source() {
+  g_fetch_override = false;
+  g_caller_user.clear();
+  g_caller_host.clear();
+  g_keyring.clear();
+  g_open_readers = 0;
+}
+
+int open_keyring_readers() { return g_open_readers; }
+
+std::vector<std::string> error_messages() {
+  std::vector<std::string> out;
+  for (const Call &call : g_calls) {
+    if (call.method == "error_emit") out.push_back(call.extra);
+  }
+  return out;
 }
 
 void fail(const FailureRule &rule) { g_rules.push_back(rule); }

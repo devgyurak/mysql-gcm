@@ -21,6 +21,7 @@ MYSQL_ADD_COMPONENT(gcm
   component.cc
   udf_encrypt.cc
   udf_decrypt.cc
+  key_source.cc
   udf_glue.cc
   sysvar.cc
   gcm.cc

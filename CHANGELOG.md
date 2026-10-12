@@ -5,6 +5,14 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
+### Changed
+- **The component requires four more server services** (#34, design amendment A13, ahead of the
+  key-id functions that use them): `keyring_reader_with_status`, `mysql_thd_security_context` and
+  `mysql_security_context_options`, and `mysql_current_thread_reader` on 8.0 and 8.4 as well as 9.x.
+  All four were found in the 8.0.43, 8.4.11 and 9.4.0 trees it is built against; the oldest 8.0
+  release that has them all was not established (the keyring reader arrived in 8.0.24). The server
+  always provides a default keyring reader, so no keyring has to be loaded. No SQL behaviour changes.
+
 ### Documented
 - **Design amendment A13, proposed** (#34): three optional functions — `gcm_encrypt_kr`,
   `gcm_encrypt_det_kr`, `gcm_decrypt_kr` — that take a key id and read the key from the MySQL keyring

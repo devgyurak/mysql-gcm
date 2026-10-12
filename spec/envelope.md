@@ -1,6 +1,6 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v3 of this document, 2026-10-06). v3 adds the AES-192 version bytes `0x06` and
+Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 added 2026-10-12 with no byte change). v3 adds the AES-192 version bytes `0x06` and
 `0x07`; v2 added the AES-128 bytes `0x04` and `0x05` and the key-length rule in §2.5. Neither changes
 a byte of any earlier envelope, and an older implementation reading a newer envelope rejects it as a
 reserved version, which §2.6 has required throughout. Supersedes the
@@ -22,6 +22,12 @@ Internal fixture generation MUST match this format; this scope change does not a
 | `gcm_encrypt(plaintext, key [, aad])` | version `0x02`, `0x04` or `0x06`, per §2.5 | BLOB (charset `binary`) |
 | `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03`, `0x05` or `0x07`, per §2.5 | BLOB (charset `binary`) |
 | `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`–`0x07` | VARCHAR tagged `utf8mb4` |
+
+Three further functions take a **key id** in place of the key and read the key from the server's
+keyring: `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and `gcm_decrypt_kr`. They produce and accept exactly
+the envelopes of the function each is named after — byte for byte, so either family opens what the
+other sealed under the same key bytes — and differ only in where the key comes from. Their argument
+contract and their additional failures are §4.2. Nothing else in this document distinguishes them.
 
 ## 2. Byte layout
 
@@ -239,6 +245,56 @@ applied to decryption would lock out exactly the rows that need migrating.
 
 Reading the setting is per statement, not per row. Any failure to read it MUST be treated as 32 — for
 a floor, failing closed means refusing the weaker suites.
+
+### 4.2 The key-id functions
+
+`gcm_encrypt_kr(plaintext, key_id [, aad])`, `gcm_encrypt_det_kr(plaintext, key_id [, aad])` and
+`gcm_decrypt_kr(ciphertext, key_id [, aad])` (`docs/design.md` amendment A13). Everything in §2–§4.1
+applies to them with "the key" read as "the key stored under `key_id`"; this section is what is
+added.
+
+**The key.** It is the keyring entry stored under `key_id` for the calling account, where the account
+is the keyring namespace `priv_user@priv_host` — the one the server's own keyring functions
+(`keyring_key_generate`, `keyring_key_store`) write to. The entry MUST be of type `AES` and 16, 24 or
+32 bytes long; its length selects the suite as in §2.5, and §4.1 applies to the two encryption
+functions and never to `gcm_decrypt_kr`. Inside a `SQL SECURITY DEFINER` stored routine the calling
+account is the definer; inside a view it is the invoker.
+
+**The key id.** 1 to 255 bytes after conversion to `utf8mb4`, with no NUL byte.
+
+**One key per statement instance.** The keyring is read at most once per instance of a function in
+an executing statement, on the first row whose arguments are all non-NULL. Every later row of that
+instance MUST bring the same `key_id` bytes and run as the same account. A different id is an error,
+so a `key_id` taken from a column is accepted only while every row names the same id.
+
+| Condition | `gcm.strict=ON` | `gcm.strict=OFF` |
+|---|---|---|
+| The keyring is not loaded, or reading it failed | error | **error** |
+| No usable key: no entry under this id for this account, or an entry that is not type `AES`, or one whose length is not 16, 24 or 32 | error | **error** |
+| Invalid key id: empty, over 255 bytes, a NUL byte, or different from an earlier row's | error | **error** |
+| No calling account: no session, an anonymous account, or one that changed between rows | error | **error** |
+
+Rules that follow, in addition to those of §4:
+
+1. `gcm.strict` keeps its one meaning. A key that cannot be had is misconfiguration and is never
+   turned into NULL.
+2. The three "no usable key" conditions MUST be reported identically, so that an entry of another
+   type or an odd length is not revealed.
+3. An error is final for the instance. The server makes no further row call after one; an
+   implementation MUST NOT serve a call made anyway, and MUST NOT read the keyring again for it.
+4. SQL NULL in any argument yields SQL NULL (§4 rule 3) with no keyring access and no check of the
+   key id.
+5. Rule 4 of §4 is extended: messages MUST NOT contain the key id, the account, or the type or
+   length of a keyring entry. A key shorter than `gcm.min_key_bytes` is reported with the floor and
+   without the key's length — which, the floor being a public setting, still bounds the length (with
+   a floor of 24 the refusal means a 16-byte key); this is accepted; a key whose length disagrees with the envelope's version byte is
+   reported without either length.
+6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
+   keyring: the following rows are decrypted without a second read.
+7. A row that raises any error MUST discard, before it returns, every secret its instance holds: the
+   key read from the keyring, any context or derived key kept for later rows, and the result buffer.
+   It MUST NOT leave that to the function's de-initialisation, which the server does not always
+   run after an error.
 
 ## 5. Worked examples
 

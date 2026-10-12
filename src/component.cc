@@ -26,10 +26,10 @@ REQUIRES_SERVICE_PLACEHOLDER(mysql_udf_metadata);
 REQUIRES_SERVICE_PLACEHOLDER(component_sys_variable_register);
 REQUIRES_SERVICE_PLACEHOLDER(component_sys_variable_unregister);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_runtime_error);
-/* For src/key_source (design A13): the caller's account and the keyring. All four
+/* The *_kr functions (design A13): the caller's account and the keyring. All four
    exist on every supported version, and the server always provides a default
    keyring_reader_with_status, so requiring it does not need a keyring to be
-   loaded — a read on such a server fails, the install does not. */
+   loaded — a *_kr call on such a server fails, the install does not. */
 REQUIRES_SERVICE_PLACEHOLDER(mysql_current_thread_reader);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_thd_security_context);
 REQUIRES_SERVICE_PLACEHOLDER(mysql_security_context_options);
@@ -57,6 +57,21 @@ bool gcm_decrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
 char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
                       unsigned char *is_null, unsigned char *error);
 void gcm_decrypt_deinit(UDF_INIT *initid);
+
+bool gcm_encrypt_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_encrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                         unsigned char *is_null, unsigned char *error);
+void gcm_encrypt_kr_deinit(UDF_INIT *initid);
+
+bool gcm_encrypt_det_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_encrypt_det_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                             unsigned char *is_null, unsigned char *error);
+void gcm_encrypt_det_kr_deinit(UDF_INIT *initid);
+
+bool gcm_decrypt_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                         unsigned char *is_null, unsigned char *error);
+void gcm_decrypt_kr_deinit(UDF_INIT *initid);
 }
 
 namespace {
@@ -76,6 +91,14 @@ const UdfSpec kUdfs[] = {
      gcm_encrypt_det_init, gcm_encrypt_det_deinit},
     {"gcm_decrypt", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_decrypt_udf),
      gcm_decrypt_init, gcm_decrypt_deinit},
+    /* design A13. Appended, never inserted: the rollback order above is the order
+       of this table. */
+    {"gcm_encrypt_kr", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_encrypt_kr_udf),
+     gcm_encrypt_kr_init, gcm_encrypt_kr_deinit},
+    {"gcm_encrypt_det_kr", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_encrypt_det_kr_udf),
+     gcm_encrypt_det_kr_init, gcm_encrypt_det_kr_deinit},
+    {"gcm_decrypt_kr", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_decrypt_kr_udf),
+     gcm_decrypt_kr_init, gcm_decrypt_kr_deinit},
 };
 
 constexpr size_t kUdfCount = sizeof(kUdfs) / sizeof(kUdfs[0]);

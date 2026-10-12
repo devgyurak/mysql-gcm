@@ -39,6 +39,8 @@ vulnerabilities to report:
 
 - Keys and plaintext travel as SQL arguments, so they can reach the general log, the slow log,
   `performance_schema` and a statement-based binlog — the same exposure as `AES_ENCRYPT` (item 2).
+- The key-id functions read the key from the keyring under the calling account. Any session of that
+  account can use the key, and with the file keyring the key is stored beside the data (item 17).
 - `gcm_encrypt_det` reveals equality, frequency and length of plaintexts (items 6 and 13).
 - Legacy `0x01` envelopes are unauthenticated by construction, and their plaintext must already be
   UTF-8 (item 8).

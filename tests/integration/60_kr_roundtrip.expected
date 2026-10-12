@@ -1,0 +1,39 @@
+# Given: an AES-256 key generated inside the keyring
+# When: a Korean name is sealed and opened by key id
+홍길동	02	29	utf8mb4	0
+# Then: the name, version 02, 29 bytes of overhead, utf8mb4, a fresh nonce per call (above)
+# Scenario 2 — Given: a table of names sealed by key id
+# When: the server searches for the partial match %길%
+2
+3
+# Then: rows 2 and 3 — native LIKE works with no key in the statement (above)
+# Scenario 3 — Given: the deterministic variant under the same key id
+# When: the same value is sealed again, and a different one
+1	0	03	EMR-001
+# Then: equal, not equal, version 03, and it opens (above)
+# Scenario 4 — Given: the same key bytes used as a key argument
+# When: each family opens what the other sealed
+홍길동	홍길동	1
+# Then: both open and the deterministic bytes are identical — one envelope format (above)
+# Scenario 5 — Given: a value sealed by key id with an AAD
+# When: it is opened with the same AAD, then with another
+홍길동
+# Then: the name, then a tag error (errors section)
+# Scenario 6 — Given: an AES-128 key in the keyring and the default floor of 32
+# When: it is used to seal
+# Then: refused by gcm.min_key_bytes, naming the floor and not the key (errors section)
+# Scenario 7 — Given: the floor lowered to 16
+# When: the value is opened after the floor is back at 32
+04	홍길동
+# Then: version 04, and decryption never consults the floor (above)
+# Scenario 8 — Given: a legacy 0x01 envelope whose key is in the keyring
+# When: it is opened by key id
+홍길동
+# Then: the name — gcm_decrypt_kr reads everything gcm_decrypt reads (above)
+# Scenario 9 — Given: the empty string and a 64 KB value
+# When: each is sealed and opened by key id
+29	1	29	1
+# Then: a 29 byte envelope that opens to the empty string, and 29 bytes over 65535 that open intact (above)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 46: gcm_decrypt_kr UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 52: gcm_encrypt_kr UDF failed; the key is below gcm.min_key_bytes = 32; decryption of existing data is unaffected

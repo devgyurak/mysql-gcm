@@ -1,0 +1,63 @@
+# Given: a keyring holding an AES-256 key, a SECRET and an 8 byte AES entry
+# When: an absent id, the SECRET and the odd-length entry are each used
+# Then: the same "no usable AES key" error for all three (errors section)
+# Scenario 2 — Given: ids that are not ids
+# When: an empty id, a 256 byte id and an id with a NUL byte are used
+# Then: an invalid-id error for each (errors section)
+# Scenario 3 — Given: the longest id allowed, with nothing stored under it
+# When: it is used
+# Then: it is a valid id, so the answer is "no usable AES key" (errors section)
+# Scenario 4 — Given: NULL in each argument position
+# When: the functions are called
+1	1	1	1
+# Then: NULL each time, even under an id that names nothing (above)
+# Scenario 5 — Given: a table whose rows name two different key ids
+# When: the id is taken from the column
+# Then: refused on the second id — one key id per call site per statement (errors section)
+# Scenario 6 — Given: a table whose rows all name the same key id
+# When: the id is taken from the column
+3
+# Then: three rows sealed — the rule is about the bytes, not about being a constant (above)
+# Scenario 7 — Given: an envelope with one bit of its last tag byte flipped, strict at its default
+# When: it is opened by key id
+# Then: a tag error, never NULL and never plaintext (errors section)
+# Scenario 8 — Given: an AES-128 envelope and the id of an AES-256 key
+# When: the envelope is opened under that id
+# Then: a suite mismatch that does not state the key length (errors section)
+# Scenario 9 — Given: the key id sent as a bound parameter
+# When: the statements are executed
+홍길동
+# Then: the name — a parameter is not visible in init, so the key is read on the first row (above)
+# Scenario 13 — Given: a usable key, and envelopes that are malformed rather than unauthentic
+# When: each is opened by key id
+# Then: each is an envelope error carrying the envelope length and nothing about the key (errors section)
+# Scenario 10 — Given: the three functions
+# When: each is called with one argument and with four
+# Then: each is refused when the statement is prepared, with its usage (errors section)
+# Scenario 11 — Given: three sealed rows, the middle one with a bit of its tag flipped, and gcm.strict OFF
+# When: one statement opens all three by key id
+1	김철수
+2	NULL
+3	박길수
+# Then: name, NULL, name — the key read on the first row survives the bad tag (above)
+# Scenario 12 — Given: gcm.strict still OFF
+# When: the rows are opened under an id that names nothing
+# Then: an error, not NULL — a key that cannot be had is not hidden by the setting (errors section)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 9: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 10: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 11: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 16: gcm_encrypt_kr UDF failed; the key id must be 1 to 255 bytes without a NUL byte and the same on every row
+ERROR 3200 (HY000) at line 17: gcm_encrypt_kr UDF failed; the key id must be 1 to 255 bytes without a NUL byte and the same on every row
+ERROR 3200 (HY000) at line 18: gcm_encrypt_kr UDF failed; the key id must be 1 to 255 bytes without a NUL byte and the same on every row
+ERROR 3200 (HY000) at line 23: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 39: gcm_encrypt_kr UDF failed; the key id must be 1 to 255 bytes without a NUL byte and the same on every row
+ERROR 3200 (HY000) at line 57: gcm_decrypt_kr UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 66: gcm_decrypt_kr UDF failed; the key's length does not match the envelope version
+ERROR 3200 (HY000) at line 83: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 0)
+ERROR 3200 (HY000) at line 84: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 1)
+ERROR 3200 (HY000) at line 85: gcm_decrypt_kr UDF failed; malformed or unsupported envelope (length 4)
+ERROR 1123 (HY000) at line 90: Can't initialize function 'gcm_encrypt_kr'; gcm_encrypt_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 1123 (HY000) at line 91: Can't initialize function 'gcm_encrypt_det_kr'; gcm_encrypt_det_kr(plaintext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 1123 (HY000) at line 92: Can't initialize function 'gcm_decrypt_kr'; gcm_decrypt_kr(ciphertext, key_id [, aad]) needs 2 or 3 arguments
+ERROR 3200 (HY000) at line 115: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account

@@ -102,7 +102,8 @@ void free_state(UDF_INIT *initid) {
     wipe(state->out, state->capacity);  // the last plaintext lives here
     std::free(state->out);
   }
-  det_session_clear(&state->det);  // the key copy and the derived nonce_key
+  det_session_clear(&state->det);       // the key copy and the derived nonce_key
+  wipe(&state->kr, sizeof(state->kr));  // the key fetched from the keyring (design A13)
   std::free(state);
   initid->ptr = nullptr;
 }

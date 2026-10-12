@@ -31,6 +31,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: scripts/build-in-docker.sh "${{ matrix.mysql }}"
       - run: scripts/verify.sh "${{ matrix.mysql }}"
+      # A second, throwaway server with no keyring: the component must still install there,
+      # and only the key-id functions may fail (docs/design.md amendment A13).
+      - run: scripts/verify-bare.sh "${{ matrix.mysql }}"
       - name: Collect diagnostics
         if: failure()
         run: |

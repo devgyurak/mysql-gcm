@@ -5,22 +5,26 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 
 ## Unreleased
 
-### Changed
-- **The component requires four more server services** (#34, design amendment A13, ahead of the
-  key-id functions that use them): `keyring_reader_with_status`, `mysql_thd_security_context` and
+### Added
+- **Key-id functions** (#34, design amendment A13): `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and
+  `gcm_decrypt_kr` take a key id and use the `AES` key stored under it in the MySQL keyring for the
+  calling account (`priv_user@priv_host`, the namespace of `keyring_key_generate`). The key is no
+  longer an argument of the statement. **No envelope change**: they produce and read the same
+  `0x02`–`0x07` bytes as the key-argument functions, which are unchanged, and either family opens
+  what the other sealed. Optional: the component installs without a keyring and only these three
+  functions then fail. Every failure to obtain the key is an error regardless of `gcm.strict`. The
+  component now requires `keyring_reader_with_status`, `mysql_thd_security_context` and
   `mysql_security_context_options`, and `mysql_current_thread_reader` on 8.0 and 8.4 as well as 9.x.
   All four were found in the 8.0.43, 8.4.11 and 9.4.0 trees it is built against; the oldest 8.0
-  release that has them all was not established (the keyring reader arrived in 8.0.24). The server
-  always provides a default keyring reader, so no keyring has to be loaded. No SQL behaviour changes.
+  release that has them all was not established (the keyring reader arrived in 8.0.24). Read
+  operational constraint 17 before using them — with the file keyring the key is stored beside the
+  data, and external keyring backends are untested.
 
 ### Documented
-- **Design amendment A13, proposed** (#34): three optional functions — `gcm_encrypt_kr`,
-  `gcm_encrypt_det_kr`, `gcm_decrypt_kr` — that take a key id and read the key from the MySQL keyring
-  under the caller's account, so the key is no longer an argument of the encryption and decryption
-  statements. The envelope and the
-  vectors do not change, and the key-as-argument functions stay as they are. Nothing is implemented
-  yet; the amendment records the decisions, what a probe observed on 8.0, 8.4 and 9.4, and what is
-  deliberately left out (a key version in the envelope, rotation).
+- **Design amendment A13** (#34), the rationale for the key-id functions above: the decisions, what
+  a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
+  what is deliberately left out (a key version in the envelope, rotation). It also records a
+  server defect found on the way (#43, operational constraint 18).
 
 ## 0.1.0 — 2026-10-10
 

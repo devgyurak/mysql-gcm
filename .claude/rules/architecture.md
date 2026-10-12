@@ -20,7 +20,7 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 | Module | Responsibility | Project dependencies allowed |
 |---|---|---|
 | `component.cc` | Service declarations, UDF registration and unregistration, coordinating init and deinit | The UDF entry points, `sysvar`, core init/deinit |
-| `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, the shared byte and error types |
+| `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, `key_source`, the shared byte and error types |
 | `key_source.{h,cc}` | The calling account and the keyring read behind the `_kr` functions (amendment A13). No cryptography and no SQL policy | MySQL services, `gcm` for wiping, `envelope` for the key lengths and the shared byte types |
 | `sysvar.{h,cc}` | Registering and reading server configuration, per-version service differences | MySQL services |
 | `gcm.{h,cc}` | The encryption and decryption construction, the authentication result, crypto resource init/deinit | `envelope`, `nonce`, OpenSSL |
@@ -55,7 +55,8 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 | Lifetime | Resource and responsibility |
 |---|---|
 | component | The fetched algorithm handles, the sysvar storage, the registration state. Prepared in init and released in a safe deinit |
-| `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session |
+| `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session. And, under amendment A13, a `_kr` function's key as fetched from the keyring, with its key id and account and a latched failure: acquired on the first non-NULL row, kept across a `bad_tag` that strict=OFF turns into NULL, cleansed — with the A11 states and the result buffer — by any row that raises an error, and in deinit |
+| keyring read | The reader object of `keyring_reader_with_status`. Acquired and released inside one call of `key_source`, on every path — it holds the server's global keyring read lock — and never stored (amendment A13) |
 | operation | The EVP *operation* (the init with the nonce through Final), derived per-row values and transient secrets — the nonce, the MAC output, a scratch copy. Cleaned up when the operation ends and on every error path. The decrypt context *object* is `UDF_INIT`-lifetime (A11); the operation run in it is not |
 
 - Input bytes are borrowed from a buffer the caller owns. Do not retain a pointer beyond that
@@ -85,7 +86,15 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
   per-row cost is confirmed with the load tests.
 - Reuse across rows is confined to what amendment A11 allows — `gcm_decrypt`'s scheduled context and
   `gcm_encrypt_det`'s nonce key, each inside one `UDF_INIT` — and is keyed on the full key bytes,
-  compared in constant time. Nothing else is carried from one row to the next.
+  compared in constant time. The one other value carried from row to row is a `_kr` function's
+  fetched key (amendment A13), keyed on the calling account and the key id, both compared on every
+  row. Nothing else is.
+- A `_kr` function reads the keyring once, on its first non-NULL row — not in init, where a prepared
+  statement's parameter is not visible. An error is final for the `UDF_INIT`: the server makes no
+  further row call, and a row that raises wipes everything the instance holds — the fetched key,
+  both A11 states and the result buffer — rather than leave it for deinit. Reading the calling account on every row touches no keyring. Through a definer stored
+  *function* the server creates a `UDF_INIT` per row, so that shape reads per row: an accepted,
+  documented cost (`docs/ops-constraints.md` item 17), not something to cache around.
 
 ## 6. Test boundaries and verification
 

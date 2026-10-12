@@ -12,8 +12,32 @@
 #include <mysql/udf_registration_types.h>
 
 #include "gcm.h"
+#include "key_source.h"
 
 namespace gcm {
+
+/* The *_kr functions only (design A13): the key read from the keyring on the first
+   row, with the id and the account it was read under. One per UDF item, never
+   shared, wiped in free_state and — with the A11 states — by every row that raises
+   an error. Unlike the two
+   A11 states below it survives a bad_tag that gcm.strict=OFF turns into NULL — the
+   next row still has to decrypt, and reading again would let a planted corrupt row
+   cost one keyring read per row. Zeroed by calloc. */
+struct KeyHold {
+  bool loaded;
+  /* Set by the row that raised an error, which has released every secret this
+     UDF_INIT held. The server makes no further row call after an error; a call
+     made anyway is refused rather than served from the released state. */
+  bool spent;
+  /* A key-source failure is latched: later rows raise it again without touching
+     the keyring. KeySource::ok (zero) means none. */
+  KeySource failure;
+  size_t key_len;
+  unsigned char key[kKeyLen256];
+  size_t id_len;
+  char id[kMaxKeyIdLen + 1];
+  CallerAccount account;
+};
 
 /* Hung off UDF_INIT::ptr, one per UDF item. Nothing is shared between items: the
    same UDF runs concurrently in many sessions (component-src rule). Everything in
@@ -31,6 +55,8 @@ struct UdfState {
   /* gcm_encrypt_det only: the cached nonce_key and the key copy it is valid for
      (design A11). Zeroed by calloc in init_state, cleansed in free_state. */
   DetSession det;
+  /* The *_kr functions only: the fetched key (design A13). Unused otherwise. */
+  KeyHold kr;
 };
 
 /* Every helper below follows the UDF init convention: true means failure, with
@@ -121,6 +147,8 @@ void raise_too_long(const char *func, size_t len);
    bad_key_len: the key is a valid length for a suite, and the server policy is
    what refuses it, so the message has to say that rather than claim the length
    is wrong (design A10). Carries lengths only. */
+/* Not for the *_kr functions: there the length belongs to a keyring entry and must
+   not appear in a message (design A13). udf_kr.cc reports the floor alone. */
 void raise_below_floor(const char *func, size_t key_len, size_t floor);
 
 }  // namespace gcm

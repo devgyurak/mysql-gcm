@@ -3,7 +3,7 @@
 
 ## Scope
 - [ ] Net diff ≤ 400 lines (excluding `.result` / vectors), single concern
-- [ ] Touches crypto path (`src/gcm.cc` `envelope.cc` `nonce.cc` `sysvar.cc` `key_source.cc` `spec/**` vector generation) → 2 human reviewers + `crypto-reviewer` report attached
+- [ ] Touches crypto path (`src/gcm.cc` `envelope.cc` `nonce.cc` `sysvar.cc` `key_source.cc` `udf_kr.cc` `spec/**` vector generation) → 2 human reviewers + `crypto-reviewer` report attached
 
 ## Correctness & safety (P1 items — reviewer blocks on these)
 - [ ] Envelope offsets/lengths match `spec/envelope.md`

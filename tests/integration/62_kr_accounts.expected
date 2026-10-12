@@ -1,0 +1,26 @@
+# Given: a second account that owns a key, and a key of our own
+# When: we use the other account's key id directly
+# Then: no usable key — an id names a key only within the caller's own namespace (errors section)
+# Scenario 2 — Given: definer functions owned by that account, with the id hard-coded
+# When: we search through them
+2
+3
+# Then: rows 2 and 3 — the definer's key is used on our behalf (above)
+# Scenario 3 — Given: the same function body with SQL SECURITY INVOKER
+# When: we call it
+# Then: no usable key — it runs as us (errors section)
+# Scenario 4 — Given: a SQL SECURITY DEFINER view owned by that account
+# When: we select from it
+# Then: no usable key — a function in a view runs as the invoker (errors section)
+# Scenario 5 — Given: a definer routine of that account naming our key id
+# When: we call it
+# Then: no usable key — the boundary holds in that direction too (errors section)
+# Scenario 6 — Given: our own key id
+# When: we use it directly
+홍길동
+# Then: the name (above)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 26: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 48: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 55: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 63: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account

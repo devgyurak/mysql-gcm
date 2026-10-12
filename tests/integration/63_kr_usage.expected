@@ -1,0 +1,46 @@
+# Given: a key that has not been used since the component was installed
+# When: its usage is read
+1	[0, 0, 0, 0]	1	true	utf8mb4
+# Then: valid JSON, all zeros, a start time, complete, utf8mb4 (above)
+# Scenario 2 — Given: three names sealed at random and one value sealed deterministically
+# When: the usage is read
+[3, 1, 34, 0]
+# Then: 3 random, 1 deterministic, 27 + 7 plaintext bytes, no tag failure (above)
+# Scenario 3 — Given: one statement that seals three rows through one call site
+# When: the usage is read after it
+[6, 61]
+# Then: three more seals and 27 more bytes; opening them counted nothing (above)
+# Scenario 4 — Given: a statement that seals and reads the usage in the same row
+# When: it runs
+1	6
+7
+# Then: 6 inside the statement and 7 after it — a count appears when its statement has finished (above)
+# Scenario 5 — Given: an envelope with a bit of its tag flipped, strict at its default
+# When: it is opened, and the usage is read
+1
+# Then: an error, and one tag failure counted even though the statement failed (above, errors section)
+# Scenario 6 — Given: gcm.strict OFF, in a new connection so it applies on every major
+# When: the three rows are opened in one statement, and the usage is read
+1	0
+2	1
+3	0
+2
+# Then: the middle row is NULL, and it is a second tag failure (above)
+# Scenario 7 — Given: the same key bytes passed to the key-argument functions
+[7, 1]
+# When: the usage is read
+[7, 1]
+# Then: the same 7 and 1 — the key-argument functions are not counted (above)
+# Scenario 8 — Given: another account, reading the same key id through a definer function
+# When: it is called
+[0, 0, 0, 0]
+# Then: zeros — the name is the account and the key id, and that account has sealed nothing (above)
+# Scenario 9 — Given: ids that name nothing, are NULL, or are not ids
+# When: their usage is read
+0	1
+# Then: zero without asking whether the key exists, NULL, and an error for each of the rest (above, errors section)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 45: gcm_decrypt_kr UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 84: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
+ERROR 3200 (HY000) at line 85: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
+ERROR 1123 (HY000) at line 86: Can't initialize function 'gcm_key_usage'; gcm_key_usage(key_id) needs 1 argument

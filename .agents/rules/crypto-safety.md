@@ -85,8 +85,11 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
 
 ## Operational responsibility (amendment A8)
 - Before deployment, have a security review set a usage budget that sums **every** use of a given key,
-  and the criteria for rotating it. Do not assume the component counts per-key usage, rotates
-  automatically or detects a repeated nonce. Do not document an arbitrary number as a universal safe
+  and the criteria for rotating it. Do not assume the component holds a budget, rotates
+  automatically or detects a repeated nonce. It counts **calls of the key-id functions per key
+  name** (amendment A14) and nothing else: never describe `gcm_key_usage` as a key's usage, as a
+  total, or as enforcement. It excludes the key-argument functions, other servers, other names for
+  the same key bytes, and everything before the last start. Do not document an arbitrary number as a universal safe
   limit.
 - Distinguish copying or restoring an envelope from re-encrypting. Random re-encryption takes a fresh
   nonce; a deterministic retry uses the same key, plaintext and AAD. Recovery does not roll back
@@ -99,6 +102,16 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
 - The development guard hook is a command blocker, not monitoring of crypto calls in production.
   Keep the detailed operational guidance in items 11–13 of `docs/ops-constraints.md` and in the README
   together.
+
+## Usage counts (amendment A14)
+- The table of counts holds names and integers. **No key byte and nothing derived from one** — not
+  a hash, not a fingerprint, not a length — may be stored in it or used as its key.
+- Count in the `UDF_INIT` state and fold once, when the instance ends: in `deinit` and in the row
+  that raises an error. Never take the table's lock per row.
+- A row is created only by a non-zero count under a key that was actually read. No other path —
+  `gcm_key_usage`, a key-source failure, a refusal — may create one.
+- The bound is per account. One account reaching it must not change another account's answer.
+- No persistence, no threshold, no refusal: each needs its own amendment.
 
 ## Patterns blocked automatically (P1) in code review
 Scope is C++ under `src/`. The Python `hmac.HMAC` in the internal vector generator is an allowed

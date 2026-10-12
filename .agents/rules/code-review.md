@@ -40,6 +40,9 @@ Style comes last.
       every secret of the instance (fetched key, A11 states, result buffer) wiped by a row that
       raises an error,
       no key id, account or entry length or type in a message
+- [ ] Usage counts (amendment A14): counted in the instance and folded once (deinit and the error
+      row), never per row; no key-derived value in the table; nothing but a real seal or tag failure
+      creates a row; documentation never calls a count a key's usage
 
 **Safety (P1)** — grep for the blocked patterns in `crypto-safety.md`, check for keys or plaintext in
 logs, check that memory is cleansed

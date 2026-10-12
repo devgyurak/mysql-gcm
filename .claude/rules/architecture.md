@@ -57,13 +57,15 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 
 | Lifetime | Resource and responsibility |
 |---|---|
-| component | The fetched algorithm handles, the sysvar storage, the registration state. Prepared in init and released in a safe deinit |
+| component | The fetched algorithm handles, the sysvar storage, the registration state, and the table of usage counts (amendment A14: names and integers, one mutex, created in init before any function is registered and released with the algorithm handles). Prepared in init and released in a safe deinit |
 | `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session. And, under amendment A13, a `_kr` function's key as fetched from the keyring, with its key id and account and a latched failure: acquired on the first non-NULL row, kept across a `bad_tag` that strict=OFF turns into NULL, cleansed — with the A11 states and the result buffer — by any row that raises an error, and in deinit |
 | keyring read | The reader object of `keyring_reader_with_status`. Acquired and released inside one call of `key_source`, on every path — it holds the server's global keyring read lock — and never stored (amendment A13) |
 | operation | The EVP *operation* (the init with the nonce through Final), derived per-row values and transient secrets — the nonce, the MAC output, a scratch copy. Cleaned up when the operation ends and on every error path. The decrypt context *object* is `UDF_INIT`-lifetime (A11); the operation run in it is not |
 
 - Input bytes are borrowed from a buffer the caller owns. Do not retain a pointer beyond that
   ownership. Cleansing a copied secret is the responsibility of whoever made the copy.
+- The table of usage counts is the one piece of shared mutable state (amendment A14). It is written
+  once per `UDF_INIT`, by `fold_usage`, and read by `gcm_key_usage`; nothing else touches it.
 - Do not share keys, plaintext, per-row results or operation contexts in globals. Any component-level
   global state must have a stated lifetime and a stated synchronisation responsibility.
 - For each new resource, define where it is acquired, where it is released, and who cleans up on

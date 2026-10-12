@@ -1,0 +1,90 @@
+# Usage counts for the key-id functions (docs/design.md amendment A14).
+#
+# tests/integration/63_kr_usage.sql covers this on every supported major. This case is
+# here for what MTR adds: a server it installs the component into itself, so the counts
+# start from zero by construction, and its check that nothing unexpected reaches the error
+# log. Recorded against 8.4, where gcm.strict is GLOBAL.
+--source include/have_component_keyring_file.inc
+--source suite/component_keyring_file/inc/setup_component.inc
+--source suite/gcm/include/gcm_install.inc
+
+--disable_query_log
+--replace_regex /\.dll/.so/
+--eval INSTALL PLUGIN keyring_udf SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_generate RETURNS INTEGER SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_fetch RETURNS STRING SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_remove RETURNS INTEGER SONAME '$KEYRING_UDF'
+--enable_query_log
+
+--echo # Given: a key that has not been used
+DO keyring_key_generate('mtr_usage', 'AES', 32);
+
+--echo # When: its usage is read
+SELECT JSON_VALID(gcm_key_usage('mtr_usage')) AS is_json,
+       JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals', '$.bytes_sealed', '$.tag_failures') AS counts,
+       JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.complete') AS complete;
+
+--echo # Then: valid JSON, all zeros, complete
+
+--echo # Given: three names sealed at random and one value sealed deterministically
+CREATE TABLE patients (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO patients VALUES
+  (1, gcm_encrypt_kr('김철수', 'mtr_usage')),
+  (2, gcm_encrypt_kr('홍길동', 'mtr_usage')),
+  (3, gcm_encrypt_kr('박길수', 'mtr_usage'));
+SET @d = gcm_encrypt_det_kr('EMR-001', 'mtr_usage');
+
+--echo # When: the usage is read
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals', '$.bytes_sealed', '$.tag_failures') AS counts;
+
+--echo # Then: 3 random, 1 deterministic, 34 plaintext bytes, no tag failure
+
+--echo # Given: the second row made unauthentic, and gcm.strict at its default
+UPDATE patients SET name_enc = CONCAT(LEFT(name_enc, LENGTH(name_enc) - 1), CHAR(ASCII(RIGHT(name_enc, 1)) ^ 1)) WHERE id = 2;
+
+--echo # When: it is opened
+--error ER_UDF_ERROR
+SELECT gcm_decrypt_kr(name_enc, 'mtr_usage') FROM patients WHERE id = 2;
+
+--echo # Then: an error, and the failure is counted although the statement failed
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.tag_failures') AS tag_failures;
+
+--echo # Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+
+--echo # When: the three rows are opened in one statement
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_usage') IS NULL AS is_null FROM patients ORDER BY id;
+
+--echo # Then: the middle row is NULL, and it is a second tag failure
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.tag_failures') AS tag_failures;
+SET GLOBAL gcm.strict = DEFAULT;
+
+--echo # Given: the same key bytes passed to the key-argument functions
+DO gcm_encrypt('홍길동', keyring_key_fetch('mtr_usage'));
+
+--echo # When: the usage is read
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals') AS counts;
+
+--echo # Then: still 3 and 1 — the key-argument functions are not counted
+
+--echo # Given: a NULL key id, and one that is not an id
+--echo # When: their usage is read
+SELECT gcm_key_usage(NULL) IS NULL AS null_id;
+--error ER_UDF_ERROR
+SELECT gcm_key_usage('');
+
+--echo # Then: NULL, and an error
+
+DROP TABLE patients;
+--disable_query_log
+DO keyring_key_remove('mtr_usage');
+DROP FUNCTION keyring_key_generate;
+DROP FUNCTION keyring_key_fetch;
+DROP FUNCTION keyring_key_remove;
+UNINSTALL PLUGIN keyring_udf;
+--enable_query_log
+--source suite/gcm/include/gcm_uninstall.inc
+--source suite/component_keyring_file/inc/teardown_component.inc

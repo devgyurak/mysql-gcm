@@ -38,9 +38,9 @@ using gcm_adapter::min_key_bytes_is_registered;
 using gcm_adapter::registered_udfs;
 using gcm_adapter::sysvar_is_registered;
 
-const std::vector<std::string> kAllUdfs = {"gcm_encrypt",        "gcm_encrypt_det",
-                                           "gcm_decrypt",        "gcm_encrypt_kr",
-                                           "gcm_encrypt_det_kr", "gcm_decrypt_kr"};
+const std::vector<std::string> kAllUdfs = {"gcm_encrypt",    "gcm_encrypt_det",    "gcm_decrypt",
+                                           "gcm_encrypt_kr", "gcm_encrypt_det_kr", "gcm_decrypt_kr",
+                                           "gcm_key_usage"};
 constexpr const char *kStrict = "gcm.strict";
 constexpr const char *kFloor = "gcm.min_key_bytes";
 /* min_key_bytes() reads GLOBAL on every version, but through a different service:
@@ -321,7 +321,7 @@ TEST_F(Lifecycle, GivenReRegistrationAlsoFails_WhenDeinit_ThenTheUnloadIsStillRe
   EXPECT_EQ(status, 1);
   EXPECT_EQ(registered_udfs(),
             std::set<std::string>({"gcm_encrypt_det", "gcm_decrypt", "gcm_encrypt_kr",
-                                   "gcm_encrypt_det_kr", "gcm_decrypt_kr"}));
+                                   "gcm_encrypt_det_kr", "gcm_decrypt_kr", "gcm_key_usage"}));
   EXPECT_TRUE(algorithms_live());
 }
 
@@ -375,7 +375,8 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast)
                 {"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
                  "udf_unregister:gcm_decrypt", "udf_unregister:gcm_encrypt_kr",
                  "udf_unregister:gcm_encrypt_det_kr", "udf_unregister:gcm_decrypt_kr",
-                 "unregister_variable:gcm.min_key_bytes", "unregister_variable:gcm.strict"}));
+                 "udf_unregister:gcm_key_usage", "unregister_variable:gcm.min_key_bytes",
+                 "unregister_variable:gcm.strict"}));
 }
 
 TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreReleased) {

@@ -3,6 +3,7 @@
    and the gcm.strict sysvar. No cryptography and no argument handling here. */
 
 #include <cstddef>
+#include <ctime>
 
 #include <mysql/components/component_implementation.h>
 #include <mysql/components/services/component_sys_var_service.h>
@@ -16,6 +17,7 @@
 
 #include "gcm.h"
 #include "sysvar.h"
+#include "usage.h"
 
 #if GCM_HAS_SESSION_SYSVAR
 #include <mysql/components/services/mysql_system_variable.h>
@@ -72,6 +74,11 @@ bool gcm_decrypt_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
 char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
                          unsigned char *is_null, unsigned char *error);
 void gcm_decrypt_kr_deinit(UDF_INIT *initid);
+
+bool gcm_key_usage_init(UDF_INIT *initid, UDF_ARGS *args, char *message);
+char *gcm_key_usage_udf(UDF_INIT *initid, UDF_ARGS *args, char *result, unsigned long *length,
+                        unsigned char *is_null, unsigned char *error);
+void gcm_key_usage_deinit(UDF_INIT *initid);
 }
 
 namespace {
@@ -99,9 +106,21 @@ const UdfSpec kUdfs[] = {
      gcm_encrypt_det_kr_init, gcm_encrypt_det_kr_deinit},
     {"gcm_decrypt_kr", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_decrypt_kr_udf),
      gcm_decrypt_kr_init, gcm_decrypt_kr_deinit},
+    /* design A14. Appended for the same reason. */
+    {"gcm_key_usage", STRING_RESULT, reinterpret_cast<Udf_func_any>(gcm_key_usage_udf),
+     gcm_key_usage_init, gcm_key_usage_deinit},
 };
 
 constexpr size_t kUdfCount = sizeof(kUdfs) / sizeof(kUdfs[0]);
+
+/* Releases what init acquired and no function can reach any more: the fetched
+   algorithms and the table of usage counts (design A14). They go together, under
+   the same condition — a function that is still registered may still be called,
+   and a *_kr function folds into the table when its instance ends. */
+void release_resources() {
+  gcm::crypto_deinit();
+  gcm::usage_deinit();
+}
 
 /* Returns true when every one of the first `count` functions is gone.
    The return value matters: see the rollback in gcm_component_init. */
@@ -138,6 +157,12 @@ mysql_service_status_t gcm_component_init() {
      (crypto-safety rule). Fetching before anything is registered also means no function is
      ever callable while the handles are still null. */
   if (gcm::crypto_init() != 0) return 1;
+  /* The table of usage counts, before any function that could fold into it exists.
+     `since` is this moment: counting starts when the component does. */
+  if (gcm::usage_init(static_cast<int64_t>(std::time(nullptr))) != 0) {
+    gcm::crypto_deinit();
+    return 1;
+  }
 
   for (size_t i = 0; i < kUdfCount; ++i) {
     const UdfSpec &udf = kUdfs[i];
@@ -156,7 +181,7 @@ mysql_service_status_t gcm_component_init() {
          loader rolls back and dlclose()s the library, so a registration that survived here
          points into an unmapped segment either way. Keeping the handles does not prevent
          that crash; it only avoids causing a second, different one. */
-      if (unregister_first(i)) gcm::crypto_deinit();
+      if (unregister_first(i)) release_resources();
       return 1;
     }
   }
@@ -182,7 +207,7 @@ mysql_service_status_t gcm_component_init() {
        variables and rolls the first back if the second fails, and that rollback
        can itself be refused. A surviving variable reaches this component's
        storage by enumeration, so the handles stay (design A9, A10). */
-    if (unregister_first(kUdfCount) && vars_rolled_back) gcm::crypto_deinit();
+    if (unregister_first(kUdfCount) && vars_rolled_back) release_resources();
     return 1;
   }
   return 0;
@@ -215,7 +240,7 @@ mysql_service_status_t gcm_component_deinit() {
     register_first(kUdfCount);
     return 1;
   }
-  gcm::crypto_deinit();
+  release_resources();
   return 0;
 }
 

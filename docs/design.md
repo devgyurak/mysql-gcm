@@ -8,8 +8,14 @@
 
 > ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions
 >
-> **Status: proposed (issue #35). Nothing is implemented by this amendment.** Merging the PR that
-> adds this text records the proposal; it becomes the design when the implementation PR merges.
+> **Status: implemented, awaiting review (issue #35).** The table is in `src/usage`, the function
+> in `src/udf_usage.cc`, the counting and the fold in `src/udf_kr.cc` and `src/udf_glue.cc`. It
+> becomes the design when the PR that carries this revision merges. Pinned: the table in
+> `tests/unit` (14 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
+> `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
+> 8.4; and on a server with no keyring, where the function still answers. Not pinned: counts lost
+> by an instance that is neither de-initialised nor raises (issue #43), which no test can produce
+> without poisoning its server.
 >
 > Amendment A8 and operational constraints 11 and 13 tell every deployment to set a usage budget per
 > key and then say "the component does not count uses", so the operator has no number to compare the
@@ -396,7 +402,8 @@
 >   row. `WHERE f(col) LIKE '%길%'` over a shared key is exactly that shape. Prefer one account per
 >   application with its own keys; where a key must be shared, put the whole statement in a definer
 >   procedure, and measure before using the function shape on a large scan.
-> - Key-usage accounting (A8, constraints 11–13) is unchanged: the component still counts nothing.
+> - Key-usage accounting (A8, constraints 11–13) is unchanged by this amendment: the component
+>   counts nothing here. (Amendment A14 later adds a count of calls per key name.)
 >   A key reachable by id from several accounts or servers is one key for the usage budget.
 > - **Every condition on a deterministic key still applies, and a keyring makes two of them easier to
 >   break.** A12 requires an independent, full-length CSPRNG key per suite and security domain:

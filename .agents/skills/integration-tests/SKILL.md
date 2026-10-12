@@ -42,6 +42,7 @@ Case files (the name is the intent):
 60_kr_roundtrip.sql                 key-id functions (A13): round trip, LIKE '%길%', interop with the key-argument functions, floor, 0x01
 61_kr_key_source.sql                key-id failures: absent / wrong type / odd length as one error, invalid ids, NULL, an id per row, bound parameters, strict=OFF over good/tampered/good rows
 62_kr_accounts.sql                  the account boundary: another account's id, definer and invoker functions, a definer view
+63_kr_usage.sql                     gcm_key_usage (A14): counts per kind, visible when the statement ends, tag failures, key-argument calls not counted, another account
 bare/kr_unavailable.sql             NOT run by verify.sh — scripts/verify-bare.sh runs it on a throwaway server with no keyring
 90_tmp_disk_observation.sql         a decrypt + ORDER BY + GROUP BY workload (the counter is recorded in tmp_disk.txt)
 91_server_udf_arg_defect.sql        per-major-expected — pins the amendment A7 server defect

@@ -97,6 +97,7 @@ bool init_decrypt_session(UDF_INIT *initid, char *msg) {
 void free_state(UDF_INIT *initid) {
   auto *state = reinterpret_cast<UdfState *>(initid->ptr);
   if (state == nullptr) return;
+  fold_usage(state);                     // before the name it folds under is wiped below
   decrypt_session_free(state->decrypt);  // wipes its key copy; nullptr for the encrypt UDFs
   if (state->out != nullptr) {
     wipe(state->out, state->capacity);  // the last plaintext lives here
@@ -106,6 +107,15 @@ void free_state(UDF_INIT *initid) {
   wipe(&state->kr, sizeof(state->kr));  // the key fetched from the keyring (design A13)
   std::free(state);
   initid->ptr = nullptr;
+}
+
+void fold_usage(UdfState *state) {
+  const KeyHold &hold = state->kr;
+  /* The name is the account and the id recorded when the key was read, not a fresh
+     look at the caller. Counts exist only after a key was read, so the name is set
+     whenever there is anything to fold. */
+  usage_fold(UsageName{hold.account.text, hold.account.len, hold.id, hold.id_len}, state->used);
+  state->used = UsageCounts{0, 0, 0, 0};
 }
 
 bool reserve(UdfState *state, size_t need) {

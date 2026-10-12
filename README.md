@@ -68,7 +68,8 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
 11. **Set a per-key usage budget and rotation plan before deploying**, summed across everything that
     shares the key. Generate keys independently per suite and domain; never resize one key into
     another. Deterministic AES-128 needs an approved budget, a finite use period and a retention
-    horizon (A12). The component counts nothing and rotates nothing.
+    horizon (A12). The component holds no budget and rotates nothing; `gcm_key_usage` (item 19) gives
+    one of the numbers to sum.
 12. **Retries and restores are part of nonce management.** Copying an envelope is not a new
     encryption; never change only the AAD on a deterministic retry; do not roll back usage
     accounting with a restore. If RNG state is uncertain after recovery, stop writing.
@@ -89,6 +90,9 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
 18. **Do not nest one of these functions inside another with a bound parameter.**
     `gcm_decrypt(gcm_encrypt(?, ?), ?)` in a prepared statement fails, and afterwards
     `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, seen on 8.4.
+19. **`gcm_key_usage` is a count, not your key's usage.** It covers the key-id functions only, this
+    server only, since the last start, per account and key id. The key-argument functions are not
+    counted. Nothing is persisted and nothing is refused.
 
 ## Support matrix
 
@@ -196,6 +200,9 @@ SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'patient_name_v1') LIKE '
 - **Every failure to get the key is an error**, whatever `gcm.strict` says, and the message never
   names the id, the account or the stored entry.
 - **Read constraint 17 first.** The file keyring keeps the key next to the data.
+- **`gcm_key_usage('patient_name_v1')`** returns, as JSON text, how many seals, plaintext bytes and
+  tag failures these functions have counted under that id for the calling account since the server
+  started. It is an input to a usage budget, not the budget — constraint 19 says what it leaves out.
 
 Byte layout, failure codes and test vectors: [`spec/envelope.md`](spec/envelope.md).
 

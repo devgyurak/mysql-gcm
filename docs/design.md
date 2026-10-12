@@ -80,7 +80,8 @@
 >   `utf8mb4` — which is what `keyring_udf` asks for its own string arguments (read in
 >   `plugin/keyring_udf/keyring_udf.cc`, all three trees), so a non-ASCII id names the same entry from
 >   either side. The bound is this component's, chosen to keep the id in a fixed buffer.
-> - **At most one keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL.**
+> - **One keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL** — and
+>   one more after any row that raised an error and was continued past (see the key copy below).
 >   Not in `init`: see the observation below. Every later row of that `UDF_INIT` must bring the same
 >   id bytes; a different id is an error. An id that varies by row (a column) is therefore refused on
 >   the second distinct value. The id is not secret and is compared with `memcmp`. The account the
@@ -126,12 +127,16 @@
 >   buffer and no text of *this* statement contains the key. The component's copies — this one, and
 >   A11's scheduled context and nonce key derived from it — are what the statement adds to the
 >   keyring's own memory, and a core dump taken mid-statement contains them.
-> - **It survives `bad_tag`.** A11 cleanses its copy on every failure of the cipher operation, and
->   that still happens: the scheduled context and its copy, and the cached nonce key, are discarded
->   exactly as A11 says, by the unchanged core. The fetched key is kept, because with
->   `gcm.strict=OFF` the next row must still decrypt. The alternative — fetching again after a
->   failure — would let whoever planted a corrupt row cause one keyring read per row, which on an
->   external backend may be a network call.
+> - **It survives a `bad_tag` that `gcm.strict=OFF` turns into NULL.** A11 cleanses its copy on
+>   every failure of the cipher operation, and that still happens: the scheduled context and its
+>   copy, and the cached nonce key, are discarded exactly as A11 says, by the unchanged core. The
+>   fetched key is kept, because the next row must still decrypt. **A row that raises an error —
+>   a `bad_tag` under `gcm.strict=ON` included — gives the fetched key up at once**, without
+>   waiting for `deinit`: an error normally ends the statement, and the server does not always
+>   call `deinit` after one. A statement that continues past the error (`INSERT IGNORE`, a
+>   handler) reads the keyring again on its next row. Giving the key up on the NULL path
+>   too would let whoever planted corrupt rows cause one keyring read per row with no error to stop
+>   the statement, which on an external backend may be a network call per row.
 >
 > **What this contradicts, stated rather than left to a reviewer to find.** A11 rejects "a cache keyed
 > on anything other than the full key bytes", `crypto-safety.md` lists it as a blocked pattern, and
@@ -153,8 +158,12 @@
 > it is cleansed in `deinit` and when `init` fails after allocating; the reader object is released
 > immediately after the fetch, never kept across rows (it holds a read lock on the server's global
 > keyring lock from its `init` to its `deinit`); the fetch buffer is cleansed on every path. Nothing
-> is cached across `UDF_INIT`s, so removing or replacing a key in the keyring takes effect at the
-> next execution of a statement — the same boundary at which `gcm.strict` is read (A5).
+> is cached across `UDF_INIT`s, so a key removed from or replaced in the keyring is picked up by
+> the next `UDF_INIT` that reads it. **That is not a promise that one statement sees one key.** It
+> is usually the next execution of the statement, but a definer stored function gets a `UDF_INIT`
+> per row, and a row that raised an error and was continued past reads again — so a key replaced
+> while such a statement runs can take effect on its next row. How fresh the answer is on a
+> backend that caches is that backend's property, not this component's.
 >
 > The core (`gcm`, `envelope`, `nonce`) does not change. Reading the keyring and the caller's account
 > is a server adapter (`architecture.md` §1), and the `_kr` functions call the same core entry points

@@ -62,6 +62,8 @@ add_library(gcm_component_under_test
   ${GCM_SRC_DIR}/udf_glue.cc
   ${GCM_SRC_DIR}/udf_encrypt.cc
   ${GCM_SRC_DIR}/udf_decrypt.cc
+  ${GCM_SRC_DIR}/udf_kr.cc
+  ${GCM_SRC_DIR}/key_source.cc
   ${GCM_SRC_DIR}/gcm.cc
   ${GCM_SRC_DIR}/envelope.cc
   ${GCM_SRC_DIR}/nonce.cc
@@ -79,6 +81,7 @@ target_compile_options(gcm_component_under_test PRIVATE -Wall -Wextra -Werror -f
 add_executable(gcm_adapter
   service_stubs.cc
   lifecycle_test.cc
+  key_source_test.cc
 )
 target_compile_options(gcm_adapter PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(gcm_adapter PRIVATE gcm_component_under_test GTest::gtest_main)

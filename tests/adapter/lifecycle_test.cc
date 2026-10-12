@@ -38,7 +38,9 @@ using gcm_adapter::min_key_bytes_is_registered;
 using gcm_adapter::registered_udfs;
 using gcm_adapter::sysvar_is_registered;
 
-const std::vector<std::string> kAllUdfs = {"gcm_encrypt", "gcm_encrypt_det", "gcm_decrypt"};
+const std::vector<std::string> kAllUdfs = {"gcm_encrypt",        "gcm_encrypt_det",
+                                           "gcm_decrypt",        "gcm_encrypt_kr",
+                                           "gcm_encrypt_det_kr", "gcm_decrypt_kr"};
 constexpr const char *kStrict = "gcm.strict";
 constexpr const char *kFloor = "gcm.min_key_bytes";
 /* min_key_bytes() reads GLOBAL on every version, but through a different service:
@@ -115,6 +117,22 @@ TEST_F(Lifecycle, GivenTheSecondUdfFailsToRegister_WhenInit_ThenTheFirstIsUnregi
   EXPECT_TRUE(registered_udfs().empty());
   EXPECT_FALSE(sysvar_is_registered());
   EXPECT_FALSE(min_key_bytes_is_registered());
+}
+
+TEST_F(Lifecycle, GivenAKeyIdUdfFailsToRegister_WhenInit_ThenEveryEarlierOneIsUnregistered) {
+  // Given: the fifth of the six functions cannot register (design A13 appended three)
+  fail(FailureRule{"udf_register", "gcm_encrypt_det_kr", 1, true});
+
+  // When
+  const int status = component_init();
+
+  // Then: the four registered before it are rolled back, in registration order
+  EXPECT_EQ(status, 1);
+  EXPECT_EQ(details_for("udf_unregister"),
+            (std::vector<std::string>{"gcm_encrypt", "gcm_encrypt_det", "gcm_decrypt",
+                                      "gcm_encrypt_kr"}));
+  EXPECT_TRUE(registered_udfs().empty());
+  EXPECT_TRUE(algorithms_released());
 }
 
 TEST_F(Lifecycle, GivenAUdfFailsAndRollbackSucceeds_WhenInit_ThenTheAlgorithmsAreReleased) {
@@ -301,7 +319,9 @@ TEST_F(Lifecycle, GivenReRegistrationAlsoFails_WhenDeinit_ThenTheUnloadIsStillRe
   // Then: still refused, and the component is left incomplete — gcm_encrypt did not come back.
   //       There is no logging service here, so this state has no signal beyond the refusal.
   EXPECT_EQ(status, 1);
-  EXPECT_EQ(registered_udfs(), std::set<std::string>({"gcm_encrypt_det", "gcm_decrypt"}));
+  EXPECT_EQ(registered_udfs(),
+            std::set<std::string>({"gcm_encrypt_det", "gcm_decrypt", "gcm_encrypt_kr",
+                                   "gcm_encrypt_det_kr", "gcm_decrypt_kr"}));
   EXPECT_TRUE(algorithms_live());
 }
 
@@ -353,8 +373,9 @@ TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheVariableGoesLast)
   EXPECT_EQ(gcm_adapter::call_sequence(),
             std::vector<std::string>(
                 {"udf_unregister:gcm_encrypt", "udf_unregister:gcm_encrypt_det",
-                 "udf_unregister:gcm_decrypt", "unregister_variable:gcm.min_key_bytes",
-                 "unregister_variable:gcm.strict"}));
+                 "udf_unregister:gcm_decrypt", "udf_unregister:gcm_encrypt_kr",
+                 "udf_unregister:gcm_encrypt_det_kr", "udf_unregister:gcm_decrypt_kr",
+                 "unregister_variable:gcm.min_key_bytes", "unregister_variable:gcm.strict"}));
 }
 
 TEST_F(Lifecycle, GivenEverythingUnregisters_WhenDeinit_ThenTheAlgorithmsAreReleased) {

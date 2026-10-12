@@ -6,13 +6,110 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions
+>
+> **Status: proposed (issue #35). Nothing is implemented by this amendment.** Merging the PR that
+> adds this text records the proposal; it becomes the design when the implementation PR merges.
+>
+> Amendment A8 and operational constraints 11 and 13 tell every deployment to set a usage budget per
+> key and then say "the component does not count uses", so the operator has no number to compare the
+> budget with. Amendment A13 gave a key a name the component may publish. This adds a count under
+> that name, and one function to read it.
+>
+> ```
+> gcm_key_usage(key_id)  -> VARCHAR (utf8mb4), a JSON object as text
+>   {"random_seals":N,"det_seals":N,"bytes_sealed":N,"tag_failures":N,"since":T,"complete":true}
+> ```
+>
+> **What the number is, and it is less than it looks.** A row is *the seals this server has performed
+> through the key-id functions under this name since it started counting*. It is a **lower bound on
+> one term** of the budget A8 asks for, and the documentation says so wherever the number appears.
+>
+> - The budget is about key **bytes**; the count is about a **name**. The same bytes under another id
+>   or another account are counted separately. An id whose entry was removed and generated again is
+>   a new key under an old name, and the count carries on. The component cannot tell either case
+>   without keeping something derived from the key bytes, which `crypto-safety.md` forbids.
+> - **The key-argument functions are not counted at all**: they have no name to count under. A
+>   deployment that uses both families has a count that is not the total, and
+>   `keyring_key_fetch` lets an application move a keyring key into that uncounted family.
+> - Other servers are other counts. A replica under ROW replication calls no function and counts
+>   nothing; copying or restoring an envelope is not a seal.
+> - It starts again from zero when the server restarts or the component is reinstalled.
+>
+> ### Decisions
+>
+> - **The name is (calling account, key id)** — A13's namespace, `priv_user@priv_host` and the id.
+>   `gcm_key_usage` answers for the caller's own account only, which is the boundary A13 already has
+>   and needs no new privilege. There is no cross-account view; an operator reads it as each account,
+>   or through a `SQL SECURITY DEFINER` routine with the id hard-coded, as for A13.
+> - **It reads no keyring.** The function looks up a name in the component's own table. It does not
+>   check that the id names a key: a name with no counts answers zeros. `key_id` is validated as in
+>   A13 (1 to 255 bytes after conversion to `utf8mb4`, no NUL); a NULL argument gives NULL.
+> - **What is counted.** `random_seals` and `det_seals`: successful calls of `gcm_encrypt_kr` and
+>   `gcm_encrypt_det_kr`. `bytes_sealed`: the plaintext bytes of those calls. `tag_failures`:
+>   `gcm_decrypt_kr` calls that ended in a tag mismatch, with `gcm.strict` ON or OFF — forgery attempts
+>   count against the GCM bound too (NIST SP 800-38D), and it is the one number here that can show an
+>   attack. Successful decryptions and failed seals are not counted. Counts are 64-bit and saturate.
+> - **`since`** is the Unix time, in seconds, at which the component began counting (its
+>   initialisation). **`complete`** is false once the table of names has been full — see below — and
+>   then some name's uses are in no row.
+> - **Nothing is added to the row path.** A `_kr` function counts in its own `UDF_INIT` state, in
+>   plain integers, and folds them into the component's table **once**, when the instance ends: in
+>   `deinit`, and in the row that raises an error, because A13 established that the server does not
+>   always call `deinit` after one. So a statement's own counts are not visible while it runs, and a
+>   `gcm_key_usage` call in the same statement as the seals it would count sees the earlier value.
+> - **No persistence, no thresholds.** Issue #35 proposed both. A count persisted by the component is
+>   rolled back by a restore, which A8 warns about, and the server offers no shutdown notification
+>   to a component on 8.0. A refusing threshold without persistence is undone by a restart and would
+>   look like enforcement while being none. The durable ledger and the alert are the operator's
+>   monitoring system reading this function — which is where A8 already puts the ledger.
+> - **No new server service**, no envelope change, no change to the core.
+>
+> ### The component's first shared state
+>
+> Until now the component held nothing between calls but the fetched algorithms and its two system
+> variables. The table of counts is shared, mutable, and lives from component init to deinit.
+> `architecture.md` §3 asks for a stated lifetime and synchronisation for any such state:
+>
+> - **Contents:** names (account and key id — not secret, and already visible in
+>   `performance_schema.keyring_keys`) and integers. **No key bytes and nothing derived from them.**
+> - **Synchronisation:** one mutex, taken once per `UDF_INIT` to fold and once per `gcm_key_usage`
+>   call to read. Never on the row path of an encryption or decryption.
+> - **Bound:** at most 1024 names. A use under a name that does not fit is not attributed, and
+>   `complete` turns false in every answer from then on. Names are never evicted: evicting would make
+>   a count go backwards.
+> - **Lifetime:** created in init before any function is registered, released in deinit after every
+>   function is unregistered. An instance the server never de-initialises (issue #43) has already
+>   folded in the row that raised.
+> - **Where it lives:** a module with no server dependency, so `tests/unit` covers it, concurrency
+>   included.
+>
+> ### What stays as it was
+>
+> The component still does not hold a budget, rotate a key, detect a repeated nonce, or enforce an AAD
+> policy (constraint 13). A8's instruction to sum **every** use of a key across servers, columns and
+> applications stands; this gives one of the numbers to sum.
+>
+> **Sequencing.** After the key-id functions (A13), in the same minor release. Backward compatible:
+> one more function.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/` | the table of counts as a server-free module; the counters in the per-instance state and the fold in `deinit` and on the error row; the `gcm_key_usage` UDF; init and deinit of the table in `component.cc` |
+> | `spec/envelope.md` | the function's argument contract and the meaning of each field |
+> | `tests/unit`, `tests/adapter` | the table (folding, the bound, concurrent folds); when a count becomes visible, the error-row fold, account isolation, that the key-argument functions add nothing |
+> | `tests/integration`, `mysql-test` | counts after seals of each kind and after a tag failure, on every major |
+> | `architecture.md` §3 and §5, `crypto-safety.md` | the component-level state and its rules; that the table holds no key material |
+> | README, `docs/ops-constraints.md` 11 and 13, `AGENTS.md`, `CHANGELOG.md` | the function, and what is now counted and what still is not |
+
 > ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
 >
-> **Status: implemented, awaiting review (issue #34).** The implementation is in the PR that carries
-> this revision of the text. It becomes the design when that PR merges, which needs the
-> `crypto-reviewer` pass and two human reviewers: it changes key handling and widens what amendment
-> A11 lets a `UDF_INIT` keep. "Implementation notes" at the end of this amendment records what the
-> implementation pinned, what it only observed, and one server defect it ran into.
+> **Status: implemented and merged (issue #34; PRs #39, #40, #42 and #41, 2026-10-12).** It changes
+> key handling and widens what amendment A11 lets a `UDF_INIT` keep. "Implementation notes" at the
+> end of this amendment records what the implementation pinned, what it only observed, and one
+> server defect it ran into (issue #43).
 >
 > Amendment A1 withdrew the keyring design and left the door open: "the keyring approach can be
 > revisited later as an optional feature (something like `gcm_encrypt_kr`)". This is that revisit. It

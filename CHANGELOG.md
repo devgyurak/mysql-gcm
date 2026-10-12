@@ -3,6 +3,17 @@
 Notable changes per release. Envelope-format changes get their own entry with a compatibility note
 (`ci-release` skill release checklist).
 
+## Unreleased
+
+### Documented
+- **Design amendment A13, proposed** (#34): three optional functions — `gcm_encrypt_kr`,
+  `gcm_encrypt_det_kr`, `gcm_decrypt_kr` — that take a key id and read the key from the MySQL keyring
+  under the caller's account, so the key is no longer an argument of the encryption and decryption
+  statements. The envelope and the
+  vectors do not change, and the key-as-argument functions stay as they are. Nothing is implemented
+  yet; the amendment records the decisions, what was measured on 8.0, 8.4 and 9.4, and what is
+  deliberately left out (a key version in the envelope, rotation).
+
 ## 0.1.0 — 2026-10-10
 
 First release. The component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x. It

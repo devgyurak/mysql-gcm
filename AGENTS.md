@@ -63,6 +63,7 @@ src/                           The component (C++17)
   CMakeLists.txt               MYSQL_ADD_COMPONENT — copied into the server tree as components/gcm and built there
   component.cc                 DECLARE_COMPONENT, the REQUIRES_SERVICE list, init/deinit (including registration rollback)
   udf_encrypt.cc udf_decrypt.cc   The UDF glue — argument validation, charset tagging and error translation only
+  key_source.{h,cc}            The caller's account and the keyring read for the key-id UDFs of amendment A13 (a server adapter, no crypto)
   udf_glue.{h,cc}              Arguments, buffers and error translation shared by the two UDF glues (no crypto logic)
   gcm.{h,cc}                   The OpenSSL EVP wrapper (no server header dependency → unit testable)
   envelope.{h,cc}              Envelope encoding and decoding (does not depend on OpenSSL either)

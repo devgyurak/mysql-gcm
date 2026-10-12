@@ -71,6 +71,26 @@ void set_startup_option(const std::string &name, const std::string &value);
    wants to drop its failure rules while keeping what is installed. */
 void forget_registrations();
 
+/* The key source of design A13. `set_caller` is what the security-context stubs report as
+   priv_user and priv_host; `put_keyring_entry` stores under an account ("user@host") and
+   an id, the way the real keyring is keyed. Cleared by clear_key_source(), not by reset(),
+   so a case can drop its failure rules and keep its keyring. */
+void set_caller(const std::string &user, const std::string &host);
+void put_keyring_entry(const std::string &account, const std::string &id, const std::string &type,
+                       const std::string &value);
+void clear_key_source();
+
+/* Makes keyring_fetch report this entry instead of the one keyring_fetch_length described.
+   Stays in force until clear_key_source(). */
+void override_next_keyring_fetch(const std::string &type, const std::string &value);
+
+/* Reader objects initialised and not yet released. A reader holds the server's global
+   keyring read lock, so anything but 0 after a call is a defect. */
+int open_keyring_readers();
+
+/* The message of every SQL error raised so far, in order. */
+std::vector<std::string> error_messages();
+
 /* Makes the matching call return failure. */
 void fail(const FailureRule &rule);
 

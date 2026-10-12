@@ -22,7 +22,7 @@ Style comes last.
 2. Automated review (the `code-reviewer` agent, plus `crypto-reviewer` on a crypto path): a
    prerequisite **before** human review, not a substitute for it.
 3. Human review: one reviewer for an ordinary PR. Two for the crypto, envelope and sysvar paths
-   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `spec/`).
+   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `key_source.cc`, `spec/`).
 4. Merge conditions: CI green + the required approvals + zero open P1 + zero P2 that has not been
    explicitly deferred.
 

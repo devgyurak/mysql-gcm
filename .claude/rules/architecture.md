@@ -21,6 +21,7 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 |---|---|---|
 | `component.cc` | Service declarations, UDF registration and unregistration, coordinating init and deinit | The UDF entry points, `sysvar`, core init/deinit |
 | `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, the shared byte and error types |
+| `key_source.{h,cc}` | The calling account and the keyring read behind the `_kr` functions (amendment A13). No cryptography and no SQL policy | MySQL services, `gcm` for wiping, `envelope` for the key lengths and the shared byte types |
 | `sysvar.{h,cc}` | Registering and reading server configuration, per-version service differences | MySQL services |
 | `gcm.{h,cc}` | The encryption and decryption construction, the authentication result, crypto resource init/deinit | `envelope`, `nonce`, OpenSSL |
 | `nonce.{h,cc}` | Domain separation and nonce derivation | The shared byte and error types, OpenSSL |

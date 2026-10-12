@@ -11,7 +11,7 @@ server stability → architecture → tests → compatibility → documentation 
 ## Procedure
 1. Fix the scope: `git diff --stat <base>...HEAD`. Over 400 net lines, ask for a split as the first
    comment (P2) and carry on reviewing.
-2. If a changed file touches a crypto path (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`,
+2. If a changed file touches a crypto path (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `key_source.cc`,
    `spec/**`, `scripts/gen-vectors.py`), **the parent agent running this skill** starts both
    `code-reviewer` and `crypto-reviewer` and merges the two reports. This repository's reviewers are
    configured not to delegate further, so do not expect this step to happen inside `code-reviewer` —

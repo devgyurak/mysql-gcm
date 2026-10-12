@@ -13,12 +13,16 @@ struct Row {
   size_t name_len;
   size_t account_len;
   UsageCounts counts;
+  /* Set on every row of an account once a name of that account did not fit. Kept
+     in the rows so that recording it needs no memory and cannot fail. */
+  bool account_lost;
 };
 
 /* What one pass over the table learns about an account. */
 struct AccountView {
   Row *row;     /* the row of the name asked for, or nullptr */
   size_t names; /* rows this account has */
+  bool lost;    /* a name of this account did not fit */
 };
 
 /* Everything below is guarded by g_mutex. It is taken once per UDF_INIT to fold
@@ -29,15 +33,10 @@ Row *g_rows = nullptr; /* kMaxUsageNames slots; nullptr means not counting */
 size_t g_row_count = 0;
 int64_t g_since = 0;
 
-/* Accounts that lost a name, by account. Small and bounded like the table: an
-   account that does not fit here either is covered by g_unlisted_account_lost. */
-struct LostAccount {
-  char *account;
-  size_t account_len;
-};
-LostAccount *g_lost = nullptr; /* kMaxUsageNames slots */
-size_t g_lost_count = 0;
-bool g_unlisted_account_lost = false;
+/* An account that has no row and lost a use has nowhere to keep that fact, so it
+   is kept here, for all such accounts at once. It can only become true when the
+   whole table is full or memory ran out — see usage_read for what it costs. */
+bool g_rowless_account_lost = false;
 
 uint64_t saturating_add(uint64_t a, uint64_t b) {
   const uint64_t sum = a + b;
@@ -65,46 +64,34 @@ bool same_account(const char *account, size_t account_len, const UsageName &name
 /* A linear search, on purpose: it runs once per UDF_INIT under a bound of 1024
    short comparisons, and a table that never rehashes has nothing to get wrong. */
 AccountView look(const UsageName &name) {
-  AccountView view{nullptr, 0};
+  AccountView view{nullptr, 0, false};
   for (size_t i = 0; i < g_row_count; ++i) {
     Row &row = g_rows[i];
     if (!same_account(row.name, row.account_len, name)) continue;
     ++view.names;
+    view.lost = view.lost || row.account_lost;
     if (matches(row, name)) view.row = &row;
   }
   return view;
 }
 
-bool lost_a_name(const UsageName &name) {
-  for (size_t i = 0; i < g_lost_count; ++i) {
-    if (same_account(g_lost[i].account, g_lost[i].account_len, name)) return true;
-  }
-  return false;
-}
-
-/* Records that a use by this account is in no row. */
-void note_lost(const UsageName &name) {
-  if (lost_a_name(name)) return;
-  char *copy = nullptr;
-  if (g_lost_count < kMaxUsageNames) {
-    copy = static_cast<char *>(std::malloc(name.account_len == 0 ? 1 : name.account_len));
-  }
-  if (copy == nullptr) {
-    /* Not even room to remember which account. Every account without a row of
-       its own is then told its answer may be incomplete — the one case in which
-       one account's answer depends on others, and it takes more accounts than
-       the table has slots for to get here. */
-    g_unlisted_account_lost = true;
+/* Records that a use by this account is in no row. No allocation: the mark goes on
+   the account's own rows, or, for an account without any, on the one shared flag. */
+void note_lost(const UsageName &name, size_t names_of_account) {
+  if (names_of_account == 0) {
+    g_rowless_account_lost = true;
     return;
   }
-  std::memcpy(copy, name.account, name.account_len);
-  g_lost[g_lost_count++] = LostAccount{copy, name.account_len};
+  for (size_t i = 0; i < g_row_count; ++i) {
+    Row &row = g_rows[i];
+    if (same_account(row.name, row.account_len, name)) row.account_lost = true;
+  }
 }
 
 Row *add(const UsageName &name, size_t names_of_account) {
   if (g_row_count == kMaxUsageNames || names_of_account >= kMaxUsageNamesPerAccount) return nullptr;
   const size_t len = joined_len(name);
-  char *joined = static_cast<char *>(std::malloc(len == 0 ? 1 : len));
+  char *joined = static_cast<char *>(std::malloc(len)); /* len >= 1: the separator */
   if (joined == nullptr) return nullptr;
   std::memcpy(joined, name.account, name.account_len);
   joined[name.account_len] = '\0';
@@ -115,6 +102,7 @@ Row *add(const UsageName &name, size_t names_of_account) {
   row->name_len = len;
   row->account_len = name.account_len;
   row->counts = UsageCounts{0, 0, 0, 0};
+  row->account_lost = false;
   return row;
 }
 
@@ -124,17 +112,9 @@ int usage_init(int64_t now) {
   const std::lock_guard<std::mutex> lock(g_mutex);
   if (g_rows != nullptr) return 0;
   g_rows = static_cast<Row *>(std::calloc(kMaxUsageNames, sizeof(Row)));
-  g_lost = static_cast<LostAccount *>(std::calloc(kMaxUsageNames, sizeof(LostAccount)));
-  if (g_rows == nullptr || g_lost == nullptr) {
-    std::free(g_rows);
-    std::free(g_lost);
-    g_rows = nullptr;
-    g_lost = nullptr;
-    return 1;
-  }
+  if (g_rows == nullptr) return 1;
   g_row_count = 0;
-  g_lost_count = 0;
-  g_unlisted_account_lost = false;
+  g_rowless_account_lost = false;
   g_since = now;
   return 0;
 }
@@ -143,13 +123,9 @@ void usage_deinit() {
   const std::lock_guard<std::mutex> lock(g_mutex);
   if (g_rows == nullptr) return;
   for (size_t i = 0; i < g_row_count; ++i) std::free(g_rows[i].name);
-  for (size_t i = 0; i < g_lost_count; ++i) std::free(g_lost[i].account);
   std::free(g_rows);
-  std::free(g_lost);
   g_rows = nullptr;
-  g_lost = nullptr;
   g_row_count = 0;
-  g_lost_count = 0;
 }
 
 void usage_fold(const UsageName &name, const UsageCounts &delta) {
@@ -162,7 +138,7 @@ void usage_fold(const UsageName &name, const UsageCounts &delta) {
   if (row == nullptr) {
     /* No room in the account's share or in the table, or no memory for the name.
        The use is in no row, and this account's answers say so from here on. */
-    note_lost(name);
+    note_lost(name, view.names);
     return;
   }
   row->counts.random_seals = saturating_add(row->counts.random_seals, delta.random_seals);
@@ -177,7 +153,12 @@ bool usage_read(const UsageName &name, UsageAnswer *out) {
   const AccountView view = look(name);
   out->counts = view.row != nullptr ? view.row->counts : UsageCounts{0, 0, 0, 0};
   out->since = g_since;
-  out->complete = !lost_a_name(name) && !(view.names == 0 && g_unlisted_account_lost);
+  /* An account with rows is answered from its own rows alone. An account with none
+     cannot be told apart from the rowless account that lost a use, so once that has
+     happened every rowless account is told its answer may be incomplete. This is
+     the one way one account's use shows in another's answer, and it needs the whole
+     table to be full, or memory to have run out. */
+  out->complete = !view.lost && !(view.names == 0 && g_rowless_account_lost);
   return true;
 }
 

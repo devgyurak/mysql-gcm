@@ -48,6 +48,13 @@ void fill_table_with_accounts() {
   }
 }
 
+/* As fill_table_with_accounts, leaving exactly one account's share of slots free. */
+void fill_table_with_accounts_but_one_share() {
+  for (size_t a = 0; a + 1 < gcm::kMaxUsageNames / gcm::kMaxUsageNamesPerAccount; ++a) {
+    fold_distinct_names("account_" + std::to_string(a) + "@%", gcm::kMaxUsageNamesPerAccount);
+  }
+}
+
 /* `threads` threads, each folding one random seal of one byte `folds` times. */
 void fold_from_threads(const std::string &account, const std::string &key_id, size_t threads,
                        size_t folds) {
@@ -207,6 +214,35 @@ TEST_F(Usage, GivenTheWholeTableIsFull_WhenAnAccountWithNoRowFolds_ThenThatAccou
   EXPECT_EQ(late.counts.random_seals, 0u);
   EXPECT_FALSE(late.complete);
   EXPECT_TRUE(settled.complete);
+}
+
+TEST_F(Usage,
+       GivenTheWholeTableIsFull_WhenAnAccountWithRowsLosesAName_ThenItIsToldAndOthersAreNot) {
+  // Given: the table one slot short of full, with app@% holding two names
+  fill_table_with_accounts_but_one_share();
+  fold_distinct_names("app@%", 2);
+  fold_distinct_names("filler@%", gcm::kMaxUsageNamesPerAccount - 2);
+
+  // When: app@% is well inside its own share but the table has no slot left
+  fold("app@%", "one_more", UsageCounts{5, 0, 0, 0});
+
+  // Then: app@% is told from its own rows, and an account that lost nothing is not
+  const UsageAnswer app = read("app@%", "key_0");
+  const UsageAnswer other = read("account_0@%", "key_0");
+  EXPECT_FALSE(app.complete);
+  EXPECT_TRUE(other.complete);
+}
+
+TEST_F(Usage, GivenARowlessAccountLostAUse_WhenAnotherRowlessAccountReads_ThenItIsToldToo) {
+  // Given: the documented exception — a full table and an account with no row losing a use
+  fill_table_with_accounts();
+  fold("late@%", "k1", UsageCounts{2, 0, 0, 0});
+
+  // When: an account that has never counted anything reads
+  const UsageAnswer bystander = read("bystander@%", "k1");
+
+  // Then: the table cannot tell the two apart, so it does not claim completeness to either
+  EXPECT_FALSE(bystander.complete);
 }
 
 TEST_F(Usage, GivenEightThreadsFoldingUnderOneName_WhenRead_ThenNoFoldWasLost) {

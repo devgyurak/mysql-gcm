@@ -10,8 +10,11 @@ CORE_HEADERS = {
     "gcm": {"gcm.h", "envelope.h", "nonce.h"},
     "nonce": {"nonce.h", "envelope.h"},
     "envelope": {"envelope.h"},
+    # Not cryptographic core, but held to the same server independence (amendment A14).
+    "usage": {"usage.h"},
 }
-STANDARD_HEADERS = {"climits", "cstddef", "cstring", "memory"}
+NO_OPENSSL = {"envelope", "usage"}
+STANDARD_HEADERS = {"climits", "cstddef", "cstdint", "cstdlib", "cstring", "memory", "mutex"}
 TEST_SEAMS = {"encrypt_with_nonce", "decrypt_session_has_key", "fault_inject_decrypt_init"}
 TOKENS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/')
 
@@ -36,7 +39,7 @@ def check(root: Path) -> list[str]:
                 allowed = (
                     name in CORE_HEADERS[path.stem]
                     or name in STANDARD_HEADERS
-                    or (path.stem != "envelope" and name.startswith("openssl/"))
+                    or (path.stem not in NO_OPENSSL and name.startswith("openssl/"))
                 )
                 if not allowed:
                     problems.append(

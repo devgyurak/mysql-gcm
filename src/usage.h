@@ -31,8 +31,10 @@ struct UsageAnswer {
   /* When counting began: the value given to usage_init. */
   int64_t since;
   /* False once a name of *this account* did not fit. From then on some use by
-     this account is in no row. It says nothing about any other account: one
-     account filling its share must not be visible to, or cost, another. */
+     this account is in no row. An account filling its own share is not visible
+     to, and costs nothing for, any other. The one exception: once the *whole*
+     table is full and an account with no row at all has lost a use, every account
+     with no row is told false, because the table has nowhere to keep which. */
   bool complete;
 };
 

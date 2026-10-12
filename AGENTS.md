@@ -89,7 +89,7 @@ src/                           The component (C++17)
   nonce.{h,cc}                 The synthetic nonce and the nonce_key derivation (EVP_MAC HMAC-SHA256)
   usage.{h,cc}                 The table of usage counts for the key-id functions (amendment A14; no server header → unit testable)
   sysvar.{h,cc}                Registering and reading gcm.strict — the session scope is 9.0+ only (amendment A5)
-tests/unit/                    GoogleTest — gcm/envelope/nonce, linking libcrypto alone with no server
+tests/unit/                    GoogleTest — gcm/envelope/nonce/usage, linking libcrypto alone with no server
 tests/integration/             Real-server SQL scenarios on docker (sql + expected)
 mysql-test/suite/gcm/          MTR .test/.result (run from a server source tree build)
 tests/e2e/                     compose: mysql (ROW) + replica + a Python SQL runner → LIKE / replication / dual-read

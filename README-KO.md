@@ -191,7 +191,7 @@ SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'patient_name_v1') LIKE '
 - **키를 얻지 못한 모든 경우는 오류**이며 `gcm.strict` 와 무관합니다. 메시지에는 id 도 계정도 저장된
   항목의 정보도 들어가지 않습니다.
 - **제약 17 을 먼저 읽으세요.** file keyring 은 키를 데이터 옆에 둡니다.
-- **`gcm_key_usage('patient_name_v1')`** 는 이 함수들이 서버 시작 이후 호출 계정의 그 id 아래에서 센
+- **`gcm_key_usage('patient_name_v1')`** 는 이 함수들이 component 가 세기 시작한 뒤(서버 시작 또는 재설치) 호출 계정의 그 id 아래에서 센
   봉인 수, 평문 바이트, tag 실패 수를 JSON 텍스트로 돌려줍니다. 사용 예산의 입력 하나이지 예산이
   아닙니다 — 무엇이 빠지는지는 제약 19 에 있습니다.
 

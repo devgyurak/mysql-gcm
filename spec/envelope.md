@@ -322,16 +322,20 @@ Rules an implementation MUST honour:
    counts answers zeros. `key_id` is validated as in §4.2; an invalid one is an error. SQL NULL
    yields SQL NULL.
 3. A call is counted when it returns successfully (a seal) or with a tag mismatch, whether or not
-   its statement later fails or its transaction rolls back. Successful decryptions, failed seals
+   its statement later fails or its transaction rolls back. A count is a **lower bound**: an
+   instance the server abandons without de-initialising, and which did not itself raise, loses what
+   it counted. Successful decryptions, failed seals
    and the key-argument functions of §1 are not counted.
 4. Counts become visible when the instance of the function that made them ends, not row by row. A
    `gcm_key_usage` call in the same statement as a seal does not see that seal.
-5. Counts are 64-bit unsigned and saturate. They start from zero whenever `since` changes: at server
+5. Counts are 64-bit unsigned and saturate, in the instance and in the table. They start from zero whenever `since` changes: at server
    start and when the component is installed.
 6. A row is created only by a non-zero count, which requires that a usable key was read under that
    name. `gcm_key_usage` creates none.
 7. The table holds at most 64 names per account and 1024 in all, and never evicts one. One account
-   reaching its bound MUST NOT change any other account's answer.
+   reaching its own bound MUST NOT change any other account's answer. When the whole table is full
+   and an account with no row loses a use, `complete` MAY be `false` for every account with no row;
+   it MUST NOT be `true` for an account that lost a use.
 
 A count is **not** a key's usage: it does not include other servers, other names for the same key
 bytes, the key-argument functions, or anything before `since`.

@@ -9,6 +9,7 @@
    of a keyring entry. */
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -145,14 +146,19 @@ using EncryptFn = Error (*)(UdfState *state, Bytes key, Bytes plaintext, Bytes a
 /* design A14: one successful seal, counted in the instance and folded when it ends.
    The bytes are the plaintext as sealed — after the server's conversion to
    utf8mb4, without the AAD. */
+uint64_t saturating_add(uint64_t a, uint64_t b) {
+  const uint64_t sum = a + b;
+  return sum < a ? UINT64_MAX : sum;
+}
+
 void count_random_seal(UdfState *state, size_t plaintext_len) {
-  ++state->used.random_seals;
-  state->used.bytes_sealed += plaintext_len;
+  state->used.random_seals = saturating_add(state->used.random_seals, 1);
+  state->used.bytes_sealed = saturating_add(state->used.bytes_sealed, plaintext_len);
 }
 
 void count_det_seal(UdfState *state, size_t plaintext_len) {
-  ++state->used.det_seals;
-  state->used.bytes_sealed += plaintext_len;
+  state->used.det_seals = saturating_add(state->used.det_seals, 1);
+  state->used.bytes_sealed = saturating_add(state->used.bytes_sealed, plaintext_len);
 }
 
 using CountFn = void (*)(UdfState *state, size_t plaintext_len);
@@ -353,7 +359,9 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
      any other and falls through to give_up_secrets below. */
   /* design A14: a tag mismatch is counted whichever way gcm.strict then sends it —
      a forgery attempt counts against the GCM bound either way. */
-  if (err == Error::bad_tag) ++state->used.tag_failures;
+  if (err == Error::bad_tag) {
+    state->used.tag_failures = saturating_add(state->used.tag_failures, 1);
+  }
   if (err == Error::bad_tag && !state->strict) {
     *is_null = 1;
     return nullptr;

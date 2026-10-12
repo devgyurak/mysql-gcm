@@ -80,6 +80,14 @@ char *gcm_key_usage_udf(UDF_INIT *, UDF_ARGS *args, char *result, unsigned long 
                ",\"tag_failures\":%" PRIu64 ",\"since\":%" PRId64 ",\"complete\":%s}",
                answer.counts.random_seals, answer.counts.det_seals, answer.counts.bytes_sealed,
                answer.counts.tag_failures, answer.since, answer.complete ? "true" : "false");
+  /* The longest possible text is 188 bytes — four 20-digit counts, a 19-digit
+     time and "false" — so this cannot happen; it is checked because the length is
+     about to be handed to the server. */
+  if (written < 0 || static_cast<unsigned long>(written) > kMaxAnswerLen) {
+    gcm::raise_message(kFunc, "the answer could not be formatted");
+    *error = 1;
+    return nullptr;
+  }
   *length = static_cast<unsigned long>(written);
   return result;
 }

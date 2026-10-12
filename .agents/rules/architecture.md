@@ -18,8 +18,8 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 
 | Module | Responsibility | Project dependencies allowed |
 |---|---|---|
-| `component.cc` | Service declarations, UDF registration and unregistration, coordinating init and deinit | The UDF entry points, `sysvar`, core init/deinit |
-| `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, `key_source`, the shared byte and error types |
+| `component.cc` | Service declarations, UDF registration and unregistration, coordinating init and deinit | The UDF entry points, `sysvar`, core init/deinit, `usage` init/deinit |
+| `udf_*.cc`, `udf_glue.h` | SQL arguments, NULL, charset, the result buffer, error translation | `gcm`, `sysvar`, `key_source`, `usage`, the shared byte and error types |
 | `key_source.{h,cc}` | The calling account and the keyring read behind the `_kr` functions (amendment A13). No cryptography and no SQL policy | MySQL services, `gcm` for wiping, `envelope` for the key lengths and the shared byte types |
 | `sysvar.{h,cc}` | Registering and reading server configuration, per-version service differences | MySQL services |
 | `gcm.{h,cc}` | The encryption and decryption construction, the authentication result, crypto resource init/deinit | `envelope`, `nonce`, OpenSSL |
@@ -64,7 +64,9 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 - Input bytes are borrowed from a buffer the caller owns. Do not retain a pointer beyond that
   ownership. Cleansing a copied secret is the responsibility of whoever made the copy.
 - The table of usage counts is the one piece of shared mutable state (amendment A14). It is written
-  once per `UDF_INIT`, by `fold_usage`, and read by `gcm_key_usage`; nothing else touches it.
+  once per `UDF_INIT`, by `fold_usage`, and read by `gcm_key_usage` — one lock per call of that
+  function, which is a read someone asked for, not a cost added to encryption or decryption;
+  nothing else touches it.
 - Do not share keys, plaintext, per-row results or operation contexts in globals. Any component-level
   global state must have a stated lifetime and a stated synchronisation responsibility.
 - For each new resource, define where it is acquired, where it is released, and who cleans up on

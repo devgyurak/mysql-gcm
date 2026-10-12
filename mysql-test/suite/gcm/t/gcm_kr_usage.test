@@ -78,6 +78,16 @@ SELECT gcm_key_usage('');
 
 --echo # Then: NULL, and an error
 
+--echo # Given: the longest key id allowed, one byte more, and a call with no argument
+--echo # When: their usage is read
+SELECT JSON_EXTRACT(gcm_key_usage(REPEAT('k', 255)), '$.random_seals') AS longest_id;
+--error ER_UDF_ERROR
+SELECT gcm_key_usage(REPEAT('k', 256));
+--error ER_CANT_INITIALIZE_UDF
+SELECT gcm_key_usage();
+
+--echo # Then: zero for the longest id, an error for the id that is too long, and the usage for the wrong arity
+
 DROP TABLE patients;
 --disable_query_log
 DO keyring_key_remove('mtr_usage');

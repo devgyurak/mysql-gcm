@@ -80,11 +80,13 @@ DROP USER 'kr_reader'@'%';
 SELECT '# Scenario 9 — Given: ids that name nothing, are NULL, or are not ids';
 SELECT '# When: their usage is read';
 SELECT JSON_EXTRACT(gcm_key_usage('it_never_created'), '$.random_seals') AS absent_id,
+       JSON_EXTRACT(gcm_key_usage(REPEAT('k', 255)), '$.random_seals') AS longest_id,
        gcm_key_usage(NULL) IS NULL AS null_id;
 SELECT gcm_key_usage('') AS never_reached;
 SELECT gcm_key_usage(REPEAT('k', 256)) AS never_reached;
+SELECT gcm_key_usage(CONCAT('it_', CHAR(0), 'usage')) AS never_reached;
 SELECT gcm_key_usage() AS never_reached;
-SELECT '# Then: zero without asking whether the key exists, NULL, and an error for each of the rest (above, errors section)';
+SELECT '# Then: zero without asking whether the key exists, zero for the longest id, NULL, and an error for each of the rest (above, errors section)';
 
 DROP TABLE usage_copy;
 DROP TABLE usage_rows;

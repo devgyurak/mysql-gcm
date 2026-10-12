@@ -201,8 +201,8 @@ SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'patient_name_v1') LIKE '
   names the id, the account or the stored entry.
 - **Read constraint 17 first.** The file keyring keeps the key next to the data.
 - **`gcm_key_usage('patient_name_v1')`** returns, as JSON text, how many seals, plaintext bytes and
-  tag failures these functions have counted under that id for the calling account since the server
-  started. It is an input to a usage budget, not the budget — constraint 19 says what it leaves out.
+  tag failures these functions have counted under that id for the calling account since the
+  component started counting (server start or reinstall). It is an input to a usage budget, not the budget — constraint 19 says what it leaves out.
 
 Byte layout, failure codes and test vectors: [`spec/envelope.md`](spec/envelope.md).
 

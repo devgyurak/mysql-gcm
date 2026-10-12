@@ -62,6 +62,16 @@ null_id
 SELECT gcm_key_usage('');
 ERROR HY000: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
 # Then: NULL, and an error
+# Given: the longest key id allowed, one byte more, and a call with no argument
+# When: their usage is read
+SELECT JSON_EXTRACT(gcm_key_usage(REPEAT('k', 255)), '$.random_seals') AS longest_id;
+longest_id
+0
+SELECT gcm_key_usage(REPEAT('k', 256));
+ERROR HY000: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
+SELECT gcm_key_usage();
+ERROR HY000: Can't initialize function 'gcm_key_usage'; gcm_key_usage(key_id) needs 1 argument
+# Then: zero for the longest id, an error for the id that is too long, and the usage for the wrong arity
 DROP TABLE patients;
 # ----------------------------------------------------------------------
 # Teardown

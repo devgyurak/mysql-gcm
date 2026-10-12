@@ -11,7 +11,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   under the caller's account, so the key is no longer an argument of the encryption and decryption
   statements. The envelope and the
   vectors do not change, and the key-as-argument functions stay as they are. Nothing is implemented
-  yet; the amendment records the decisions, what was measured on 8.0, 8.4 and 9.4, and what is
+  yet; the amendment records the decisions, what a probe observed on 8.0, 8.4 and 9.4, and what is
   deliberately left out (a key version in the envelope, rotation).
 
 ## 0.1.0 — 2026-10-10

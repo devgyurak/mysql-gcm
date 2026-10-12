@@ -8,9 +8,10 @@
 
 > ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
 >
-> **Status: proposed (issue #34). Nothing is implemented by this amendment.** It needs the
-> `crypto-reviewer` pass and two human reviewers before the implementation PR may merge: it changes
-> key handling and widens what amendment A11 lets a `UDF_INIT` keep.
+> **Status: proposed (issue #34). Nothing is implemented by this amendment.** Merging the PR that
+> adds this text records the proposal and decides nothing. It becomes the design when the
+> implementation PR merges, which needs the `crypto-reviewer` pass and two human reviewers: it
+> changes key handling and widens what amendment A11 lets a `UDF_INIT` keep.
 >
 > Amendment A1 withdrew the keyring design and left the door open: "the keyring approach can be
 > revisited later as an optional feature (something like `gcm_encrypt_kr`)". This is that revisit. It
@@ -56,23 +57,37 @@
 >   function); and the `user@host` string is ambiguous for an account name containing `@`, which is
 >   inherited from `keyring_udf` rather than fixed here, since fixing it would leave its keys
 >   unreachable. An account with an empty `priv_user` (anonymous) is refused: it is not one principal.
+>   The namespace is a *string*, with what follows from that and has not been tried: an account
+>   dropped and created again under the same name reaches the old account's keys, `RENAME USER`
+>   leaves them behind, and under a proxy the name is whatever `priv_user` reports. And whoever may
+>   create a routine with another account as its definer (`SET_USER_ID` on 8.0, `SET_ANY_DEFINER`
+>   from 8.2) can use that account's keys; that privilege is already equivalent to being the account.
 > - **Sharing a key between accounts** goes through a stored routine with `SQL SECURITY DEFINER`:
 >   inside it the security context is the definer's, so the definer's keys are used. A view does
 >   **not** do this — a function in a view runs as the invoker, whatever the view's `SQL SECURITY`.
 >   Such a routine is an oracle for its callers over whatever it lets them choose, so it **hard-codes
->   the key id and the AAD**; neither is a parameter. And its shape matters (measured below): a
+>   the key id and the AAD**; neither is a parameter. And its shape matters (observed below): a
 >   stored *function* gets a new `UDF_INIT` on every invocation, so `SELECT f(col) FROM t` reads the
 >   keyring once per row; a stored *procedure* that contains the whole statement reads it once.
+> - **When a call fails with *no usable key*, diagnose as the same account**: `SELECT CURRENT_USER()`
+>   gives the namespace (`app@localhost` and `app@%` are different ones), and
+>   `keyring_key_type_fetch('id')` and `keyring_key_length_fetch('id')` give what is stored — both
+>   need the global `EXECUTE` privilege. The component's message will not say which it was.
 > - **The key must be of keyring type `AES` and 16, 24 or 32 bytes.** The length selects the suite and
 >   nothing else does (A10). `gcm.min_key_bytes` applies to the two encryption functions and never to
 >   `gcm_decrypt_kr`, exactly as for the existing functions.
-> - **The key id** is 1 to 255 bytes with no NUL byte, taken as the bytes the caller sent (argument
->   charset `binary`, which is how `keyring_udf` sees it too). The bound is this component's, chosen
->   to keep the id in a fixed buffer.
+> - **The key id** is 1 to 255 bytes with no NUL byte, after the server has converted the argument to
+>   `utf8mb4` — which is what `keyring_udf` asks for its own string arguments (read in
+>   `plugin/keyring_udf/keyring_udf.cc`, all three trees), so a non-ASCII id names the same entry from
+>   either side. The bound is this component's, chosen to keep the id in a fixed buffer.
 > - **At most one keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL.**
->   Not in `init`: see the measurement below. Every later row of that `UDF_INIT` must bring the same
+>   Not in `init`: see the observation below. Every later row of that `UDF_INIT` must bring the same
 >   id bytes; a different id is an error. An id that varies by row (a column) is therefore refused on
->   the second distinct value. The id is not secret and is compared with `memcmp`. How many
+>   the second distinct value. The id is not secret and is compared with `memcmp`. The account the
+>   key was read under is recorded with it and compared on every row as well — reading the security
+>   context touches no keyring — so "the account does not change within a `UDF_INIT`" is enforced
+>   rather than assumed; a change is an error. The order on a row is: NULL check, id and account
+>   check, the keyring read if this is the first such row, then the core. How many
 >   `UDF_INIT`s a statement has is the server's decision, not the component's — see the stored
 >   function above. Pass the id as a literal, a user variable or a bound parameter: a *computed* id
 >   is subject to the 8.0/8.4 argument defect of A7 like any other argument.
@@ -82,10 +97,14 @@
 >   one meaning — a tag mismatch. There are four, and no more are distinguished:
 >   *keyring unavailable* (the reader's `init` or a fetch failed); *no usable key* (no entry under
 >   this id for this account, or an entry that is not type `AES` with a length of 16, 24 or 32 —
->   **one message for all three**, so that a definer routine does not tell its callers which ids
->   exist or how long another secret is); *invalid id* (empty, over 255 bytes, a NUL byte, or
->   different from the first row's); *no caller account*. No message carries the key id, the account,
->   or the length or type of a keyring entry.
+>   **one message for all three**, so that entries of another type or an odd length are not
+>   revealed); *invalid id* (empty, over 255 bytes, a NUL byte, or different from the first row's);
+>   *no caller account*, which includes an account that changed between rows. No message carries
+>   the key id, the account, or the length or type of a keyring entry. **This narrows an oracle and
+>   does not close it**: a definer routine that took the id as a parameter would still tell its
+>   callers which ids name a usable AES key and how long it is — through the `gcm.min_key_bytes`
+>   refusal, through the key-length error a crafted envelope of another suite draws, and through
+>   *keyring unavailable* differing from *no usable key*. That is why such a routine hard-codes it.
 > - **A key-source failure is latched for the `UDF_INIT`.** If execution continues past the error
 >   (`INSERT IGNORE`, a handler), later rows raise the same error without touching the keyring again.
 > - **`gcm_encrypt_det_kr` declares `const_item`, as `gcm_encrypt_det` does** — a constant lookup on a
@@ -93,7 +112,8 @@
 >   while the statement is being optimised, in the caller's session and under the caller's account.
 > - **The functions are always registered.** "Optional" means using them is: the component installs
 >   and the existing functions work on a server with no keyring, where a `_kr` call raises
->   *keyring unavailable*.
+>   *keyring unavailable*. Observed on 8.4 only so far; that it holds on 8.0 and 9.4 is a gate for
+>   the implementation PR, not something this amendment has established.
 >
 > ### The key copy: what A11 is widened to allow
 >
@@ -103,9 +123,9 @@
 > row to `deinit`.** It differs from A11's copies in two ways, and both are deliberate.
 >
 > - It is not a second copy of an argument the server already holds for the statement: no argument
->   buffer and no statement text contains this key. The component's copies — this one, and A11's
->   scheduled context and nonce key derived from it — are the only ones outside the keyring's own
->   memory, and a core dump taken mid-statement contains them.
+>   buffer and no text of *this* statement contains the key. The component's copies — this one, and
+>   A11's scheduled context and nonce key derived from it — are what the statement adds to the
+>   keyring's own memory, and a core dump taken mid-statement contains them.
 > - **It survives `bad_tag`.** A11 cleanses its copy on every failure of the cipher operation, and
 >   that still happens: the scheduled context and its copy, and the cached nonce key, are discarded
 >   exactly as A11 says, by the unchanged core. The fetched key is kept, because with
@@ -116,16 +136,18 @@
 > **What this contradicts, stated rather than left to a reviewer to find.** A11 rejects "a cache keyed
 > on anything other than the full key bytes", `crypto-safety.md` lists it as a blocked pattern, and
 > `architecture.md` §5 says nothing else is carried from one row to the next and that a row callback
-> does not touch a file or the network repeatedly. The fetched key is a cross-row value keyed on
+> does not touch a file or the network repeatedly. `crypto-safety.md` also opens its key handling
+> with "the key arrives only as the UDF argument `key`", and `AGENTS.md` §9 lists keyring
+> integration as out of scope. The fetched key is a cross-row value keyed on
 > *(calling account, key id)*, and its one read happens in the row callback. The grounds for the
 > exception: A11's rule exists because a caller-supplied key can change between rows while a
 > cheaper-to-compare proxy for it stays the same; here the id *is* the caller's whole input, there
 > are no key bytes to compare until the keyring has been read, and comparing by re-reading is the
-> per-row backend call this design avoids. The account cannot change within a `UDF_INIT`: one
-> `UDF_INIT` is one execution of one item on one thread (A11), and the security context changes only
-> on entering or leaving a stored routine, which the measurement below shows gives a routine's
-> function call its own `UDF_INIT`. The read is once, not repeated. All three rule texts are amended
-> by the implementation PR to name this exception and no other.
+> per-row backend call this design avoids. Both halves of the cache key are compared on every row,
+> the id and the account. The read is once per `UDF_INIT`. **Through a definer stored function that
+> is once per row**, since the server gives each invocation its own `UDF_INIT`: an accepted breach
+> of §5 for that one shape, listed with the operational constraints below. These rule texts are
+> amended by the implementation PR to name this exception and no other.
 >
 > The conditions: the copy belongs to one `UDF_INIT` and is never shared across threads or instances;
 > it is cleansed in `deinit` and when `init` fails after allocating; the reader object is released
@@ -211,10 +233,15 @@
 >
 > - Keyring contents are not replicated, exactly as the component is not (constraint 14). Every
 >   server that runs a `_kr` function needs the key under the same id **and the same account**.
-> - `gcm_encrypt_det_kr` needs ROW binlog as `gcm_encrypt` does. The existing `gcm_encrypt_det` gives
->   the same bytes wherever it is replayed; a `_kr` function replayed on a replica would resolve the
->   id in the replica's keyring under whatever account the applier runs as. Not tested; do not rely
->   on it.
+> - `gcm_encrypt_kr` and `gcm_encrypt_det_kr` both need ROW binlog. The existing `gcm_encrypt_det`
+>   gives the same bytes wherever it is replayed; a `_kr` function replayed on a replica would
+>   resolve the id in the replica's keyring under whatever account the applier runs as. Not tested;
+>   do not rely on it.
+> - **Sharing through a definer stored *function* costs one keyring read per row**, each taking the
+>   server's global keyring read lock, and on a backend that does not cache, one backend call per
+>   row. `WHERE f(col) LIKE '%길%'` over a shared key is exactly that shape. Prefer one account per
+>   application with its own keys; where a key must be shared, put the whole statement in a definer
+>   procedure, and measure before using the function shape on a large scan.
 > - Key-usage accounting (A8, constraints 11–13) is unchanged: the component still counts nothing.
 >   A key reachable by id from several accounts or servers is one key for the usage budget.
 > - **Every condition on a deterministic key still applies, and a keyring makes two of them easier to
@@ -250,7 +277,7 @@
 > | `tests/adapter` | stubs for the new services; every key-source failure injected |
 > | `tests/integration`, `mysql-test` | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
 > | `scripts/dev-up.sh`, `scripts/verify.sh` | the test servers load `component_keyring_file` and `keyring_udf` |
-> | `crypto-safety.md` (key handling, blocked patterns), `architecture.md` §3 and §5 | the widened key-copy rule, its lifetime row, and the one cross-row value keyed on (account, key id) |
+> | `crypto-safety.md`, `architecture.md` §3 | the widened key-copy rule and its lifetime row |
 > | README, `docs/ops-constraints.md`, `AGENTS.md` | the function table, constraints 2 and 14, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
 
 > ## Amendment A12 (2026-10-07) — Cross-suite nonce-key linkage, and deterministic AES-128: analysis for review

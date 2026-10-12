@@ -6,6 +6,307 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
+>
+> **Status: proposed (issue #34). Nothing is implemented by this amendment.** Merging the PR that
+> adds this text records the proposal and decides nothing. It becomes the design when the
+> implementation PR merges, which needs the `crypto-reviewer` pass and two human reviewers: it
+> changes key handling and widens what amendment A11 lets a `UDF_INIT` keep.
+>
+> Amendment A1 withdrew the keyring design and left the door open: "the keyring approach can be
+> revisited later as an optional feature (something like `gcm_encrypt_kr`)". This is that revisit. It
+> **adds** three functions and changes none of the existing three; taking the key as a SQL argument
+> stays the default and stays supported.
+>
+> ```
+> gcm_encrypt_kr(plaintext, key_id [, aad])       -> BLOB     random nonce
+> gcm_encrypt_det_kr(plaintext, key_id [, aad])   -> BLOB     deterministic
+> gcm_decrypt_kr(ciphertext, key_id [, aad])      -> VARCHAR  charset tagged (utf8mb4)
+> ```
+>
+> **What it closes, and what it does not.** Operational constraint 2 has two halves. With these
+> functions the *key* is not an argument of the encryption and decryption statements, so those
+> statements no longer carry it into the general log, the slow log,
+> `performance_schema.events_statements_*` or the binlog. A key created with `keyring_key_generate`
+> never appears in a statement at all. **Importing an existing key does, once**:
+> `keyring_key_store('id', 'AES', <key>)` is a statement with the key in it, and `keyring_key_fetch`
+> returns the key to any session of the account that owns it. The *plaintext* argument and a
+> `LIKE '%김%'` pattern are still in the statement. Constraint 2 shrinks; it does not go away.
+>
+> ### Decisions
+>
+> - **The envelope does not change.** The functions produce `0x02`–`0x07` exactly as
+>   `spec/envelope.md` defines them, `gcm_decrypt_kr` reads everything `gcm_decrypt` reads — the legacy
+>   `0x01` envelope included, through the same core path and with A3's conditions — and no vector
+>   changes. A row written by `gcm_encrypt(…, key)` is
+>   readable by `gcm_decrypt_kr(…, id)` when the keyring holds the same key bytes under `id`, and the
+>   reverse. That is the migration path and a server test pins it.
+> - **The key id is an explicit argument of all three functions.** Issue #34 proposed reading the id
+>   from the envelope on decryption. That is deferred (see "Out of scope"): it needs new version
+>   bytes, lets whoever can write the column choose the key, and makes the keyring lookup per row.
+> - **The key is read through `keyring_reader_with_status`**, with the keyring `auth_id` set to the
+>   caller's `priv_user@priv_host`. This is the namespace the server's own general-purpose keyring
+>   functions (`keyring_udf`) use, so `SELECT keyring_key_generate('id', 'AES', 32)` creates a key
+>   these functions can use and whose bytes were never in a statement. The component does not create,
+>   store or remove keys.
+> - **Authorisation is that namespace.** MySQL has no privilege for invoking a loadable function and
+>   the keyring reader service checks none, so "who may call" cannot be the boundary. "Which key" is:
+>   an account can use only the keys stored under its own `priv_user@priv_host`. No dynamic privilege
+>   is registered. Two differences from `keyring_udf` are deliberate and stated: its functions also
+>   demand the global `EXECUTE` privilege and these do not (reading one's own key is the whole
+>   function); and the `user@host` string is ambiguous for an account name containing `@`, which is
+>   inherited from `keyring_udf` rather than fixed here, since fixing it would leave its keys
+>   unreachable. An account with an empty `priv_user` (anonymous) is refused: it is not one principal.
+>   The namespace is a *string*, with what follows from that and has not been tried: an account
+>   dropped and created again under the same name reaches the old account's keys, `RENAME USER`
+>   leaves them behind, and under a proxy the name is whatever `priv_user` reports. And whoever may
+>   create a routine with another account as its definer (`SET_USER_ID` on 8.0, `SET_ANY_DEFINER`
+>   from 8.2) can use that account's keys; that privilege is already equivalent to being the account.
+> - **Sharing a key between accounts** goes through a stored routine with `SQL SECURITY DEFINER`:
+>   inside it the security context is the definer's, so the definer's keys are used. A view does
+>   **not** do this — a function in a view runs as the invoker, whatever the view's `SQL SECURITY`.
+>   Such a routine is an oracle for its callers over whatever it lets them choose, so it **hard-codes
+>   the key id and the AAD**; neither is a parameter. And its shape matters (observed below): a
+>   stored *function* gets a new `UDF_INIT` on every invocation, so `SELECT f(col) FROM t` reads the
+>   keyring once per row; a stored *procedure* that contains the whole statement reads it once.
+> - **When a call fails with *no usable key*, diagnose as the same account**: `SELECT CURRENT_USER()`
+>   gives the namespace (`app@localhost` and `app@%` are different ones), and
+>   `keyring_key_type_fetch('id')` and `keyring_key_length_fetch('id')` give what is stored — both
+>   need the global `EXECUTE` privilege. The component's message will not say which it was.
+> - **The key must be of keyring type `AES` — compared exactly, in that case — and 16, 24 or 32
+>   bytes.** The length selects the suite and
+>   nothing else does (A10). `gcm.min_key_bytes` applies to the two encryption functions and never to
+>   `gcm_decrypt_kr`, exactly as for the existing functions.
+> - **The key id** is 1 to 255 bytes with no NUL byte, after the server has converted the argument to
+>   `utf8mb4` — which is what `keyring_udf` asks for its own string arguments (read in
+>   `plugin/keyring_udf/keyring_udf.cc`, all three trees), so a non-ASCII id names the same entry from
+>   either side. The bound is this component's, chosen to keep the id in a fixed buffer.
+> - **At most one keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL.**
+>   Not in `init`: see the observation below. Every later row of that `UDF_INIT` must bring the same
+>   id bytes; a different id is an error. An id that varies by row (a column) is therefore refused on
+>   the second distinct value. The id is not secret and is compared with `memcmp`. The account the
+>   key was read under is recorded with it and compared on every row as well — reading the security
+>   context touches no keyring — so "the account does not change within a `UDF_INIT`" is enforced
+>   rather than assumed; a change is an error. The order on a row is: NULL check, id and account
+>   check, the keyring read if this is the first such row, then the core. The read asks for the
+>   entry's lengths first and for its bytes only when they are those of an `AES` entry of a suite
+>   length, so this component never requests the bytes of an entry it will not use. How many
+>   `UDF_INIT`s a statement has is the server's decision, not the component's — see the stored
+>   function above. Pass the id as a literal, a user variable or a bound parameter: a *computed* id
+>   is subject to the 8.0/8.4 argument defect of A7 like any other argument.
+> - **A NULL argument gives SQL NULL** with no keyring access and no id check
+>   (`spec/envelope.md` §4 rule 3).
+> - **Every key-source failure is an error regardless of `gcm.strict`,** and `gcm.strict` keeps its
+>   one meaning — a tag mismatch. There are four, and no more are distinguished:
+>   *keyring unavailable* (the reader's `init` or a fetch failed); *no usable key* (no entry under
+>   this id for this account, or an entry that is not type `AES` with a length of 16, 24 or 32 —
+>   **one message for all three**, so that entries of another type or an odd length are not
+>   revealed); *invalid id* (empty — which the server's keyring also asserts on in a debug build —
+>   over 255 bytes, a NUL byte, or different from the first row's);
+>   *no caller account*, which includes an account that changed between rows. No message carries
+>   the key id, the account, or the length or type of a keyring entry. **This narrows an oracle and
+>   does not close it**: a definer routine that took the id as a parameter would still tell its
+>   callers which ids name a usable AES key and how long it is — through the `gcm.min_key_bytes`
+>   refusal, through the key-length error a crafted envelope of another suite draws, through
+>   *keyring unavailable* differing from *no usable key*, and through timing, which nothing here
+>   equalises. That is why such a routine hard-codes it.
+> - **An error is final for the `UDF_INIT`.** The server does not call a function's row callback
+>   again once it has reported an error — `udf_handler::get_arguments` returns on the handler's
+>   error flag; read in the 8.0.43, 8.4.11 and 9.4.0 sources — so no row follows a key-source
+>   failure, or any other error, in the same `UDF_INIT`. The implementation records the failure as
+>   well, so that a call made anyway is refused rather than served.
+> - **`gcm_encrypt_det_kr` declares `const_item`, as `gcm_encrypt_det` does** — a constant lookup on a
+>   UNIQUE index is what the variant is for. The consequence is that the keyring read can happen
+>   while the statement is being optimised, in the caller's session and under the caller's account.
+>   Whether `EXPLAIN` of a statement holding a constant `gcm_encrypt_det_kr` call reads the keyring
+>   was not observed.
+> - **The functions are always registered.** "Optional" means using them is: the component installs
+>   and the existing functions work on a server with no keyring, where a `_kr` call raises
+>   *keyring unavailable*. Observed on 8.4 only so far; that it holds on 8.0 and 9.4 is a gate for
+>   the implementation PR, not something this amendment has established.
+>
+> ### The key copy: what A11 is widened to allow
+>
+> A11 lets a `UDF_INIT` hold a key copy only beside `gcm_decrypt`'s scheduled context or
+> `gcm_encrypt_det`'s nonce key. A `_kr` function needs one more: **the key fetched from the keyring
+> (at most 32 bytes), with the id and the account it was fetched under, held in the per-instance
+> state from the first row to `deinit`.** It differs from A11's copies in two ways, and both are deliberate.
+>
+> - It is not a second copy of an argument the server already holds for the statement: no argument
+>   buffer and no text of *this* statement contains the key. The component's copies — this one, and
+>   A11's scheduled context and nonce key derived from it — are what the statement adds to the
+>   keyring's own memory, and a core dump taken mid-statement contains them.
+> - **It survives a `bad_tag` that `gcm.strict=OFF` turns into NULL.** A11 cleanses its copy on
+>   every failure of the cipher operation, and that still happens: the scheduled context and its
+>   copy, and the cached nonce key, are discarded exactly as A11 says, by the unchanged core. The
+>   fetched key is kept, because the next row must still decrypt. **A row in which one of these
+>   functions raises an error — a `bad_tag` under `gcm.strict=ON` included — gives up every secret
+>   its `UDF_INIT` holds at once**: the fetched key, and the two A11 states and the result buffer
+>   with it, because an error the core raises from a pre-check (a malformed envelope, a suite
+>   mismatch) leaves its scheduled context and nonce key as they were. It does not wait for
+>   `deinit`: no row follows an error (above), so nothing is lost, and the server does not always
+>   call `deinit` after one. Giving the key up on the NULL path too would let whoever planted corrupt rows cause one keyring read per row with no error to stop
+>   the statement, which on an external backend may be a network call per row.
+>
+> **What this contradicts, stated rather than left to a reviewer to find.** A11 rejects "a cache keyed
+> on anything other than the full key bytes", `crypto-safety.md` lists it as a blocked pattern, and
+> `architecture.md` §5 says nothing else is carried from one row to the next and that a row callback
+> does not touch a file or the network repeatedly. `crypto-safety.md` also opens its key handling
+> with "the key arrives only as the UDF argument `key`", and `AGENTS.md` §9 lists keyring
+> integration as out of scope. The fetched key is a cross-row value keyed on
+> *(calling account, key id)*, and its one read happens in the row callback. The grounds for the
+> exception: A11's rule exists because a caller-supplied key can change between rows while a
+> cheaper-to-compare proxy for it stays the same; here the id *is* the caller's whole input, there
+> are no key bytes to compare until the keyring has been read, and comparing by re-reading is the
+> per-row backend call this design avoids. Both halves of the cache key are compared on every row,
+> the id and the account. The read is once per `UDF_INIT`. **Through a definer stored function that
+> is once per row**, since the server gives each invocation its own `UDF_INIT`: an accepted breach
+> of §5 for that one shape, listed with the operational constraints below. These rule texts are
+> amended by the implementation PR to name this exception and no other.
+>
+> The conditions: the copy belongs to one `UDF_INIT` and is never shared across threads or instances;
+> it is cleansed in `deinit` and when `init` fails after allocating; the reader object is released
+> immediately after the fetch, never kept across rows (it holds a read lock on the server's global
+> keyring lock from its `init` to its `deinit`), and if that release fails the result is ignored —
+> there is nothing to do about it — and a key already fetched is still used; the fetch buffer is
+> cleansed on every path. Nothing
+> is cached across `UDF_INIT`s, so a key removed from or replaced in the keyring is picked up by
+> the next `UDF_INIT` that reads it. **That is not a promise that one statement sees one key.** It
+> is usually the next execution of the statement, but a definer stored function gets a `UDF_INIT`
+> per row — so a key replaced while such a statement runs can take effect on its next row, and a
+> deterministic column filled by such a scan can come out sealed under two keys. How fresh the answer is on a
+> backend that caches is that backend's property, not this component's.
+>
+> The core (`gcm`, `envelope`, `nonce`) does not change. Reading the keyring and the caller's account
+> is a server adapter (`architecture.md` §1), and the `_kr` functions call the same core entry points
+> as the existing three.
+>
+> ### Observed on 2026-10-12 with a throwaway probe component
+>
+> Servers 8.0.46, 8.4.11 and 9.4.0 (the pinned images), the probe built against the 8.0.43, 8.4.11
+> and 9.4.0 trees. **Observed once and not yet pinned**: the probe is not committed, and each row
+> below becomes a committed server test in the implementation PR, the way A7's finding is pinned by
+> `tests/integration/91_*`. Until then these are observations, not guarantees. The three versions
+> gave the same output for every row of the three tables.
+>
+> | What the function is called with | What `init` sees | What the row function sees |
+> |---|---|---|
+> | a literal, a user variable, a stored-procedure variable, `CONCAT` of literals, `(SELECT 'k')` | the value | the value |
+> | a `?` of a prepared statement (`EXECUTE … USING @v`) | **a null pointer, length 0** | the value |
+> | a column | a null pointer, length = the column width | the value |
+> | a NULL literal | a null pointer, length 0 | NULL |
+>
+> So `init` cannot tell a bound parameter from a NULL literal, and "the id must be resolved in `init`"
+> would refuse the way applications normally send it. Hence the first-row read above.
+>
+> | Caller and context | `auth_id` the component reads under | A key the definer `root@%` owns |
+> |---|---|---|
+> | `app@%` calling directly | `app@%` | absent |
+> | `app@%` through a `SQL SECURITY DEFINER` function defined by `root@%` | `root@%` | found |
+> | `app@%` through a `SQL SECURITY INVOKER` function | `app@%` | absent |
+> | `app@%` through a `SQL SECURITY DEFINER` view defined by `root@%` | `app@%` | absent |
+>
+> | A five-row scan calling the function… | `UDF_INIT`s created |
+> |---|---|
+> | directly in the select list | 1 |
+> | inside a stored *function* called in the select list | 5 — one per row |
+> | directly, with the whole `SELECT` inside a stored *procedure* | 1 |
+> | under `EXPLAIN` (function in a `WHERE` comparison) | 1, and no row call |
+>
+> Keys created with `keyring_key_generate` (`AES`, 16 and 32 bytes) and `keyring_key_store`
+> (`SECRET`, 8 bytes) were read back with their length and type. An absent id returns from the
+> reader's `init` with success and a null reader object, and left no line in the error log at the
+> default `log_error_verbosity` of 2. At 3 the keyring component logs a note for it that carries
+> the data id and the auth id (`ER_NOTE_KEYRING_COMPONENT_READ_DATA_NOT_FOUND`; read in the 8.4.11
+> source, not run) — so with verbose error logging a key id and the account that asked for it reach
+> the error log, from the server's keyring and not from this component. An
+> account without the global `EXECUTE` privilege was refused by `keyring_key_generate` and could
+> still reach the reader. On a server with no keyring loaded — **8.4 only** — the reader's `init`
+> returned failure and `INSTALL COMPONENT` had succeeded. Triggers and events were not tried.
+>
+> Read in the 8.0.43, 8.4.11 and 9.4.0 sources, not run: the service header is identical in all
+> three and was introduced in 8.0.24 — on an older 8.0 a hard `REQUIRES_SERVICE` on it cannot be
+> satisfied and `INSTALL COMPONENT` would fail, which was not tried: the component is built and
+> tested against 8.0.43, and nothing older is supported; `mysql_thd_security_context`,
+> `mysql_security_context_options` and `mysql_current_thread_reader` have the same signatures in all
+> three; the server registers a default implementation of the reader service in all three, which is
+> why requiring it should not block an install on 8.0 and 9.4 either; the server's reader wrapper
+> takes a read lock on its global keyring lock in `init` and holds it until `deinit`; a failed
+> backend read surfaces as `fetch_length` or `fetch` returning failure with no error code, so the
+> component cannot tell "backend unreachable" from any other fetch failure and does not claim to.
+>
+> ### Which keyring, and the §3 prerequisite
+>
+> The original §3 called the keyring backend a prerequisite and ruled `component_keyring_file` "not
+> viable". That verdict was about one goal, and there are two:
+>
+> - **Keeping the key out of the encryption and decryption statements** — this does not depend on
+>   where the keyring stores its data, so the file keyring is enough. This is what the amendment
+>   claims, and the file keyring is the only one it has been tried with.
+> - **Surviving a stolen data directory or backup** — needs the key off the database host, so an
+>   external backend. §3 stands for this goal: with `component_keyring_file` the key sits beside the
+>   data, and this amendment does not claim otherwise.
+>
+> Oracle's MySQL Community distribution ships no external backend: the 8.4 manual lists
+> `component_keyring_file` as its only keyring (the 8.0 image also carries the legacy `keyring_file`
+> plugin), and the external ones are in MySQL Enterprise Edition
+> ([manual](https://dev.mysql.com/doc/refman/8.4/en/keyring.html)).
+> The project's CI can therefore exercise the file keyring and nothing else. Behaviour with an
+> Enterprise backend, and with Percona Server's keyring components, is **untested** and is not
+> claimed as supported. A backend that does not cache makes the one read per `UDF_INIT` a backend
+> call per statement.
+>
+> ### Operational constraints this adds
+>
+> - Keyring contents are not replicated, exactly as the component is not (constraint 14). Every
+>   server that runs a `_kr` function needs the key under the same id **and the same account**.
+> - `gcm_encrypt_kr` and `gcm_encrypt_det_kr` both need ROW binlog. The existing `gcm_encrypt_det`
+>   gives the same bytes wherever it is replayed; a `_kr` function replayed on a replica would
+>   resolve the id in the replica's keyring under whatever account the applier runs as. Not tested;
+>   do not rely on it.
+> - **Sharing through a definer stored *function* costs one keyring read per row**, each taking the
+>   server's global keyring read lock, and on a backend that does not cache, one backend call per
+>   row. `WHERE f(col) LIKE '%길%'` over a shared key is exactly that shape. Prefer one account per
+>   application with its own keys; where a key must be shared, put the whole statement in a definer
+>   procedure, and measure before using the function shape on a large scan.
+> - Key-usage accounting (A8, constraints 11–13) is unchanged: the component still counts nothing.
+>   A key reachable by id from several accounts or servers is one key for the usage budget.
+> - **Every condition on a deterministic key still applies, and a keyring makes two of them easier to
+>   break.** A12 requires an independent, full-length CSPRNG key per suite and security domain:
+>   `keyring_key_generate` gives one, `keyring_key_store` accepts whatever it is handed, padded or
+>   low-entropy keys included, and the component cannot tell. And "one AAD convention per key"
+>   (constraint 7) and "independent keys for the random and the deterministic mode" (A12) are about
+>   the key *bytes*: a key several accounts reach through a routine, or that `keyring_key_fetch`
+>   hands to an application which then passes it to `gcm_encrypt_det`, is still one key with one AAD
+>   convention across all of them.
+> - A key generated in the keyring exists nowhere else. Backing up the keyring, and keeping old keys
+>   for old data, is the operator's responsibility as before — and now the only copy is theirs.
+>
+> ### Out of scope, deliberately
+>
+> - **A key id or key version in the envelope**, and with it rotation and dual-read without the
+>   application's help. It needs new version bytes (to be allocated together with issue #37), an
+>   authenticated id, a bound on which ids a stored value may name, and an answer to the per-row
+>   lookup that `architecture.md` §5 forbids. Its own amendment.
+> - A dynamic privilege, per-key grants, and any function that writes to the keyring.
+> - Per-key usage counters (issue #35), which this makes possible by giving a key a name.
+> - `tests/e2e`: a replica with its own keyring is a separate piece of test infrastructure.
+>
+> **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
+> backward compatible: no envelope a released build wrote or reads is affected.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/` | a keyring-and-caller adapter; the three `_kr` UDFs reusing `udf_glue`'s argument and buffer handling and the unchanged core, with messages of their own (the shared ones carry a key length); the per-instance key copy; three more service requirements in `component.cc`, with `mysql_current_thread_reader` required on every version |
+> | `spec/envelope.md` | the argument contract and failure semantics of the three functions. No byte layout and no vector changes |
+> | `tests/adapter` | stubs for the new services; every key-source failure injected |
+> | `tests/integration`, `mysql-test` | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
+> | `scripts/dev-up.sh`, `scripts/verify.sh` | the test servers load `component_keyring_file` and `keyring_udf` |
+> | `crypto-safety.md` (key handling, failure semantics, blocked patterns), `architecture.md` §1, §3 and §5 | the widened key-copy rule, the module and lifetime rows, and the one cross-row value keyed on (account, key id) |
+> | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the function table, constraints 2 and 14, what verbose keyring logging records, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
+
 > ## Amendment A12 (2026-10-07) — Cross-suite nonce-key linkage, and deterministic AES-128: analysis for review
 >
 > **Status: decisions recorded on 2026-10-07 by Codex (AI design reviewer).** The analysis and
@@ -883,6 +1184,7 @@
 >   log, `performance_schema.events_statements_*` and an SBR binlog. This is **the same exposure surface
 >   as running `AES_ENCRYPT` today**, and it is added to the §6 operational constraints. The keyring
 >   approach can be revisited later as an optional feature (something like `gcm_encrypt_kr`).
+>   *Revisited in A13.*
 > - In the Phase S checklist, "reads the key from the keyring" is removed and replaced by "validates a
 >   32-byte key argument, and `SET SESSION gcm.strict` works".
 
@@ -1022,7 +1324,8 @@ SQL. That is how crypsi's flaw is avoided.
 
 ## 3. A prerequisite decision — the keyring backend (before the spike)
 
-> **Out of scope** as of amendment A1. Kept because A1 is written against this section.
+> **Out of scope** as of amendment A1. Kept because A1 is written against this section. Revisited
+> by amendment A13, which keeps this section's verdict for the goal it was about.
 
 This decision determines whether the project is justified at all.
 

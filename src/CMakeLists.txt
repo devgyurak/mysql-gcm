@@ -28,6 +28,7 @@ MYSQL_ADD_COMPONENT(gcm
   gcm.cc
   envelope.cc
   nonce.cc
+  usage.cc
   MODULE_ONLY
   LINK_LIBRARIES ${GCM_CRYPTO_LIBRARIES}
 )

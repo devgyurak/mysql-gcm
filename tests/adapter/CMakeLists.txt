@@ -67,6 +67,7 @@ add_library(gcm_component_under_test
   ${GCM_SRC_DIR}/gcm.cc
   ${GCM_SRC_DIR}/envelope.cc
   ${GCM_SRC_DIR}/nonce.cc
+  ${GCM_SRC_DIR}/usage.cc
 )
 target_include_directories(gcm_component_under_test PUBLIC
   ${GCM_SRC_DIR}

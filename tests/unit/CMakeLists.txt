@@ -35,6 +35,7 @@ add_library(gcm_core
   ${GCM_SRC_DIR}/gcm.cc
   ${GCM_SRC_DIR}/envelope.cc
   ${GCM_SRC_DIR}/nonce.cc
+  ${GCM_SRC_DIR}/usage.cc
 )
 target_include_directories(gcm_core PUBLIC ${GCM_SRC_DIR})
 target_link_libraries(gcm_core PUBLIC OpenSSL::Crypto)
@@ -50,6 +51,7 @@ add_executable(gcm_unit
   nonce_test.cc
   gcm_test.cc
   det_session_test.cc
+  usage_test.cc
 )
 target_include_directories(gcm_unit PRIVATE ${GCM_REPO_ROOT}/third_party)
 target_compile_definitions(gcm_unit PRIVATE GCM_REPO_ROOT="${GCM_REPO_ROOT}")

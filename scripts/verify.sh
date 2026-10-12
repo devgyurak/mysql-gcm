@@ -82,6 +82,11 @@ for case_file in "${cases[@]}"; do
   # variable, so the default is restored before each case: order independence should
   # not depend on a case cleaning up after itself.
   mysql -N -e "SET GLOBAL gcm.strict = DEFAULT"
+  # The same reasoning for the keyring (design A13): a key a case generated must not
+  # be there for the next one, and an aborted run must not leave one behind for this
+  # one. Emptied in place so the file keeps the ownership dev-up.sh gave it.
+  docker exec "${name}" sh -c ': > /var/lib/mysql-keyring/component_keyring_file'
+  mysql -N -e "ALTER INSTANCE RELOAD KEYRING"
   case_mysql -N --force < "${case_file}" > "${actual}.out" 2> "${actual}.err" || true
   {
     cat "${actual}.out"

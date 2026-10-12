@@ -1,0 +1,93 @@
+# The key-id functions (docs/design.md amendment A13): the key is read from the keyring
+# under the calling account instead of being passed as an argument.
+#
+# This is the layer that can show two things tests/integration cannot: gcm.strict=OFF
+# across rows of one statement on a server where the variable is GLOBAL (8.4, where this
+# .result is recorded), and that none of it writes an unexpected line to the error log —
+# MTR fails a test that does. The account boundary, definer routines and bound parameters
+# are in tests/integration/6*_kr_*.sql, which runs on every supported major.
+--source include/have_component_keyring_file.inc
+--source suite/component_keyring_file/inc/setup_component.inc
+--source suite/gcm/include/gcm_install.inc
+
+--disable_query_log
+--replace_regex /\.dll/.so/
+--eval INSTALL PLUGIN keyring_udf SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_generate RETURNS INTEGER SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_fetch RETURNS STRING SONAME '$KEYRING_UDF'
+--replace_regex /\.dll/.so/
+--eval CREATE FUNCTION keyring_key_remove RETURNS INTEGER SONAME '$KEYRING_UDF'
+--enable_query_log
+
+--echo # Given: an AES-256 key generated inside the keyring
+DO keyring_key_generate('mtr_name_v1', 'AES', 32);
+
+--echo # When: a Korean name is sealed and opened by key id
+SET @c = gcm_encrypt_kr('홍길동', 'mtr_name_v1');
+SELECT gcm_decrypt_kr(@c, 'mtr_name_v1') AS round_trip,
+       HEX(LEFT(@c, 1)) AS version_byte,
+       CHARSET(gcm_decrypt_kr(@c, 'mtr_name_v1')) AS result_charset;
+
+--echo # Then: the name, version 02, tagged utf8mb4
+
+--echo # Given: a table of names sealed by key id
+CREATE TABLE patients (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO patients VALUES
+  (1, gcm_encrypt_kr('김철수', 'mtr_name_v1')),
+  (2, gcm_encrypt_kr('홍길동', 'mtr_name_v1')),
+  (3, gcm_encrypt_kr('박길수', 'mtr_name_v1'));
+
+--echo # When: the server searches for the partial match %길%
+SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'mtr_name_v1') LIKE '%길%' ORDER BY id;
+
+--echo # Then: rows 2 and 3, with no key in the statement
+
+--echo # Given: the same key bytes used as a key argument
+--echo # When: each family opens what the other sealed, and the deterministic bytes are compared
+SELECT gcm_decrypt(@c, keyring_key_fetch('mtr_name_v1')) AS kr_sealed_arg_opened,
+       gcm_decrypt_kr(gcm_encrypt('홍길동', keyring_key_fetch('mtr_name_v1')), 'mtr_name_v1') AS arg_sealed_kr_opened,
+       gcm_encrypt_det_kr('EMR-001', 'mtr_name_v1') = gcm_encrypt_det('EMR-001', keyring_key_fetch('mtr_name_v1')) AS det_bytes_identical;
+
+--echo # Then: both open and the bytes are identical — one envelope format
+
+--echo # Given: the second row of the table replaced by an envelope that does not authenticate
+# XOR, not a fixed byte: a random tag ends in any given byte one time in 256.
+UPDATE patients SET name_enc = CONCAT(LEFT(name_enc, LENGTH(name_enc) - 1), CHAR(ASCII(RIGHT(name_enc, 1)) ^ 1)) WHERE id = 2;
+
+--echo # When: the table is read with gcm.strict at its default
+--error ER_UDF_ERROR
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_name_v1') AS name FROM patients ORDER BY id;
+
+--echo # Then: an error — a tag mismatch is never silently NULL
+
+--echo # Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+
+--echo # When: the same statement reads the three rows
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_name_v1') AS name FROM patients ORDER BY id;
+
+--echo # Then: name, NULL, name — the key read on the first row is still there for the third
+SET GLOBAL gcm.strict = DEFAULT;
+
+--echo # Given: gcm.strict off again
+SET GLOBAL gcm.strict = OFF;
+
+--echo # When: a key id with nothing stored under it is used
+--error ER_UDF_ERROR
+SELECT gcm_decrypt_kr(name_enc, 'mtr_absent') FROM patients;
+
+--echo # Then: still an error — a missing key is not hidden by a setting
+SET GLOBAL gcm.strict = DEFAULT;
+
+DROP TABLE patients;
+--disable_query_log
+DO keyring_key_remove('mtr_name_v1');
+DROP FUNCTION keyring_key_generate;
+DROP FUNCTION keyring_key_fetch;
+DROP FUNCTION keyring_key_remove;
+UNINSTALL PLUGIN keyring_udf;
+--enable_query_log
+--source suite/gcm/include/gcm_uninstall.inc
+--source suite/component_keyring_file/inc/teardown_component.inc

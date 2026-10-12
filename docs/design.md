@@ -81,7 +81,8 @@
 >   `utf8mb4` — which is what `keyring_udf` asks for its own string arguments (read in
 >   `plugin/keyring_udf/keyring_udf.cc`, all three trees), so a non-ASCII id names the same entry from
 >   either side. The bound is this component's, chosen to keep the id in a fixed buffer.
-> - **At most one keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL.**
+> - **One keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL** — and
+>   one more after any row that raised an error and was continued past (see the key copy below).
 >   Not in `init`: see the observation below. Every later row of that `UDF_INIT` must bring the same
 >   id bytes; a different id is an error. An id that varies by row (a column) is therefore refused on
 >   the second distinct value. The id is not secret and is compared with `memcmp`. The account the
@@ -127,12 +128,16 @@
 >   buffer and no text of *this* statement contains the key. The component's copies — this one, and
 >   A11's scheduled context and nonce key derived from it — are what the statement adds to the
 >   keyring's own memory, and a core dump taken mid-statement contains them.
-> - **It survives `bad_tag`.** A11 cleanses its copy on every failure of the cipher operation, and
->   that still happens: the scheduled context and its copy, and the cached nonce key, are discarded
->   exactly as A11 says, by the unchanged core. The fetched key is kept, because with
->   `gcm.strict=OFF` the next row must still decrypt. The alternative — fetching again after a
->   failure — would let whoever planted a corrupt row cause one keyring read per row, which on an
->   external backend may be a network call.
+> - **It survives a `bad_tag` that `gcm.strict=OFF` turns into NULL.** A11 cleanses its copy on
+>   every failure of the cipher operation, and that still happens: the scheduled context and its
+>   copy, and the cached nonce key, are discarded exactly as A11 says, by the unchanged core. The
+>   fetched key is kept, because the next row must still decrypt. **A row that raises an error —
+>   a `bad_tag` under `gcm.strict=ON` included — gives the fetched key up at once**, without
+>   waiting for `deinit`: an error normally ends the statement, and the server does not always
+>   call `deinit` after one. A statement that continues past the error (`INSERT IGNORE`, a
+>   handler) reads the keyring again on its next row. Giving the key up on the NULL path
+>   too would let whoever planted corrupt rows cause one keyring read per row with no error to stop
+>   the statement, which on an external backend may be a network call per row.
 >
 > **What this contradicts, stated rather than left to a reviewer to find.** A11 rejects "a cache keyed
 > on anything other than the full key bytes", `crypto-safety.md` lists it as a blocked pattern, and
@@ -154,8 +159,12 @@
 > it is cleansed in `deinit` and when `init` fails after allocating; the reader object is released
 > immediately after the fetch, never kept across rows (it holds a read lock on the server's global
 > keyring lock from its `init` to its `deinit`); the fetch buffer is cleansed on every path. Nothing
-> is cached across `UDF_INIT`s, so removing or replacing a key in the keyring takes effect at the
-> next execution of a statement — the same boundary at which `gcm.strict` is read (A5).
+> is cached across `UDF_INIT`s, so a key removed from or replaced in the keyring is picked up by
+> the next `UDF_INIT` that reads it. **That is not a promise that one statement sees one key.** It
+> is usually the next execution of the statement, but a definer stored function gets a `UDF_INIT`
+> per row, and a row that raised an error and was continued past reads again — so a key replaced
+> while such a statement runs can take effect on its next row. How fresh the answer is on a
+> backend that caches is that backend's property, not this component's.
 >
 > The core (`gcm`, `envelope`, `nonce`) does not change. Reading the keyring and the caller's account
 > is a server adapter (`architecture.md` §1), and the `_kr` functions call the same core entry points
@@ -268,41 +277,59 @@
 >
 > ### Implementation notes (2026-10-12)
 >
-> **Pinned by committed tests.** `tests/integration/60_kr_roundtrip`, `61_kr_key_source` and
-> `62_kr_accounts` run on 8.0, 8.4 and 9.4 with one expected output each: the round trip and Korean
-> `LIKE '%길%'`, interoperation with the key-argument functions in both directions and identical
-> deterministic bytes, the floor, a legacy `0x01` envelope, the one "no usable key" error for an
-> absent id, a `SECRET` and an 8-byte `AES` entry, invalid ids, NULL arguments, an id that varies by
-> row, a key id sent as a bound parameter, and the account table above — another account's id, a
-> definer function, an invoker function, a definer view. `tests/adapter/key_source_test.cc` pins
-> what a real server cannot be made to show: one keyring read per `UDF_INIT` and none in `init`, no
-> reader left open on any path, each keyring call failing, the latch, the account changing between
-> rows, and the fetched key surviving `bad_tag` under `gcm.strict=OFF`.
+> **Pinned by committed tests.**
 >
-> **Not done: the MTR case.** A `gcm_kr` case for `mysql-test/suite/gcm` was written — it is the
-> layer that would show `gcm.strict=OFF` across the rows of one statement against a real server, and
-> that nothing lands in the error log — but its `.result` could not be recorded: the server tree
-> would not link in the memory available where this was implemented. It is left out rather than
-> committed with a hand-written result. Until it is recorded, the strict-OFF path of the `_kr`
-> functions is pinned against stub services only.
+> - `tests/integration/60_kr_roundtrip`, `61_kr_key_source` and `62_kr_accounts` run on 8.0, 8.4 and
+>   9.4 with one expected output each: the round trip and Korean `LIKE '%길%'`, interoperation with
+>   the key-argument functions in both directions and identical deterministic bytes, the floor, a
+>   legacy `0x01` envelope, the one "no usable key" error for an absent id, a `SECRET` and an 8-byte
+>   `AES` entry, invalid ids, NULL arguments, an id that varies by row, a key id sent as a bound
+>   parameter, `gcm.strict=OFF` over a good, a tampered and a good row in one statement, and the
+>   account table above — another account's id, a definer function, an invoker function, a definer
+>   view.
+> - `scripts/verify-bare.sh` starts a server with **no keyring** on each major and checks that the
+>   component installs, the key-argument functions work, each `_kr` function raises *keyring
+>   unavailable* with `gcm.strict` ON and OFF, and the component uninstalls afterwards. This closes
+>   the gate the decisions above left open, on 8.0.46, 8.4.11 and 9.4.0.
+> - `tests/adapter/key_source_test.cc` calls the key source directly and
+>   `tests/adapter/udf_kr_test.cc` drives the UDFs, both against stub services, for what a real
+>   server cannot be made to show: one keyring read per `UDF_INIT` and none in `init`, no reader
+>   left open on any path, each keyring call failing, a fetch that disagrees with the length call,
+>   the latch for each kind of failure, the account changing between rows, the fetched key
+>   surviving a `bad_tag` that `gcm.strict=OFF` turns into NULL, and its being given up and read
+>   again after a row that raised an error.
+> - `mysql-test/suite/gcm/t/gcm_kr`, recorded on 8.4: the round trip, `LIKE`, interoperation and
+>   `gcm.strict` ON and OFF across the rows of one statement, under MTR's check that nothing
+>   unexpected reaches the error log.
 >
-> **Observed by hand, not pinned.** On a server with no keyring loaded the component installs and
-> a `_kr` call raises *keyring unavailable*: run on 8.0.46, 8.4.11 and 9.4.0, which closes the gate
-> above, but no committed case starts such a server. The `UDF_INIT` counts in the third table come
-> from the probe's counter and are not reproduced by a committed test either.
+> **Observed, not pinned.** The `UDF_INIT` counts in the third table come from the probe's counter
+> and are not reproduced by a committed test. That the fetched key is wiped before its memory is
+> released is established by reading `free_state`, not by a test: observing it would need a seam in
+> `src/`, which `architecture.md` §6 does not allow.
 >
 > **A server defect found on the way, not specific to these functions.** When a loadable function is
 > an argument of another loadable function and takes a prepared-statement parameter, the outer
 > function's `init` evaluates the inner call before the parameter has its value. The inner function
 > sees an empty string: `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE`
-> with a 0-byte key, and the `_kr` form fails with *invalid id*. Worse, after that error
-> `UNINSTALL COMPONENT` is refused until the server restarts — a reference to the inner function is
-> evidently not released. Observed on 8.4.11 with the key-argument functions, so it predates this
-> amendment; not tried on 8.0 or 9.4. It is **not** pinned by a committed case, because a case that
-> triggers it leaves the server unable to uninstall the component for every case after it. It needs
-> its own issue: whether the inner function's `deinit` runs at all in that path decides whether A11's
-> "cleansed in `deinit`" holds there. Until then: do not nest one of these functions inside another
-> with a bound parameter. Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
+> with a 0-byte key, and the `_kr` form fails with *invalid id*. Two things follow, both observed on
+> 8.4.11 and not tried on 8.0 or 9.4:
+>
+> - After that error `UNINSTALL COMPONENT` is refused until the server restarts. Seen with the
+>   key-argument functions, so it predates this amendment and applies to 0.1.0.
+> - **The inner function's `deinit` is never called** — not at the end of the statement, not on
+>   `DEALLOCATE PREPARE`, not when the session ends. A probe that counts its own `init` and `deinit`
+>   calls showed three `init`s and one `deinit` after two failing executions. Whatever the inner
+>   `UDF_INIT` holds at that moment is neither wiped nor freed for the life of the server. For the
+>   key-argument functions that is a result buffer and an unkeyed context: the paths that raise in
+>   this shape do so before a key is copied, or wipe it first as A11 requires. For a `_kr` function
+>   it could have been the fetched key — for example an inner `gcm_decrypt_kr(?, 'id')`, which reads
+>   the key and then rejects the empty envelope — which is why every row that raises an error gives
+>   the fetched key up before it returns ("The key copy", above).
+>
+> It is not pinned by a committed case, because a case that triggers it leaves the test server
+> unable to uninstall the component for every case after it. It needs its own issue. Until then: do
+> not nest one of these functions inside another with a bound parameter (operational constraint
+> 18). Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
 >
 > **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
 > backward compatible: no envelope a released build wrote or reads is affected.
@@ -314,8 +341,8 @@
 > | `src/` | a keyring-and-caller adapter; the three `_kr` UDFs reusing `udf_glue` and the unchanged core; the per-instance key copy; three more service requirements in `component.cc`, with `mysql_current_thread_reader` required on every version |
 > | `spec/envelope.md` | the argument contract and failure semantics of the three functions. No byte layout and no vector changes |
 > | `tests/adapter` | stubs for the new services; every key-source failure injected |
-> | `tests/integration` (and `mysql-test`, see "Implementation notes") | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
-> | `scripts/dev-up.sh`, `scripts/verify.sh` | the test servers load `component_keyring_file` and `keyring_udf` |
+> | `tests/integration`, `mysql-test` | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
+> | `scripts/dev-up.sh`, `scripts/verify.sh`, `scripts/verify-bare.sh` | the test servers load `component_keyring_file` and `keyring_udf`; a second check runs on a server with no keyring |
 > | `crypto-safety.md`, `architecture.md` §3 | the widened key-copy rule and its lifetime row |
 > | README, `docs/ops-constraints.md`, `AGENTS.md` | the function table, constraints 2 and 14, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
 

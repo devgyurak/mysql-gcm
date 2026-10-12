@@ -1,0 +1,67 @@
+# ----------------------------------------------------------------------
+# Setup
+# Creating local configuration file for keyring component: component_keyring_file
+# Creating manifest file for current MySQL server instance
+# Re-starting mysql server with manifest file
+# ----------------------------------------------------------------------
+# Given: an AES-256 key generated inside the keyring
+DO keyring_key_generate('mtr_name_v1', 'AES', 32);
+# When: a Korean name is sealed and opened by key id
+SET @c = gcm_encrypt_kr('홍길동', 'mtr_name_v1');
+SELECT gcm_decrypt_kr(@c, 'mtr_name_v1') AS round_trip,
+HEX(LEFT(@c, 1)) AS version_byte,
+CHARSET(gcm_decrypt_kr(@c, 'mtr_name_v1')) AS result_charset;
+round_trip	version_byte	result_charset
+홍길동	02	utf8mb4
+# Then: the name, version 02, tagged utf8mb4
+# Given: a table of names sealed by key id
+CREATE TABLE patients (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO patients VALUES
+(1, gcm_encrypt_kr('김철수', 'mtr_name_v1')),
+(2, gcm_encrypt_kr('홍길동', 'mtr_name_v1')),
+(3, gcm_encrypt_kr('박길수', 'mtr_name_v1'));
+# When: the server searches for the partial match %길%
+SELECT id FROM patients WHERE gcm_decrypt_kr(name_enc, 'mtr_name_v1') LIKE '%길%' ORDER BY id;
+id
+2
+3
+# Then: rows 2 and 3, with no key in the statement
+# Given: the same key bytes used as a key argument
+# When: each family opens what the other sealed, and the deterministic bytes are compared
+SELECT gcm_decrypt(@c, keyring_key_fetch('mtr_name_v1')) AS kr_sealed_arg_opened,
+gcm_decrypt_kr(gcm_encrypt('홍길동', keyring_key_fetch('mtr_name_v1')), 'mtr_name_v1') AS arg_sealed_kr_opened,
+gcm_encrypt_det_kr('EMR-001', 'mtr_name_v1') = gcm_encrypt_det('EMR-001', keyring_key_fetch('mtr_name_v1')) AS det_bytes_identical;
+kr_sealed_arg_opened	arg_sealed_kr_opened	det_bytes_identical
+홍길동	홍길동	1
+# Then: both open and the bytes are identical — one envelope format
+# Given: the second row of the table replaced by an envelope that does not authenticate
+UPDATE patients SET name_enc = CONCAT(LEFT(name_enc, LENGTH(name_enc) - 1), CHAR(ASCII(RIGHT(name_enc, 1)) ^ 1)) WHERE id = 2;
+# When: the table is read with gcm.strict at its default
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_name_v1') AS name FROM patients ORDER BY id;
+ERROR HY000: gcm_decrypt_kr UDF failed; authentication tag verification failed
+# Then: an error — a tag mismatch is never silently NULL
+# Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+# When: the same statement reads the three rows
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_name_v1') AS name FROM patients ORDER BY id;
+id	name
+1	김철수
+2	NULL
+3	박길수
+# Then: name, NULL, name — the key read on the first row is still there for the third
+SET GLOBAL gcm.strict = DEFAULT;
+# Given: gcm.strict off again
+SET GLOBAL gcm.strict = OFF;
+# When: a key id with nothing stored under it is used
+SELECT gcm_decrypt_kr(name_enc, 'mtr_absent') FROM patients;
+ERROR HY000: gcm_decrypt_kr UDF failed; no usable AES key under this id for the calling account
+# Then: still an error — a missing key is not hidden by a setting
+SET GLOBAL gcm.strict = DEFAULT;
+DROP TABLE patients;
+# ----------------------------------------------------------------------
+# Teardown
+# Removing manifest file for current MySQL server instance
+# Removing local keyring file for keyring component: component_keyring_file
+# Removing local configuration file for keyring component: component_keyring_file
+# Restarting server without the manifest file
+# ----------------------------------------------------------------------

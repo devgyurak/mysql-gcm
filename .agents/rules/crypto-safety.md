@@ -39,9 +39,11 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   the keyring (at most 32 bytes) with the key id and the account it was read under, from the first
   non-NULL row to `deinit`, on these conditions and no others: it is read at most once per
   `UDF_INIT`, through one reader object released before the read returns; the id and the account
-  are compared on every row and a difference is an error; it is **not** discarded on `bad_tag` —
-  the A11 context and nonce-key copies still are — because with `gcm.strict=OFF` the next row needs
-  it and a second read would be a per-row keyring call; a key-source failure is latched; it is
+  are compared on every row and a difference is an error; it is **not** discarded on a `bad_tag` that
+  `gcm.strict=OFF` turns into NULL — the A11 context and nonce-key copies still are — because the
+  next row needs it and a second read would be a per-row keyring call; **every row that raises an
+  error wipes it before returning**, because the server does not always call `deinit` after an
+  error; a key-source failure is latched; it is
   cleansed in `deinit`; and it is never shared across threads or `UDF_INIT`s. An entry whose data
   length or type length disqualifies it is never copied out of the keyring; any other rejected
   entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as

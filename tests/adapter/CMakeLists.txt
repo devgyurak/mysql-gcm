@@ -82,6 +82,7 @@ add_executable(gcm_adapter
   service_stubs.cc
   lifecycle_test.cc
   key_source_test.cc
+  udf_kr_test.cc
 )
 target_compile_options(gcm_adapter PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(gcm_adapter PRIVATE gcm_component_under_test GTest::gtest_main)

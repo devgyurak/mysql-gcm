@@ -18,9 +18,10 @@ namespace gcm {
 
 /* The *_kr functions only (design A13): the key read from the keyring on the first
    row, with the id and the account it was read under. One per UDF item, never
-   shared, wiped in free_state. Unlike the two A11 states below it survives bad_tag
-   — with gcm.strict=OFF the next row still has to decrypt, and reading again would
-   let a planted corrupt row cost one keyring read per row. Zeroed by calloc. */
+   shared, wiped in free_state and by every row that raises an error. Unlike the two
+   A11 states below it survives a bad_tag that gcm.strict=OFF turns into NULL — the
+   next row still has to decrypt, and reading again would let a planted corrupt row
+   cost one keyring read per row. Zeroed by calloc. */
 struct KeyHold {
   bool loaded;
   /* A key-source failure is latched: later rows raise it again without touching

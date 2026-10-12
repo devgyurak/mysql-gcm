@@ -48,9 +48,11 @@ SELECT COUNT(gcm_encrypt_kr('x', key_id)) AS sealed FROM same_jobs;
 SELECT '# Then: three rows sealed — the rule is about the bytes, not about being a constant (above)';
 DROP TEMPORARY TABLE same_jobs;
 
-SELECT '# Scenario 7 — Given: an envelope with its last tag byte flipped, strict at its default';
+SELECT '# Scenario 7 — Given: an envelope with one bit of its last tag byte flipped, strict at its default';
+-- XOR, not a fixed byte: this envelope has a random nonce, so its tag ends in any
+-- given byte one time in 256 and overwriting with that byte would change nothing.
 SET @good = gcm_encrypt_kr('홍길동', 'it_good');
-SET @tampered = CONCAT(LEFT(@good, LENGTH(@good) - 1), UNHEX('FF'));
+SET @tampered = CONCAT(LEFT(@good, LENGTH(@good) - 1), CHAR(ASCII(RIGHT(@good, 1)) ^ 1));
 SELECT '# When: it is opened by key id';
 SELECT gcm_decrypt_kr(@tampered, 'it_good') AS never_reached;
 SELECT '# Then: a tag error, never NULL and never plaintext (errors section)';
@@ -82,3 +84,29 @@ SELECT gcm_encrypt_kr('x') AS never_reached;
 SELECT gcm_encrypt_det_kr('x', 'it_good', 'aad', 'extra') AS never_reached;
 SELECT gcm_decrypt_kr('x') AS never_reached;
 SELECT '# Then: each is refused when the statement is prepared, with its usage (errors section)';
+
+SELECT '# Scenario 11 — Given: three sealed rows, the middle one with a bit of its tag flipped, and gcm.strict OFF';
+-- A table, not user variables: the strict setting is read per session on 9.x and
+-- GLOBAL-only before it (docs/design.md amendment A5), so the one way to turn it
+-- off that works on every major is SET GLOBAL followed by a new connection.
+CREATE TABLE strict_rows (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO strict_rows VALUES
+  (1, gcm_encrypt_kr('김철수', 'it_good')),
+  (2, gcm_encrypt_kr('홍길동', 'it_good')),
+  (3, gcm_encrypt_kr('박길수', 'it_good'));
+UPDATE strict_rows
+   SET name_enc = CONCAT(LEFT(name_enc, LENGTH(name_enc) - 1), CHAR(ASCII(RIGHT(name_enc, 1)) ^ 1))
+ WHERE id = 2;
+SET GLOBAL gcm.strict = OFF;
+connect;
+SELECT '# When: one statement opens all three by key id';
+SELECT id, gcm_decrypt_kr(name_enc, 'it_good') AS name FROM strict_rows ORDER BY id;
+SELECT '# Then: name, NULL, name — the key read on the first row survives the bad tag (above)';
+
+SELECT '# Scenario 12 — Given: gcm.strict still OFF';
+SELECT '# When: the rows are opened under an id that names nothing';
+SELECT id, gcm_decrypt_kr(name_enc, 'it_absent') AS never_reached FROM strict_rows ORDER BY id;
+SELECT '# Then: an error, not NULL — a key that cannot be had is not hidden by the setting (errors section)';
+SET GLOBAL gcm.strict = DEFAULT;
+connect;
+DROP TABLE strict_rows;

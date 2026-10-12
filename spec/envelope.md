@@ -262,8 +262,9 @@ account is the definer; inside a view it is the invoker.
 
 **The key id.** 1 to 255 bytes after conversion to `utf8mb4`, with no NUL byte.
 
-**One key per statement instance.** The keyring is read at most once per instance of a function in
-an executing statement, on the first row whose arguments are all non-NULL. Every later row of that
+**One key per statement instance.** The keyring is read once per instance of a function in an
+executing statement, on the first row whose arguments are all non-NULL, and again only after a row
+that raised an error (rule 7). Every later row of that
 instance MUST bring the same `key_id` bytes and run as the same account. A different id is an error,
 so a `key_id` taken from a column is accepted only while every row names the same id.
 
@@ -288,8 +289,11 @@ Rules that follow, in addition to those of §4:
    length of a keyring entry. A key shorter than `gcm.min_key_bytes` is reported with the floor and
    without the key's length; a key whose length disagrees with the envelope's version byte is
    reported without either length.
-6. A tag mismatch does not discard the key read from the keyring: with `gcm.strict=OFF` the following
-   rows are decrypted without a second read.
+6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
+   keyring: the following rows are decrypted without a second read.
+7. A row that raises any error discards the key read from the keyring before it returns. A statement
+   that continues past the error reads the keyring again on its next row, so two rows of one
+   statement are not guaranteed the same key if the keyring changed in between.
 
 ## 5. Worked examples
 

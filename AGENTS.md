@@ -88,6 +88,7 @@ tests/load/                    Load: decrypt + LIKE over 10k/100k/300k rows, wit
 tests/bench/                   Core micro-benchmarks (Google Benchmark) — ratios against bare EVP. No server
 tests/adapter/                 The component install and uninstall paths — failure injected through stub services, inside the build image
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
+  verify-bare.sh               The same kind of check on a throwaway server with no keyring (amendment A13)
   bench.sh                     Builds and runs the core micro-benchmarks and the ratio gate
   adapter-tests.sh             Verifies the install and uninstall paths against stub services (reusing the build image)
   unit-in-docker.sh            Runs the unit tests on the same GCC and ubuntu as CI (catching what the host clang lets through)
@@ -116,6 +117,7 @@ site/                          Landing page and docs site (Astro Starlight, Node
 | Build the component (in a server source tree) | `scripts/build-in-docker.sh 8.4` | `mysql-component` |
 | Unit tests | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` | `unit-tests` |
 | Integration smoke | `scripts/verify.sh 8.4` (installs the .so in a container, then diffs the SQL scenarios) | `integration-tests` |
+| Integration, no keyring | `scripts/verify-bare.sh 8.4` (a throwaway server without a keyring: install, the key-id functions fail cleanly, uninstall) | `integration-tests` |
 | MTR | `scripts/mtr.sh 8.4` (`GCM_RECORD=1` re-records the `.result` files) | `integration-tests` |
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |
 | Load | `python tests/load/run.py --rows 300000 --baseline aes` | `e2e-load-tests` |

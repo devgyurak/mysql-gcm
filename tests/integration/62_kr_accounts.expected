@@ -20,7 +20,7 @@
 홍길동
 # Then: the name (above)
 --- errors, in statement order ---
-ERROR 3200 (HY000) at line 15: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
-ERROR 3200 (HY000) at line 37: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
-ERROR 3200 (HY000) at line 44: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
-ERROR 3200 (HY000) at line 52: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 26: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 48: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 55: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account
+ERROR 3200 (HY000) at line 63: gcm_encrypt_kr UDF failed; no usable AES key under this id for the calling account

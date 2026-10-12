@@ -42,14 +42,24 @@ const char *describe(KeySource failure) {
   return "the key source failed";
 }
 
-/* Latches and raises. Every key-source failure is an error whatever gcm.strict
-   says, and stays the answer for the rest of this UDF_INIT (design A13). */
-bool fail_key(const char *func, KeyHold *hold, KeySource failure) {
-  /* A latched failure means the key is never used again in this UDF_INIT, so it
-     does not wait for deinit. */
+/* Forgets the fetched key without latching anything. Every row that raises an error
+   does this before it returns, and does not wait for deinit: the server does not
+   always call deinit after an error — a loadable function that is an argument of
+   another one and fails while the outer one is being initialised never gets it
+   (design A13, "Implementation notes") — and a key left for a deinit that never
+   comes would stay in memory, unwiped, for the life of the server. An error
+   normally ends the statement; one that continues past it (INSERT IGNORE, a
+   handler) reads the keyring again on its next row. */
+void forget_key(KeyHold *hold) {
   gcm::wipe(hold->key, sizeof(hold->key));
   hold->key_len = 0;
   hold->loaded = false;
+}
+
+/* Latches and raises. Every key-source failure is an error whatever gcm.strict
+   says, and stays the answer for the rest of this UDF_INIT (design A13). */
+bool fail_key(const char *func, KeyHold *hold, KeySource failure) {
+  forget_key(hold);
   hold->failure = failure;
   gcm::raise_message(func, describe(failure));
   return true;
@@ -169,17 +179,20 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
              "unaffected",
              state->min_key_bytes);
     gcm::raise_message(func, detail);
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
 
   if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
   if (gcm::reserve(state, gcm::encrypt_out_len(plaintext.size))) {
     gcm::raise_message(func, "out of memory");
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
@@ -188,6 +201,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   const Error err = seal(state, key, plaintext, aad, state->out, &out_len);
   if (err != Error::ok) {
     raise_core(func, err, 0);
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
@@ -269,11 +283,13 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
 
   if (gcm::too_long(envelope.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long(kFunc, envelope.size > aad.size ? envelope.size : aad.size);
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
   if (gcm::reserve(state, gcm::decrypt_out_len(envelope.size) + 1)) {
     gcm::raise_message(kFunc, "out of memory");
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }
@@ -283,14 +299,17 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
       gcm::decrypt_with_session(state->decrypt, key, envelope, aad, state->out, &out_len);
 
   /* The one failure gcm.strict governs. The core has wiped the output and
-     forgotten its scheduled copy of the key; the fetched key in state->kr stays,
-     so the next row decrypts without another keyring read (design A13). */
+     forgotten its scheduled copy of the key. With strict OFF this row is a NULL and
+     not an error, so the fetched key in state->kr stays and the next row decrypts
+     without another keyring read (design A13). With strict ON it is an error like
+     any other and falls through to the forget below. */
   if (err == Error::bad_tag && !state->strict) {
     *is_null = 1;
     return nullptr;
   }
   if (err != Error::ok) {
     raise_core(kFunc, err, envelope.size);
+    forget_key(&state->kr);
     *error = 1;
     return nullptr;
   }

@@ -7,8 +7,19 @@ DROP USER IF EXISTS 'kr_owner'@'%';
 CREATE USER 'kr_owner'@'%';
 GRANT EXECUTE ON *.* TO 'kr_owner'@'%';
 GRANT ALL ON gcm_it.* TO 'kr_owner'@'%';
+-- The other account's key cannot be removed by the harness, which is not that account,
+-- so this case removes it itself: before, in case an earlier run stopped half way, and
+-- after. The handler is what lets "remove if present" be one call with no output.
+DELIMITER //
+CREATE DEFINER = 'kr_owner'@'%' PROCEDURE owner_drop_key() SQL SECURITY DEFINER
+BEGIN
+  DECLARE CONTINUE HANDLER FOR SQLEXCEPTION BEGIN END;
+  DO keyring_key_remove('it_shared');
+END//
+DELIMITER ;
 CREATE DEFINER = 'kr_owner'@'%' PROCEDURE owner_make_key() SQL SECURITY DEFINER
   DO keyring_key_generate('it_shared', 'AES', 32);
+CALL owner_drop_key();
 CALL owner_make_key();
 DO keyring_key_generate('it_mine', 'AES', 32);
 SELECT '# When: we use the other account''s key id directly';
@@ -62,5 +73,7 @@ DROP FUNCTION owner_uses_mine;
 DROP FUNCTION invoker_seal;
 DROP FUNCTION owner_open;
 DROP FUNCTION owner_seal;
+CALL owner_drop_key();
+DROP PROCEDURE owner_drop_key;
 DROP PROCEDURE owner_make_key;
 DROP USER 'kr_owner'@'%';

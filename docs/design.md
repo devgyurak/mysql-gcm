@@ -833,11 +833,19 @@
 > released and there is nothing left for a test to look at.
 >
 > **A server defect found on the way, not specific to these functions, pinned per major.** A
-> statement's fix or re-prepare that fails **after** a loadable function has been fixed abandons
-> that function's `UDF_INIT`: its de-initialisation function is never called — not at the end of the
-> statement, not on `DEALLOCATE PREPARE`, not when the session ends — and the component cannot be
-> uninstalled until the server restarts. Every function the statement had already fixed is dropped,
-> whichever component it belongs to.
+> **prepared statement whose re-prepare at `EXECUTE` fails** after a loadable function has been fixed
+> abandons that function's `UDF_INIT`: its de-initialisation function is never called — not at the
+> end of the statement, not on `DEALLOCATE PREPARE`, not when the session ends — and the component
+> cannot be uninstalled until the server restarts. Every function the statement had already fixed is
+> dropped, whichever component it belongs to.
+>
+> The trigger is the failed *re-prepare*, not a failure of the statement in general: case `25`'s
+> control is the same prepared form with the failing column first, so its re-prepare fails before the
+> function is ever fixed — it adds one `init` and its own `deinit`, and nothing is kept. A prepared
+> statement is what puts the handler in the (re)prepare state that `udf_handler::cleanup()` returns
+> early from; a plain statement's fix failure was not observed to leak. Until #55's cause was read,
+> the shape issue #43 was filed with (the table below) was described as needing the nesting and a
+> bound parameter.
 >
 > The cause was read from the 8.0.43, 8.4.11 and 9.4.0 sources and is recorded, with a
 > self-contained reproducer, in `docs/upstream-udf-handler-leak.md`: `udf_handler::fix_fields`
@@ -851,7 +859,7 @@
 > call before the parameter has its value, the inner sees an empty string, and
 > `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE` with a 0-byte key (the
 > `_kr` form fails with *invalid id*). Nesting, the bound parameter and the raising are all
-> **incidental** — what the leak needs is the failed fix — and three cases added after the first
+> **incidental** — what the leak needs is the failed re-prepare — and three cases added after the first
 > review show it: a *sibling* function in the same select list, a key-id instance that raises
 > nothing at all, and a plain `ALTER TABLE` re-prepare with no nesting and no parameter.
 >
@@ -877,7 +885,7 @@
 > | `21_probe_nested_literal`, `22_probe_direct_bound` | the probe with literals, or a `?` on a direct call | every `init` paired with its `deinit`; uninstall succeeds |
 > | `23_sibling_leak` | a sibling function beside one whose inner raises, no nesting | the sibling's `init` has no `deinit`; uninstall refused |
 > | `24_nonraising_kr_inner` | a key-id seal that succeeds inside an outer function, another item raising | the seal is never counted and the instance that holds the key is never de-initialised; `UNINSTALL COMPONENT gcm` refused |
-> | `25_ddl_reprepare` | `SELECT probe_outer(d), c FROM t`, prepared, then `ALTER TABLE … DROP COLUMN c` and a second `EXECUTE` | one `init` with no `deinit`; the control with the failing column first leaks nothing |
+> | `25_ddl_reprepare` | `PREPARE … 'SELECT probe_outer(d), c FROM t'`, then `ALTER TABLE … DROP COLUMN c` and a second `EXECUTE` | `probe_outer` reaches two `init`s and one `deinit` — the failed re-prepare kept the handler it had fixed — and the control, the same prepared form with the failing column first, adds one `init` and its own `deinit` |
 > | `26_probe_nested_bound_const` | case `20` with the probe's `const_item` variant | the same counts as `20` |
 >
 > Two consequences are worth separating, because the component can act on only one of them:

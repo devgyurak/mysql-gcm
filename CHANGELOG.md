@@ -45,7 +45,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   run by `scripts/verify-nested.sh` on a throwaway server; operational constraint 18). A test-only
   probe component (`tests/probe`) counts the `init` and `deinit` calls the server makes, so the leak
   is a number that does not depend on this component. Its trigger is different from its name: a
-  statement's fix or re-prepare that fails **after** a loadable function has been fixed abandons
+  prepared statement whose **re-prepare** fails after a loadable function has been fixed abandons
   every such function, so `UNINSTALL COMPONENT` is refused until the server restarts on 8.0, 8.4
   and 9 — for `gcm_decrypt(gcm_encrypt(?, ?), ?)`, but also for a sibling function, for a key-id
   instance that raised nothing (whose seal is then never counted) and for a re-prepare invalidated

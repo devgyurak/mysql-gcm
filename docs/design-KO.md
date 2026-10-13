@@ -725,7 +725,7 @@
 > 해제돼 테스트가 볼 것이 남지 않는다.
 >
 > **도중에 발견한 서버 결함. 이 함수들에 한정되지 않으며, major 별로 고정했다.** loadable function 이
-> fix 된 **뒤에** 문장의 fix 나 재-prepare 가 실패하면 그 함수의 `UDF_INIT` 이 버려진다: deinit 함수가
+> **prepared statement 의 재-prepare 가 `EXECUTE` 에서** fix 된 **뒤에** 실패하면 그 함수의 `UDF_INIT` 이 버려진다: deinit 함수가
 > 호출되지 않으며 — 문장이 끝날 때도, `DEALLOCATE PREPARE` 때도, 세션이 끝날 때도 — 컴포넌트는 서버를
 > 재시작할 때까지 언인스톨되지 않는다. 문장이 이미 fix 한 **모든** 함수가 버려지고, 어느 컴포넌트의
 > 함수인지도 가리지 않는다.
@@ -736,11 +736,18 @@
 > 길이 된다 — 그 함수는 문장이 (재)준비되는 동안 일찍 돌아가는데, 실패한 prepare 가 결코 도달하지 않는
 > 실행까지 핸들러를 살려 두는 것이 그 이유다.
 >
+> 방아쇠는 실패한 *재-prepare* 이지 문장의 일반적인 실패가 아니다: 케이스 `25` 의 대조군은 실패
+> 컬럼이 앞선 같은 prepared 형태라 재-prepare 가 함수가 fix 되기 전에 실패한다 — `init` 하나와 그
+> `deinit` 을 더할 뿐이고 아무것도 남지 않는다. 핸들러를, `udf_handler::cleanup()` 이 일찍 돌아가는
+> (재)준비 상태에 두는 것은 prepared statement 다; 일반 문장의 fix 실패는 누수되지 않는 것으로
+> 관측됐다. #55 의 원인을 읽기 전까지, 이슈 #43 이 제기된 형태(아래 표)는 중첩과 바인딩 인자가
+> 필요하다고 서술돼 있었다.
+>
 > 가장 먼저 찾은 형태이자 이슈 #43 이 제기된 형태는 다른 함수의 인자이면서 prepared statement 의
 > 매개변수를 받는 함수다: 바깥 함수의 `init` 이 매개변수에 값이 들어오기 전에 안쪽 호출을 평가하고,
 > 안쪽은 빈 문자열을 보며, `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` 는 `EXECUTE` 에서
 > 0바이트 키로 실패한다(`_kr` 형태는 *잘못된 id* 로). 중첩도, 바인딩 인자도, 에러를 내는 것도 모두
-> **부수적**이다 — 누수에 필요한 것은 실패한 fix 다 — 그리고 첫 검토 뒤에 추가한 세 케이스가 그것을
+> **부수적**이다 — 누수에 필요한 것은 실패한 재-prepare 다 — 그리고 첫 검토 뒤에 추가한 세 케이스가 그것을
 > 보인다: 같은 select list 의 *형제* 함수, 아무것도 올리지 않은 키 id 인스턴스, 중첩도 매개변수도 없는
 > 평범한 `ALTER TABLE` 재-prepare.
 >
@@ -764,7 +771,7 @@
 > | `21_probe_nested_literal`, `22_probe_direct_bound` | 프로브에 리터럴, 또는 직접 호출에 `?` | 모든 `init` 이 `deinit` 과 짝을 이룸; 언인스톨 성공 |
 > | `23_sibling_leak` | 안쪽이 에러를 내는 함수 옆의 형제 함수, 중첩 없음 | 형제의 `init` 에 `deinit` 이 없다; 언인스톨 거부 |
 > | `24_nonraising_kr_inner` | 바깥 함수 안에서 성공하는 키 id 봉인, 다른 항목이 에러 | 봉인이 세어지지 않고 키를 들고 있는 인스턴스가 deinit 되지 않는다; `UNINSTALL COMPONENT gcm` 거부 |
-> | `25_ddl_reprepare` | prepared `SELECT probe_outer(d), c FROM t` 뒤 `ALTER TABLE … DROP COLUMN c` 와 두 번째 `EXECUTE` | `init` 하나가 `deinit` 없이 남는다; 실패 컬럼이 앞선 대조군은 아무것도 새지 않는다 |
+> | `25_ddl_reprepare` | `PREPARE … 'SELECT probe_outer(d), c FROM t'` 뒤 `ALTER TABLE … DROP COLUMN c` 와 두 번째 `EXECUTE` | `probe_outer` 가 `init` 둘과 `deinit` 하나에 도달한다 — 실패한 재-prepare 가 fix 해 둔 핸들러를 남겼다 — 그리고 실패 컬럼이 앞선 같은 prepared 대조군은 `init` 하나와 그 `deinit` 을 더한다 |
 > | `26_probe_nested_bound_const` | `20` 과 같은 형태, 프로브의 `const_item` 변형 | `20` 과 같은 수치 |
 >
 > 두 결과를 나눠 두는 것이 좋다. 컴포넌트가 손댈 수 있는 것은 하나뿐이다:

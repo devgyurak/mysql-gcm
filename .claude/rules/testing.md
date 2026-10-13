@@ -110,19 +110,20 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   caused a disk temporary table (design §5.3).
 - `tests/integration/nested/` pins the server defect of issue #43 and is run by
   `scripts/verify-nested.sh`, not `verify.sh`: a case that triggers the defect leaves the component
-  unable to uninstall for every case after it, so the harness needs a throwaway server plus a per-case
-  reinstall-or-restart. What the defect is: a **prepared statement whose re-prepare at `EXECUTE`**
-  fails after a loadable function has been fixed abandons that function's `UDF_INIT`, so its `deinit`
-  never runs and the component cannot be uninstalled. Nesting, a bound parameter and a raised error
-  are only the first shape found; the sibling and non-raising shapes and the `ALTER TABLE` re-prepare
-  are cases 23 to 26, and case 25's control shows that a re-prepare which fails *before* the function
-  is fixed leaks nothing (the cause is read in `docs/upstream-udf-handler-leak.md`). Its expected output is **per major**
+  unable to uninstall for every case after it, so the harness needs a throwaway server plus a
+  per-case reinstall-or-restart. What the defect is: a **prepared statement whose re-prepare at
+  `EXECUTE`** fails after a loadable function has been fixed abandons that function's `UDF_INIT`, so
+  its `deinit` never runs and the component cannot be uninstalled. Nesting, a bound parameter and a
+  raised error are only the first shape found; the sibling and non-raising shapes and the
+  `ALTER TABLE` re-prepare are cases 23 to 26, and case 25's control shows that a re-prepare which
+  fails *before* the function is fixed leaks nothing (the cause is read in
+  `docs/upstream-udf-handler-leak.md`). Its expected output is **per major**
   (`<case>.<major>.expected`), because whether and how the defect reproduces differs by version.
-  `tests/probe` (test-only, built by
-  `scripts/build-probe.sh`, never shipped — enforced by `check-architecture.py`) counts a leaked
-  `UDF_INIT` against the deinits the server actually ran, so a case can show the leak without relying
-  on this project's own code.
-- MTR runs from `mtr.yml` only on PRs and merges that touch `src/**`, `mysql-test/**`, `spec/**` or the
+  `tests/probe` (test-only, built by `scripts/build-probe.sh`, never shipped — enforced by
+  `check-architecture.py`) counts a leaked `UDF_INIT` against the deinits the server actually ran,
+  so a case can show the leak without relying on this project's own code.
+- MTR runs from `mtr.yml` only on PRs and merges that touch `src/**`, `mysql-test/**`, `spec/**` or
+  the
   build tooling (measured at 49–63 minutes). It catches things only the server's own harness catches —
   an unexpected line in the error log fails it. The smoke suite (`verify.sh` across three majors)
   stays a required check on every PR.

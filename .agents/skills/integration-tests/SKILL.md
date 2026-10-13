@@ -63,10 +63,11 @@ plus an assertion on the row count.
 The server defect of issue #43: a **prepared statement whose re-prepare at `EXECUTE`** fails after a
 loadable function has been fixed abandons that function's `UDF_INIT` — its `deinit` never runs and
 the component can no longer be uninstalled until the server restarts. Case `25_ddl_reprepare`'s
-control pins the other side: a re-prepare that fails *before* the function is fixed leaks nothing. The first shape found is a function
-that is the argument of another and takes a prepared-statement parameter: the inner call is evaluated
-while the outer function is being initialised, sees an empty string and raises. Nesting, the bound
-parameter and the raising are all incidental, and the cases say so —
+control pins the other side: a re-prepare that fails *before* the function is fixed leaks nothing.
+The first shape found is a function that is the argument of another and takes a prepared-statement
+parameter: the inner call is evaluated while the outer function is being initialised, sees an empty
+string and raises. Nesting, the bound parameter and the raising are all incidental, and the cases
+say so —
 `23_sibling_leak` (a sibling function), `24_nonraising_kr_inner` (a key-id instance that raises
 nothing, and whose seal is never counted), `25_ddl_reprepare` (a plain `ALTER TABLE` re-prepare, no
 nesting and no parameter) and `26_probe_nested_bound_const`. The cause is read in

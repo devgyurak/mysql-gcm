@@ -104,8 +104,9 @@ def probe_problems(root: Path) -> list[str]:
     """The probe component is scaffolding and must never reach a shipped artifact.
 
     `tests/probe` registers five throwaway UDFs to pin the server defect of issue
-    #43 (a statement's failed fix or re-prepare abandons every loadable function
-    it had already fixed). It is built only by `scripts/build-probe.sh`, from its own
+    #43 (a prepared statement whose failed re-prepare abandons every loadable
+    function it had already fixed). It is built only by `scripts/build-probe.sh`, from
+    its own
     directory, into a throwaway server — never by the component build. The name
     `probe` is reserved for it, so any occurrence under `src/` (the component) or
     `docker/` (the build tree and the images) means the scaffolding would ship in

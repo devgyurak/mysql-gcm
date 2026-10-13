@@ -321,12 +321,14 @@
 > - **Constraint 2.** The plaintext and the `LIKE` pattern are still in the statement.
 > - **The nested-call defect (#43)** applies to these functions as to the others, and the re-seal
 >   statement above nests one inside another — with literals, which is not the shape #43 was
->   observed in. #43 is about the *inner* call taking a prepared-statement parameter: with the
->   inner `gcm_decrypt_krv`'s key id bound as `?` it is the shape #43 describes and may fail the
->   same way. That is not established: #43 was observed with every argument of the inner call a
->   parameter, and here the inner call also has a column argument, which may keep the server from
->   evaluating it early. Neither that, nor a bound `key_version` (an argument of the outer call),
->   was tried.
+>   observed in. #43 is about the *inner* call taking a prepared-statement parameter, and the
+>   implemented `_kr` functions answer it: `tests/integration/nested/17_kr_reseal_chain` prepares
+>   `gcm_decrypt_kr(gcm_encrypt_kr(gcm_decrypt_kr(c, ?), ?), ?)` with every key id bound, and it
+>   round-trips on 8.0, 8.4 and 9 with the component uninstalling cleanly afterwards — the column
+>   argument of the innermost call keeps the server from evaluating it early. What is still untried
+>   is `gcm_decrypt_krv` and `gcm_envelope_key_version` with a bound `key_version`: those do not
+>   exist yet, and the PR that implements them has to pin that shape per major the way A7's
+>   finding is pinned.
 >
 > ### Open questions for review
 >
@@ -409,8 +411,9 @@
 >   reinstall within the same second leaves it unchanged, and a clock stepped backwards can make
 >   it earlier. The ledger A8 asks the operator to keep holds the previous value to compare with.
 > - Counts held by an instance that neither raises an error nor is de-initialised are lost. Issue
->   #43 shows the server skipping `deinit` in one shape (observed on 8.4.11 only); the fold in the
->   error row covers the case where the instance itself raised, and nothing covers the rest.
+>   #43 shows the server skipping `deinit` in one shape (observed on 8.0, 8.4 and 9 —
+>   `tests/integration/nested`); the fold in the error row covers the case where the instance
+>   itself raised, and nothing covers the rest.
 >
 > ### Decisions
 >
@@ -681,10 +684,12 @@
 > ### Observed on 2026-10-12 with a throwaway probe component
 >
 > Servers 8.0.46, 8.4.11 and 9.4.0 (the pinned images), the probe built against the 8.0.43, 8.4.11
-> and 9.4.0 trees. **Observed once and not yet pinned**: the probe is not committed, and each row
-> below becomes a committed server test in the implementation PR, the way A7's finding is pinned by
-> `tests/integration/91_*`. Until then these are observations, not guarantees. The three versions
-> gave the same output for every row of the three tables.
+> and 9.4.0 trees. **Observed once, and the tables below are still only an observation**: that
+> throwaway probe was not committed, and no committed test reproduces these rows. A smaller probe is
+> committed instead, as `tests/probe`, and what it pins is the *consequence* of the first table — a
+> call the server evaluates before its bound parameter has a value, and the instance that is then
+> never de-initialised — in `tests/integration/nested/20`–`22` (see "Implementation notes"). The
+> three versions gave the same output for every row of the three tables.
 >
 > | What the function is called with | What `init` sees | What the row function sees |
 > |---|---|---|
@@ -818,38 +823,62 @@
 >   `gcm.strict` ON and OFF across the rows of one statement, under MTR's check that nothing
 >   unexpected reaches the error log.
 >
-> **Observed, not pinned.** The `UDF_INIT` counts in the third table come from the probe's counter
-> and are not reproduced by a committed test. The wipe on the error path is pinned; the wipe in
-> `deinit` is established by reading `free_state`, since after `deinit` the memory is released and
-> there is nothing left for a test to look at.
+> **Observed, not pinned.** The `UDF_INIT` counts in the third table and the argument-visibility
+> rows of the first come from the throwaway probe's counter and are not reproduced by a committed
+> test. A committed probe (`tests/probe`, built by `scripts/build-probe.sh`) counts its own `init`
+> and `deinit` calls instead, and pins the consequence of the first table — the leaked instance of
+> a nested call — in `tests/integration/nested/20`–`22`. The wipe on the error path is pinned; the
+> wipe in `deinit` is established by reading `free_state`, since after `deinit` the memory is
+> released and there is nothing left for a test to look at.
 >
-> **A server defect found on the way, not specific to these functions.** When a loadable function is
-> an argument of another loadable function and takes a prepared-statement parameter, the outer
-> function's `init` evaluates the inner call before the parameter has its value. The inner function
-> sees an empty string: `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE`
-> with a 0-byte key, and the `_kr` form fails with *invalid id*. Two things follow, both observed on
-> 8.4.11 and not tried on 8.0 or 9.4:
+> **A server defect found on the way, not specific to these functions, pinned per major.** When a
+> loadable function is an argument of another loadable function and takes a prepared-statement
+> parameter, the outer function's `init` evaluates the inner call before the parameter has its
+> value. The inner function sees an empty string:
+> `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE` with a 0-byte key, and
+> the `_kr` form fails with *invalid id*. Two things follow, and both are pinned by committed cases
+> rather than observed once. `tests/integration/nested/*.sql` are run by `scripts/verify-nested.sh
+> <major>` on a throwaway server — a case that triggers the defect leaves the component unable to
+> uninstall for every case after it, so it cannot live in `scripts/verify.sh` — and their expected
+> output is recorded per major. Measured on the pinned images (8.0.46, 8.4.11 and 9.4.0), where
+> only `20` differs between the three:
 >
-> - After that error `UNINSTALL COMPONENT` is refused until the server restarts. Seen with the
+> | Case | Shape | Result |
+> |---|---|---|
+> | `10_prepared_decrypt_of_encrypt` | `gcm_decrypt(gcm_encrypt(?, ?), ?)`, prepared | the inner sees a 0-byte key; `UNINSTALL COMPONENT` refused afterwards |
+> | `11_prepared_decrypt_of_det` | the same, inner deterministic | same |
+> | `12_literal_det_bad_key`, `13_literal_encrypt_bad_key` | a literal inner whose key is one byte | inner key error; uninstall succeeds |
+> | `14_user_variable` | the inner plaintext in a user variable | round-trips; uninstall succeeds |
+> | `15_row_time_column_failure` | the inner key from a column, failing on the second row | row-time error; uninstall succeeds |
+> | `16_outer_init_fails` | the outer's own `init` fails over a successful `_kr` inner | argument-count error; uninstall succeeds |
+> | `17_kr_reseal_chain` | A15's re-seal shape with `?` in every key-id position | round-trips; uninstall succeeds |
+> | `20_probe_nested_bound` | the test-only probe instead of the crypto functions, prepared inner, two `EXECUTE`s | `probe_raise_volatile init:2, deinit:0`; uninstall refused. On 8.0 the outer's own `init` runs twice as well — the only per-major difference |
+> | `21_probe_nested_literal`, `22_probe_direct_bound` | the probe with literals, or a `?` on a direct call | every `init` paired with its `deinit`; uninstall succeeds |
+>
+> - After that error **`UNINSTALL COMPONENT` is refused until the server restarts**. Seen with the
 >   key-argument functions, so it predates this amendment and applies to 0.1.0.
 > - **The inner function's `deinit` is never called** — not at the end of the statement, not on
->   `DEALLOCATE PREPARE`, not when the session ends. A probe that counts its own `init` and `deinit`
->   calls showed three `init`s and one `deinit` after two failing executions. Whatever the inner
->   `UDF_INIT` holds at that moment is neither wiped nor freed for the life of the server. For the
->   key-argument functions that is a result buffer and an unkeyed context: the paths that raise in
->   this shape do so before a key is copied, or wipe it first as A11 requires. For a `_kr` function
->   it could have been the fetched key — for example an inner `gcm_decrypt_kr(?, 'id')`, which reads
->   the key and then rejects the empty envelope — which is why a row that raises an error gives up
->   every secret its `UDF_INIT` holds before it returns ("The key copy", above).
-> - Not every failure around a nested call does this. With the outer function's own `init` failing
->   over a successful inner call — `gcm_decrypt(gcm_encrypt_kr('x', 'id'), 'k', 'a', 'extra')`, an
->   argument-count error — `UNINSTALL COMPONENT` succeeded afterwards. Whether the inner `deinit`
->   ran there was not observed directly; the uninstall succeeding is the only evidence.
+>   `DEALLOCATE PREPARE`, not when the session ends. The probe says so in numbers that do not
+>   depend on this component: on 8.4 and 9 the inner `init` runs once per `EXECUTE` and its `deinit`
+>   never runs; on 8.0 the outer's `init` runs too before the statement fails, so one statement
+>   leaks two instances there. Whatever a leaked `UDF_INIT` holds at that moment is neither wiped
+>   nor freed for the life of the server. For the key-argument functions that is a result buffer
+>   and an unkeyed context: the paths that raise in this shape do so before a key is copied, or
+>   wipe it first as A11 requires. For a `_kr` function it could have been the fetched key — for
+>   example an inner `gcm_decrypt_kr(?, 'id')`, which reads the key and then rejects the empty
+>   envelope — which is why a row that raises an error gives up every secret its `UDF_INIT` holds
+>   before it returns ("The key copy", above).
 >
-> It is not pinned by a committed case, because a case that triggers it leaves the test server
-> unable to uninstall the component for every case after it. It needs its own issue. Until then: do
-> not nest one of these functions inside another with a bound parameter (operational constraint
-> 18). Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
+> **Not every failure around a nested call does this.** A literal inner argument, a user variable, a
+> row-time column failure and a failing outer `init` all leave the component uninstallable: the two
+> conditions are the nesting *and* a bound parameter reaching the inner call while the outer
+> function is being initialised (cases 12 to 17 above). The count here supersedes an earlier single
+> observation of "three `init`s and one `deinit`", which came from a different throwaway probe
+> shape.
+>
+> Nothing to change in the component: it is the server's. Operational constraint 18 carries the
+> rule for users — do not nest one of these functions inside another with a bound parameter, and
+> nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
 >
 > **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
 > backward compatible: no envelope a released build wrote or reads is affected.

@@ -89,7 +89,8 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
     definer routine with the id hard-coded, never through a view.
 18. **Do not nest one of these functions inside another with a bound parameter.**
     `gcm_decrypt(gcm_encrypt(?, ?), ?)` in a prepared statement fails, and afterwards
-    `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, seen on 8.4.
+    `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, pinned per major
+    on 8.0, 8.4 and 9 (`tests/integration/nested`).
 19. **`gcm_key_usage` is a count, not your key's usage.** It covers the key-id functions only, this
     server only, since the last start or reinstall, per account and key id. The key-argument functions are not
     counted. Nothing is persisted and nothing is refused.

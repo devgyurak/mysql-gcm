@@ -85,7 +85,8 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
     하지 마세요.
 18. **바인딩 인자와 함께 이 함수들을 서로 중첩하지 마세요.** prepared statement 의
     `gcm_decrypt(gcm_encrypt(?, ?), ?)` 는 실패하고, 그 뒤에는 서버를 재시작할 때까지
-    `UNINSTALL COMPONENT` 가 거부됩니다. 서버 결함이며 8.4 에서 확인했습니다.
+    `UNINSTALL COMPONENT` 가 거부됩니다. 서버 결함이며 8.0, 8.4, 9 에서 major 별로
+    고정했습니다(`tests/integration/nested`).
 19. **`gcm_key_usage` 는 카운트이지 키의 사용량이 아닙니다.** 키 id 함수만, 이 서버만, 마지막 시작
     또는 재설치 이후만, 계정과 키 id 별로 셉니다. 키 인자 함수는 세지 않습니다. 영속화도 거부도 없습니다.
 

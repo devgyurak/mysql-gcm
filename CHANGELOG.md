@@ -41,6 +41,14 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
   what is deliberately left out (a key version in the envelope, rotation). It also records a
   server defect found on the way (#43, operational constraint 18).
+- **The nested-call server defect of issue #43 is pinned per major** (`tests/integration/nested`,
+  run by `scripts/verify-nested.sh` on a throwaway server; operational constraint 18). A test-only
+  probe component (`tests/probe`) counts the `init` and `deinit` calls the server makes, so the leak
+  is a number that does not depend on this component: the inner call of
+  `gcm_decrypt(gcm_encrypt(?, ?), ?)` is never de-initialised, and `UNINSTALL COMPONENT` is refused
+  afterwards until the server restarts, on 8.0, 8.4 and 9. Only a bound parameter reaching the inner
+  call while the outer function is being initialised triggers it; a literal, a user variable, a
+  row-time column failure and a failing outer `init` do not.
 
 ## 0.1.0 — 2026-10-10
 

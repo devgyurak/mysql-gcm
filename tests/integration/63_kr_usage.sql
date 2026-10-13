@@ -89,6 +89,11 @@ SELECT gcm_key_usage() AS never_reached;
 SELECT '# Then: zero without asking whether the key exists, zero for the longest id, NULL, and an error for each of the rest (above, errors section)';
 
 SELECT '# Scenario 10 — Given: a UNIQUE column of deterministic envelopes, and the count before a lookup';
+-- The 6 below (3 per lookup) is a measurement of how often the optimizer evaluates a
+-- constant call, not something the component promises. It was the same on 8.0.46,
+-- 8.4.11 and 9.4.0. If a later server changes it, re-record the observation for that
+-- major (per-major-expected, as 91_server_udf_arg_defect does); what must keep holding
+-- is that the count is of calls and is therefore not a count of messages.
 CREATE TABLE usage_lookup (id INT PRIMARY KEY, mrn_enc VARBINARY(128), UNIQUE KEY (mrn_enc));
 INSERT INTO usage_lookup VALUES
   (1, gcm_encrypt_det_kr('EMR-001', 'it_usage')),

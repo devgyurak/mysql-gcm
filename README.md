@@ -91,7 +91,7 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
     `gcm_decrypt(gcm_encrypt(?, ?), ?)` in a prepared statement fails, and afterwards
     `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, seen on 8.4.
 19. **`gcm_key_usage` is a count, not your key's usage.** It covers the key-id functions only, this
-    server only, since the last start, per account and key id. The key-argument functions are not
+    server only, since the last start or reinstall, per account and key id. The key-argument functions are not
     counted. Nothing is persisted and nothing is refused.
 
 ## Support matrix

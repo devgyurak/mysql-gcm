@@ -49,6 +49,19 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   length or type length disqualifies it is never copied out of the keyring; any other rejected
   entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as
   soon as a failure is latched.
+- **A row that raises gives up every secret the `UDF_INIT` holds (amendment A16).** All six crypto
+  functions, not only the `_kr` three: before it returns, the fetched key, the A11 context with its
+  key copy and the A11 nonce key are cleansed and released, the result buffer's contents are
+  cleansed (the buffer itself stays allocated for the next row's output and is freed in `deinit`),
+  and the instance is marked spent, so a call made afterwards is refused rather than served from
+  what was released. Nothing may depend on `deinit` for such a row — the server does not always call it (A13,
+  "Implementation notes") — nor on being called again, which it does not do either. A row that ends
+  in NULL — a NULL argument, or a `bad_tag` under `gcm.strict=OFF` — is not an error and is not
+  covered: it keeps what the next row needs, the `_kr` key included. This is the rule for the
+  instance whose **row raised**, and only that one: an instance the server abandons *without* an
+  error — the same server defect drops those too (design A16, "The row that raised, and only it",
+  and `tests/integration/nested/23` to `26`) — keeps everything it held, a fetched keyring key
+  included, and this component cannot reach it from a row callback.
 - Derive the deterministic nonce key as `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`. Never use the
   encryption key directly as an HMAC key (domain separation). The label string is a single constant in
   `nonce.h`.
@@ -128,7 +141,9 @@ copy that outlives its `UDF_INIT`, and a cross-row cache keyed on anything but t
 (amendment A11) — the one exception being the `_kr` functions' fetched key, keyed on the calling
 account and the key id and compared on both every row (amendment A13). Also blocked: a keyring
 reader object kept across rows, a keyring read in `init`, a `_kr` error message that names the key
-id, the account or a keyring entry's length or type, and any write to the keyring. For the usage
+id, the account or a keyring entry's length or type, and any write to the keyring. Also: a row that
+raises an error without giving up the instance's key material — the fetched key, the A11 context, the
+A11 nonce key — and its result buffer, or that leaves it to `deinit` (amendment A16). For the usage
 counts (amendment A14): `usage_fold` or any other use of the table's lock on a row path that does
 not end the instance; a `UsageName` or a table row built from key bytes or anything derived from
 them; a row created by anything but a non-zero fold; persistence of the counts; a threshold that

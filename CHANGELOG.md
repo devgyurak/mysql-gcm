@@ -51,6 +51,14 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   instance that raised nothing (whose seal is then never counted) and for a re-prepare invalidated
   by `ALTER TABLE`, with no nesting and no parameter.
 
+### Changed
+- **An error row gives up everything its instance holds, in all six functions** (#43, amendment
+  A16). A13 gave this to the three `_kr` functions: a nested call that raises while the server is
+  initialising an outer one is never de-initialised, so nothing may be left to `deinit`. The code,
+  the spec, the rules and the adapter tests now say it for `gcm_encrypt`, `gcm_encrypt_det` and
+  `gcm_decrypt` as well. The success path is unchanged, no byte of any envelope changes, and nothing
+  new is counted.
+
 ## 0.1.0 — 2026-10-10
 
 First release. The component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x. It

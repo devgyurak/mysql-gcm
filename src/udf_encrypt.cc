@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* gcm_encrypt and gcm_encrypt_det: argument checks, buffers and error mapping.
+/* gcm_encrypt and gcm_encrypt_det: argument checks, buffers, error mapping, and the
+   rule that a row which raises gives up everything the item held (design A16).
    The envelope and the cryptography live in gcm.cc (component-src rule). */
 
 #include <cstddef>
@@ -67,6 +68,15 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
     return nullptr;
   }
 
+  /* design A16: this item has already raised an error and given up the A11 nonce
+     key, the A11 key copy and the result buffer. The server makes no further row
+     call after an error; one made anyway is refused rather than served from what
+     was released. */
+  if (gcm::refuse_if_spent(state, func)) {
+    *error = 1;
+    return nullptr;
+  }
+
   const Bytes plaintext = gcm::arg_bytes(args, 0);
   const Bytes key = gcm::arg_bytes(args, 1);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
@@ -81,6 +91,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
      report "below gcm.min_key_bytes" for a length no setting could ever allow. */
   if (gcm::suite_for_key_len(key.size) != nullptr && key.size < state->min_key_bytes) {
     gcm::raise_below_floor(func, key.size, state->min_key_bytes);
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -88,12 +99,14 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
   /* Checked before the envelope size is computed, so that addition cannot wrap. */
   if (gcm::too_long(plaintext.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long(func, plaintext.size > aad.size ? plaintext.size : aad.size);
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
 
   if (gcm::reserve(state, gcm::encrypt_out_len(plaintext.size))) {
     gcm::raise_message(func, "out of memory");
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -104,6 +117,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
     /* Encryption failures are always errors — gcm.strict only governs tag
        verification (spec/envelope.md §4). */
     gcm::raise(func, err, key.size, 0);
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }

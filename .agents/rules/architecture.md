@@ -57,7 +57,7 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 | Lifetime | Resource and responsibility |
 |---|---|
 | component | The fetched algorithm handles, the sysvar storage, the registration state, and the table of usage counts (amendment A14: names and integers, one mutex, created in init before any function is registered and released with the algorithm handles). Prepared in init and released in a safe deinit |
-| `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session. And, under amendment A13, a `_kr` function's key as fetched from the keyring, with its key id and account and a latched failure: acquired on the first non-NULL row, kept across a `bad_tag` that strict=OFF turns into NULL, cleansed — with the A11 states and the result buffer — by any row that raises an error, and in deinit |
+| `UDF_INIT` | That UDF instance's result buffer and its `gcm.strict` and `gcm.min_key_bytes` snapshots; and, under amendment A11, `gcm_decrypt`'s scheduled EVP context with the copy of the key it was scheduled with and its suite, and `gcm_encrypt_det`'s derived nonce key with its key copy. Managed by init/deinit — cleansed in deinit, cleansed and forgotten on any core error — and not equated with a whole session. And, under amendment A13, a `_kr` function's key as fetched from the keyring, with its key id and account and a latched failure: acquired on the first non-NULL row, kept across a `bad_tag` that strict=OFF turns into NULL, and cleansed in deinit. Under amendment A16 any row that raises gives all of this up at once — the fetched key, the A11 context and its key copy, the A11 nonce key, the result buffer — and marks the instance spent, so a call made afterwards is refused instead of served from what was released |
 | keyring read | The reader object of `keyring_reader_with_status`. Acquired and released inside one call of `key_source`, on every path — it holds the server's global keyring read lock — and never stored (amendment A13) |
 | operation | The EVP *operation* (the init with the nonce through Final), derived per-row values and transient secrets — the nonce, the MAC output, a scratch copy. Cleaned up when the operation ends and on every error path. The decrypt context *object* is `UDF_INIT`-lifetime (A11); the operation run in it is not |
 
@@ -96,11 +96,14 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
   fetched key (amendment A13), keyed on the calling account and the key id, both compared on every
   row. Nothing else is.
 - A `_kr` function reads the keyring once, on its first non-NULL row — not in init, where a prepared
-  statement's parameter is not visible. An error is final for the `UDF_INIT`: the server makes no
-  further row call, and a row that raises wipes everything the instance holds — the fetched key,
-  both A11 states and the result buffer — rather than leave it for deinit. Reading the calling account on every row touches no keyring. Through a definer stored
-  *function* the server creates a `UDF_INIT` per row, so that shape reads per row: an accepted,
-  documented cost (`docs/ops-constraints.md` item 17), not something to cache around.
+  statement's parameter is not visible. Reading the calling account on every row touches no keyring.
+  Through a definer stored *function* the server creates a `UDF_INIT` per row, so that shape reads
+  per row: an accepted, documented cost (`docs/ops-constraints.md` item 17), not something to cache
+  around.
+- An error is final for the `UDF_INIT` of every one of the six crypto functions, `_kr` or not: the
+  server makes no further row call, and the row that raises gives up everything the instance holds —
+  the fetched key, both A11 states and the result buffer — and marks it spent, rather than leave any
+  of it to a `deinit` the server does not always run (amendment A16).
 
 ## 6. Test boundaries and verification
 

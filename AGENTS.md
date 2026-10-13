@@ -154,7 +154,9 @@ different build method on your own.
   `OPENSSL_cleanse` the key and plaintext buffers. The per-`UDF_INIT` key copies amendment A11 allows
   (beside `gcm_decrypt`'s scheduled context and `gcm_encrypt_det`'s nonce key), and the key a `_kr`
   function fetched from the keyring (amendment A13), are the exceptions, on the conditions in
-  `crypto-safety.md` "Key handling".
+  `crypto-safety.md` "Key handling". In all six functions a row that raises gives up everything the
+  instance holds — a fetched key, both A11 states and the result buffer — before it returns
+  (amendment A16); never leave that to `deinit`.
 - A tag verification failure is an error when `gcm.strict=ON`. Do not swallow it as NULL. Never return
   unauthenticated plaintext.
 - The key length is 32, 24 or 16 bytes and selects the suite (amendment A10); the two encryption

@@ -41,6 +41,11 @@ Style comes last.
       every secret of the instance (fetched key, A11 states, result buffer) wiped by a row that
       raises an error,
       no key id, account or entry length or type in a message
+- [ ] Error-row wipe (amendment A16): in all six functions, every secret of the instance — the
+      fetched key, the A11 context and its key copy, the A11 nonce key, the result buffer — is given
+      up before it returns and the instance is left spent, so a call made afterwards is refused; a
+      row that ends in NULL (a NULL argument, or a tag mismatch under `gcm.strict=OFF`) is not an
+      error row and is not covered
 - [ ] Usage counts (amendment A14): counted in the instance and folded once (deinit and the error
       row), never per row; no key-derived value in the table; nothing but a real seal or tag failure
       creates a row; documentation never calls a count a key's usage

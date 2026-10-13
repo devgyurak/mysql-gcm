@@ -227,6 +227,12 @@ Rules that follow, and that every implementation MUST honour:
    not a failure mode.
 4. Error messages, logs and assertion strings MUST NOT contain key, plaintext, nonce, tag or
    ciphertext bytes. Lengths and the version byte are the only values allowed.
+5. A row that raises any error MUST give up, before it returns, every secret its instance holds: a
+   key read from the keyring, any context, key copy or derived key the instance kept for later rows,
+   and the result buffer. It MUST NOT leave that to the function's de-initialisation, which the
+   server does not always run after an error (`docs/design.md` amendment A16). This applies to all
+   six functions. A row that ends in NULL — a NULL argument (rule 3), or a tag mismatch that
+   `gcm.strict=OFF` turns into NULL — is not an error and is not covered by this rule.
 
 ### 4.1 `gcm.min_key_bytes`
 
@@ -291,10 +297,10 @@ Rules that follow, in addition to those of §4:
    reported without either length.
 6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
    keyring: the following rows are decrypted without a second read.
-7. A row that raises any error MUST discard, before it returns, every secret its instance holds: the
-   key read from the keyring, any context or derived key kept for later rows, and the result buffer.
-   It MUST NOT leave that to the function's de-initialisation, which the server does not always
-   run after an error.
+7. Rule 5 of §4 applies here as everywhere: a row that raises gives up the key read from the
+   keyring, along with any context, key copy or derived key the instance kept and the result
+   buffer. Rule 6 above is the one failure that rule does not cover, because `gcm.strict=OFF` turns
+   it into a NULL rather than an error.
 
 ### 4.3 `gcm_key_usage`
 

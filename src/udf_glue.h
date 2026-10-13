@@ -19,17 +19,13 @@ namespace gcm {
 
 /* The *_kr functions only (design A13): the key read from the keyring on the first
    row, with the id and the account it was read under. One per UDF item, never
-   shared, wiped in free_state and — with the A11 states — by every row that raises
-   an error. Unlike the two
-   A11 states below it survives a bad_tag that gcm.strict=OFF turns into NULL — the
-   next row still has to decrypt, and reading again would let a planted corrupt row
-   cost one keyring read per row. Zeroed by calloc. */
+   shared, wiped in free_state and — with the A11 states, the result buffer and the
+   spent latch — by every row that raises an error (design A16). Unlike the two A11
+   states below it survives a bad_tag that gcm.strict=OFF turns into NULL — the next
+   row still has to decrypt, and reading again would let a planted corrupt row cost
+   one keyring read per row. Zeroed by calloc. */
 struct KeyHold {
   bool loaded;
-  /* Set by the row that raised an error, which has released every secret this
-     UDF_INIT held. The server makes no further row call after an error; a call
-     made anyway is refused rather than served from the released state. */
-  bool spent;
   /* A key-source failure is latched: later rows raise it again without touching
      the keyring. KeySource::ok (zero) means none. */
   KeySource failure;
@@ -50,6 +46,13 @@ struct UdfState {
   size_t min_key_bytes; /* gcm.min_key_bytes, read once in init (design A10) */
   unsigned char *out;   /* result bytes; holds plaintext for gcm_decrypt */
   size_t capacity;
+  /* Set by the row that raised an error, which has given up every secret in this
+     state and released what it held (design A16). Covers all six functions: the
+     A11 context, the A11 nonce key, the fetched key and the result buffer. The
+     server makes no further row call after an error; a call made anyway — only a
+     test can make one — is refused instead of using the released state. Zeroed by
+     calloc. */
+  bool spent;
   /* gcm_decrypt only: the scheduled context and its key copy (design A11).
      nullptr for the encrypt UDFs; freed and cleansed in free_state. */
   DecryptSession *decrypt;
@@ -88,6 +91,22 @@ void free_state(UDF_INIT *initid);
    free_state, and from the row that raises an error, because the server does not
    always call deinit after one (design A14). */
 void fold_usage(UdfState *state);
+
+/* Gives up every secret this instance holds and marks it spent (design A16): the
+   fetched key, the A11 context, the A11 nonce key and the result buffer, at once,
+   without waiting for deinit. Every row callback of every crypto UDF calls this
+   before it reports an error, and nothing is lost by it — the server does not enter
+   the row callback again once the function has raised, and deinit cannot be relied
+   on, because a loadable function that raises while an outer one is being initialised
+   never gets its deinit (design A13, "Implementation notes"); what it held would stay
+   in memory, unwiped, for the life of the server. A row that ends in a NULL — a NULL
+   argument, or gcm.strict=OFF on a bad tag — is not an error and does not call this. */
+void give_up_secrets(UdfState *state);
+
+/* The refusal such a call gets when it is made anyway: true when it refused, after
+   raising. Only a test can reach this (the server stops calling a function that
+   reported an error). */
+bool refuse_if_spent(UdfState *state, const char *func);
 
 /* Gives the state its decrypt session (design A11). Call after init_state;
    free_state releases it. True on allocation failure, after releasing the state. */

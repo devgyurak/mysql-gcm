@@ -58,6 +58,7 @@ def check(root: Path) -> list[str]:
                         f"{path.relative_to(root)}:{number}: test seam in server adapter: {seam}"
                     )
     problems += fault_macro_problems(root)
+    problems += probe_problems(root)
     return problems
 
 
@@ -96,6 +97,33 @@ def fault_macro_problems(root: Path) -> list[str]:
             problems.append(
                 f"{path.relative_to(root)}:{number}: {FAULT_MACRO} defined outside tests"
             )
+    return problems
+
+
+def probe_problems(root: Path) -> list[str]:
+    """The probe component is scaffolding and must never reach a shipped artifact.
+
+    `tests/probe` registers five throwaway UDFs to pin the server defect of issue
+    #43 (a prepared statement whose failed re-prepare abandons every loadable
+    function it had already fixed). It is built only by `scripts/build-probe.sh`, from
+    its own
+    directory, into a throwaway server — never by the component build. The name
+    `probe` is reserved for it, so any occurrence under `src/` (the component) or
+    `docker/` (the build tree and the images) means the scaffolding would ship in
+    the `.so`. Comments are not exempt: a copy in a CMake comment or a Dockerfile is
+    exactly how it would get in.
+    """
+    problems: list[str] = []
+    for tree in ("src", "docker"):
+        for path in sorted((root / tree).rglob("*")):
+            if not path.is_file() or path.suffix == ".png":
+                continue
+            for number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+                if "probe" in line.lower():
+                    problems.append(
+                        f"{path.relative_to(root)}:{number}: 'probe' is reserved for the test-only "
+                        f"component (tests/probe) and must not appear in a shipped tree"
+                    )
     return problems
 
 

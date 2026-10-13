@@ -1,0 +1,9 @@
+# Given: a keyring entry for the inner call and the fixture key
+# When: the outer gcm_decrypt is given four arguments, so its init fails
+# Then: an argument-count error from the outer init, and the uninstall succeeds
+--- errors, in statement order ---
+ERROR 1123 (HY000) at line 12: Can't initialize function 'gcm_decrypt'; gcm_decrypt(ciphertext, key [, aad]) needs 2 or 3 arguments
+--- after the case ---
+probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall gcm: ok
+install gcm: ok

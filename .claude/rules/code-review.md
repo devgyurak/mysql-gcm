@@ -69,5 +69,9 @@ constraints (§6) is reflected in the README
 **Style (P3)** — the conventions in `stack-*.md`
 
 ## PR size
-- Over 400 net lines, ask for a split (excluding `.result` files and vector JSON). Do not mix a
-  refactor and a behaviour change in one PR.
+- Over 400 net lines, ask for a split. Not counted: `.result` files, vector JSON, and a `-KO.md`
+  translation that mirrors a document changed in the same PR (`README-KO.md`, `docs/design-KO.md` —
+  `docs.md` requires them there, so counting them would make every documented change look twice its
+  size). The original is counted, and the translation is still reviewed against it; a translation
+  changed on its own, or beyond its original, is counted. Do not mix a refactor and a behaviour
+  change in one PR.

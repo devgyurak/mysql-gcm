@@ -2,7 +2,7 @@
 <!-- one paragraph; link design.md section if this touches a decision -->
 
 ## Scope
-- [ ] Net diff ≤ 400 lines (excluding `.result` / vectors), single concern
+- [ ] Net diff ≤ 400 lines (excluding `.result` / vectors / a `-KO.md` translation that mirrors a file changed here), single concern
 - [ ] Touches crypto path (`src/gcm.cc` `envelope.cc` `nonce.cc` `sysvar.cc` `key_source.cc` `udf_kr.cc` `spec/**` vector generation) → 2 human reviewers + `crypto-reviewer` report attached
 
 ## Correctness & safety (P1 items — reviewer blocks on these)

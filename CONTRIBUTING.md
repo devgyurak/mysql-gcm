@@ -69,8 +69,9 @@ protection deliberately allows — is gated too.
 
 ## What a reviewable PR looks like
 
-- **One concern.** Net diff ≤ 400 lines, excluding `.result` files and vector JSON. Refactors go in
-  their own PR, separate from behaviour changes.
+- **One concern.** Net diff ≤ 400 lines, excluding `.result` files, vector JSON and a `-KO.md`
+  translation that mirrors a document changed in the same PR. Refactors go in their own PR, separate
+  from behaviour changes.
 - **The checklist in `.github/PULL_REQUEST_TEMPLATE.md` filled in.** A box you cannot tick is a
   conversation to have in the PR, not a box to leave blank.
 - **Conventional commit subjects**: `feat(component):`, `fix(crypto):`, `test(mtr):`, `docs:`, `ci:`.

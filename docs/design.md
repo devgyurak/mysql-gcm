@@ -16,7 +16,8 @@
 > was unsafe, and why the smaller design is the one proposed, on a reviewer's recommendation. No
 > draft of this amendment has had a human cryptographic review.
 >
-> **This replaces what A13 said such an amendment would need.** A13's "Out of scope" listed "an
+> **This proposes to drop one of the three things A13 said such an amendment would need.** A13's
+> "Out of scope" listed "an
 > authenticated id, a bound on which ids a stored value may name, and an answer to the per-row
 > lookup". The bound and the per-row lookup are answered below (the id comes from the statement;
 > at most four keys per `UDF_INIT`). The authenticated id is **not** provided: the header is not
@@ -89,10 +90,13 @@
 > - **Encryption names the version.** There is no "current version": the component does not
 >   enumerate the keyring to find the highest, and a setting that says which is current would be the
 >   `gcm.key_id` that A1 withdrew. Which version writers use is the application's configuration.
->   `key_version` is taken, like every argument of these functions, as a string, and parsed
->   strictly: ASCII digits only, no sign, no space, no leading zero, at most ten digits, a value
+>   `key_version` is taken, like every argument of these functions, as a string (requested as
+>   `utf8mb4` and compared as bytes, so a full-width digit is not a digit), and parsed strictly:
+>   ASCII digits only, no sign, no space, no leading zero, at most ten digits, a value
 >   from 1 to 4294967295. An integer literal `2` arrives as `'2'` and is accepted; `'02'`, `' 2'`,
->   `'2.5'`, `0` and `4294967296` are errors, and NULL gives NULL. Like the id, it must be the same on
+>   `'2.5'`, `0` and `4294967296` are errors, and NULL gives NULL. (What the server hands over for
+>   `2e0`, `TRUE` or `0x32` has not been checked; whatever it is, it is accepted only if it is such
+>   a digit string.) Like the id, it must be the same on
 >   every row of a `UDF_INIT`: an encryption call site uses one key.
 > - **Decryption takes it from the envelope.** `gcm_decrypt_krv(ciphertext, key_id)` reads `suite`
 >   and `key_version` from the row. Whoever can write the column therefore chooses the version — but
@@ -104,9 +108,11 @@
 >   versioned envelopes. **`0x01` is refused with `bad_envelope`**: it is unauthenticated CBC, and a
 >   new function has no installed base to keep it for. Accepting it would let whoever can write the
 >   column replace an authenticated value with an unauthenticated one — and not only by guessing
->   past the padding check: in CBC the IV is part of the stored value, so XOR-ing chosen bits into
->   the IV of a known row changes the first sixteen bytes of its plaintext to chosen values with
->   certainty and leaves the padding intact. It is a downgrade the existing functions carry for
+>   past the padding check (about one time in 256): in CBC the IV is part of the stored value, so
+>   given a CBC row under the same key bytes, XOR-ing a difference into its IV XORs the same
+>   difference into the first plaintext block with certainty — to chosen values, if that block is
+>   known. The padding is untouched when the plaintext is sixteen bytes or more; for a shorter one
+>   the padding shares that block and survives only if the difference avoids it. It is a downgrade the existing functions carry for
 >   migration's sake (A3) and this one need not. A CBC column is migrated through `gcm_decrypt_kr` first.
 > - **Every key still in the keyring is still accepted.** A reader opens any version whose entry
 >   exists, and the unversioned entry `key_id` if that exists. Rotating after a compromise therefore protects nothing until
@@ -133,7 +139,7 @@
 >   envelope today, which strict does not soften either. (It is an error and not that row's NULL
 >   for A13's reason: a key that cannot be had is misconfiguration, and `gcm.strict` has one
 >   meaning.) The "fifth key" error needs five versions that all exist, so it arises only where at
->   least that many are still kept. So that the row can be found, these two errors **do name the
+>   least that many entries are still in the keyring. So that the row can be found, these two errors **do name the
 >   `key_version`**: it is a header field read from the stored value and not a keyring fact —
 >   `spec/envelope.md` §4 rule 4 already allows lengths and the version byte in a message, though
 >   today's messages carry lengths only. The
@@ -220,16 +226,20 @@
 > - A deterministic value is equal to another, as stored bytes, only within one key, one suite, **one
 >   version** and one envelope family, because the header is part of the stored value. The bytes
 >   after the header are equal whenever key bytes, plaintext and AAD are — so equal plaintexts stay
->   linkable across versions and families that share key bytes. And because the derivation is
->   unchanged, A12's observation carries over as it stands: a key and its zero-extension derive one
->   nonce key, across versions, ids and families as across suites. "Pad the 16-byte key to 32 and
->   call it version 2" is exactly the related-key form A12 says never to create.
+>   linkable across versions and families that share key bytes, or whose keys are zero-extensions of
+>   one another. Because the derivation is unchanged, A12's observation carries over as it stands:
+>   a key and its zero-extension derive one nonce key, across versions, ids and families as across
+>   suites. "Pad the 16-byte key to 32 and call it version 2" is the resizing of one key into
+>   another that A12 and constraint 11 forbid.
 >
 > ### What rotation then looks like
 >
 > ```sql
 > -- 0. every reader of the column already calls gcm_decrypt_krv (it reads the A13 rows too)
 > SELECT keyring_key_generate('patient_name.v2', 'AES', 32);            -- 1. a new version
+> -- 1b. the SAME key bytes are in the keyring of every server that reads the column, under the
+> --     same id and account, before step 2 (constraint 14). Generating it again on each server
+> --     gives different bytes under one name.
 > -- 2. writers switch to version 2; readers cope with both:
 > SELECT id FROM patients WHERE gcm_decrypt_krv(name_enc, 'patient_name') LIKE '%길%';
 > -- 3. re-seal the rest, in batches, WITH gcm.strict = ON:
@@ -237,16 +247,21 @@
 >    SET name_enc = gcm_encrypt_krv(gcm_decrypt_krv(name_enc, 'patient_name'), 'patient_name', 2)
 >  WHERE name_enc IS NOT NULL
 >    AND (gcm_envelope_key_version(name_enc) IS NULL OR gcm_envelope_key_version(name_enc) < 2)
+>    AND gcm_decrypt_krv(name_enc, 'patient_name') IS NOT NULL    -- never write a NULL back
 >  LIMIT 1000;
 > ```
 >
-> **Step 3 destroys data if it runs with `gcm.strict = OFF`.** A row whose tag fails — corrupted, or
+> **Step 3 destroys data if it runs with `gcm.strict = OFF` and without that last predicate.** A row whose tag fails — corrupted, or
 > with its header edited to a version that holds other key bytes — then decrypts to NULL, sealing
 > NULL gives NULL, and the `UPDATE` writes NULL over a ciphertext that its real version could still
 > have opened; `name_enc IS NOT NULL` then hides the row from every later batch. With the default
 > `gcm.strict = ON` the same row is an error and the batch stops, which is what a re-seal wants.
-> **Re-seal only with `gcm.strict = ON`**, and check it in the session that runs the job: it is
-> GLOBAL-only before MySQL 9.0 (A5).
+> **Re-seal only with `gcm.strict = ON`.** But that setting is GLOBAL-only before MySQL 9.0 (A5)
+> and is read per statement, so checking it and then running is a race with whoever changes it —
+> and the natural moment to change it is exactly when a batch has stopped on a failing row, whose
+> error names no row, and someone turns strict off to find it with `… IS NULL`. Hence the last
+> predicate, which makes the statement skip a row it cannot open whatever the setting is; and
+> **stop the job before turning strict off to look for a failing row.**
 >
 > **The statement is a sketch, not a tested recipe for these functions**, which do not exist yet.
 > Two things are known about its shape:
@@ -256,7 +271,9 @@
 >   arguments. For this shape, with the A13 functions that do exist — `gcm_encrypt_kr(gcm_decrypt_kr(c, id), id)`
 >   in an `INSERT … SELECT` and in an `UPDATE`, in both row orders, over eight rows of very
 >   different lengths including the empty string — every row came back intact on 8.0.46, 8.4.11 and
->   9.4.0. That is one observation on three servers, not a guarantee across shapes; the
+>   9.4.0. That is one observation on three servers, run by hand with no committed test behind it,
+>   and not a guarantee across shapes; binary (non-UTF-8) plaintexts, which pass through a `utf8mb4`
+>   result into a `utf8mb4` argument in this shape, were not tried; the
 >   implementation has to pin it per major as `91_server_udf_arg_defect` pins A7, and until it does
 >   the conservative form is constraint 10's: decrypt into a real table and seal from it.
 > - It assumes the column holds no legacy `0x01` rows: the finder answers NULL for them, the
@@ -264,7 +281,8 @@
 >   `gcm_decrypt_kr` first.
 >
 > A key id containing a dot was tried with `component_keyring_file` on the same three servers
-> (`it_dot.v2`, generated, sealed and opened through the A13 functions) and behaves like any other.
+> (`it_dot.v2`, generated, sealed and opened through the A13 functions) and behaved like any other
+> — again by hand, with no committed test.
 >
 > The component does none of these steps itself. It does not rotate, schedule, or decide that a key
 > is old; A8's "the operator plans the rotation" stands. What changes is that the plan no longer
@@ -283,9 +301,10 @@
 > - **Constraint 2.** The plaintext and the `LIKE` pattern are still in the statement.
 > - **The nested-call defect (#43)** applies to these functions as to the others, and the re-seal
 >   statement above nests one inside another — with literals, which is not the shape #43 was
->   observed in. With the key id or version bound as prepared-statement parameters it is that
->   shape, and on 8.4.11, where #43 was observed, it would fail and leave the component unable to
->   uninstall.
+>   observed in. #43 is about the *inner* call taking a prepared-statement parameter: with the
+>   inner `gcm_decrypt_krv`'s key id bound as `?` it is that shape, and on 8.4.11, where #43 was
+>   observed, it would fail and leave the component unable to uninstall. A bound `key_version`, an
+>   argument of the outer call, is not that shape; it was not tried either.
 >
 > ### Open questions for review
 >
@@ -318,7 +337,7 @@
 > | `src/udf_*.cc`, `src/udf_glue`, `src/key_source` | the four functions; strict parsing of `key_version`; up to four held keys per instance and their wiping; messages that say "suite" where they mean the `suite` byte (today's "does not match the envelope version" and the `suite_for_version` name would otherwise blur "version `0x03`" and "suite `0x03`") |
 > | `spec/envelope.md` §4.3, `src/usage`, `src/udf_usage.cc`, `docs/ops-constraints.md` 19 | the usage name for these functions is (account, entry id), and how a version's count is read |
 > | `tests/unit`, `tests/adapter`, `tests/integration`, `mysql-test` | vectors; a changed header (fails under a different key, opens under the same key bytes — both pinned); mixed-version statements; the fifth key; the unversioned fallback; a rotation end to end |
-> | `crypto-safety.md`, `architecture.md` | "lengths and the version byte are as far as it goes" widened to the `suite` and `key_version` of a stored header; the widened key table (up to four fetched keys per instance); the blocked patterns. The label rule and "AAD is not an input to the nonce" are unchanged |
+> | `crypto-safety.md`, `architecture.md` | "lengths and the version byte are as far as it goes" widened to the `suite` and `key_version` of a stored header; the widened key table (up to four fetched keys per instance) — which is a cross-row value keyed on (account, entry id) and so has to be named as an exception to the blocked pattern "a cross-row cache keyed on anything but the full key bytes", as A13's one key is; the other blocked patterns. The label rule and "AAD is not an input to the nonce" are unchanged |
 > | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the functions, the compatibility note, rotation guidance including "re-seal only with `gcm.strict = ON`". `AGENTS.md` §2 ("withdrawn … a key id or key version in the envelope") and §9 ("out of scope: … a key version in the envelope") both become wrong when this is implemented and change with it |
 
 > ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions

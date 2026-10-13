@@ -1,4 +1,4 @@
-# Upstream report draft — a failed fix or re-prepare leaks every loadable function the statement had already fixed
+# Upstream report draft — a failed re-prepare leaks every loadable function the prepared statement had already fixed
 
 **Status: a draft. Not submitted anywhere.** It records what `mysql-gcm` found while building on the
 loadable-function API (issue #43) so that the finding has one home in the repository. Sending it, in
@@ -11,8 +11,8 @@ or work around it from inside; what it does instead is give up its own secrets o
 
 ## Summary
 
-When a statement's fix or re-prepare fails **after** a loadable function has been fixed, every such
-function's `udf_handler` is abandoned: its `UDF_INIT` is never passed to the function's
+When a prepared statement's re-prepare — its `EXECUTE` — fails **after** a loadable function has been
+fixed, every such function's `udf_handler` is abandoned: its `UDF_INIT` is never passed to the function's
 de-initialisation function, and the `udf_func::usage_count` that `find_udf()` incremented is never
 given back. The second one has a user-visible consequence — a component that registered those
 functions can no longer be uninstalled (or replaced) until the server restarts, because
@@ -90,9 +90,12 @@ was read from the sources of all three trees; the two places where the versions 
    That is why 8.0 leaks the *outer* function's handler too, where the other two abort before calling
    its init.
 
-   The same leak follows any other failure of the fix or re-prepare that happens after a function has
+   The same leak follows any other failure of the **re-prepare** that happens after a function has
    been fixed — `ALTER TABLE` invalidating a prepared statement is the simplest one, because it needs
-   no loadable function inside another and no parameter.
+   no loadable function inside another and no parameter. What the trigger does *not* include was
+   measured too: a re-prepare that fails **before** the function is fixed (its failing column first in
+   the field list) leaks nothing, and a plain, unprepared statement's fix failure was not observed to
+   leak — only the re-prepare path enters the state `udf_handler::cleanup()` returns early from.
 
 3. `sql/item_func.cc`, `udf_handler::cleanup()` — the only releaser of a deferred handler, and it
    deliberately does nothing while a (re-)prepare is in progress:
@@ -149,7 +152,9 @@ was read from the sources of all three trees; the two places where the versions 
 2. `EXECUTE` re-prepares (`is_repreparing`). The item cleanup runs first and early-returns (point 3),
    keeping both handlers.
 3. Re-fixing the outer calls `udf_handler::fix_fields` for the inner as well, which takes a **second**
-   use-count reference and calls the inner's `init`.
+   use-count reference and calls the inner's `init`. (Source read: `find_udf(name, len, true)`
+   increments `usage_count` at the top of `udf_handler::fix_fields`; the probe's counts show the
+   repeated `init`s but cannot separate the reference from them.)
 4. The outer's own `call_init_func` then treats the inner as a constant argument and evaluates it
    (point 2) — the parameters have no values yet at this point.
 5. The inner's row callback raises. In 8.4.11/9.4.0 `call_init_func` notices `thd->is_error()` and
@@ -240,7 +245,7 @@ UNINSTALL COMPONENT 'file://component_gcm';   -- ERROR 3538
 - **The dropped instance may hold secrets.** A `UDF_INIT` can legitimately hold a key read from the
   keyring (this project's key-id functions do, by design, for cross-row reuse) or a key copy and a
   scheduled context. Nothing wipes an instance the server drops without an error, and the component
-  never regains control of it: the value is an eliminated-by-design risk from the component's side
+  never regains control of it: that is a risk the component cannot eliminate from its side
   (`docs/design.md` amendment A16 states that limit rather than implying a guarantee).
 - **It is not limited to a shape an application writes deliberately.** The `ALTER TABLE` case needs
   only a prepared statement over a table whose schema changes between executions. Sealing in one

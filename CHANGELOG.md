@@ -21,6 +21,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **Design amendment A14, proposed** (#35): a count of seals per key name for the key-id functions,
+  and one function, `gcm_key_usage`, to read the caller's own. No persistence and no thresholds.
+  Nothing is implemented by the amendment.
 - **Design amendment A13** (#34), the rationale for the key-id functions above: the decisions, what
   a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
   what is deliberately left out (a key version in the envelope, rotation). It also records a

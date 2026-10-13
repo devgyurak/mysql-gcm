@@ -6,6 +6,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ## Unreleased
 
 ### Added
+- **`gcm_key_usage(key_id)`** (#35, design amendment A14): what the key-id functions have counted
+  under a key id for the calling account since the component started — random seals, deterministic
+  seals, plaintext bytes sealed and tag failures — as JSON text, with the start time. It reads no
+  keyring. **It is a count, not a key's usage**: the key-argument functions, other servers and
+  anything before the last server start or reinstall are not in it; operational constraint 19 lists what it leaves out.
+  No persistence, no thresholds. No new server service and no envelope change.
 - **Key-id functions** (#34, design amendment A13): `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and
   `gcm_decrypt_kr` take a key id and use the `AES` key stored under it in the MySQL keyring for the
   calling account (`priv_user@priv_host`, the namespace of `keyring_key_generate`). The key is no
@@ -21,11 +27,9 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
-- **The table of usage counts** (#35, design amendment A14) is in the tree as `src/usage`, with its
-  unit tests. Nothing calls it yet, so no SQL behaviour changes.
-- **Design amendment A14, proposed** (#35): a count of seals per key name for the key-id functions,
-  and one function, `gcm_key_usage`, to read the caller's own. No persistence and no thresholds.
-  Nothing is implemented by the amendment.
+- **Design amendment A14** (#35), the rationale for `gcm_key_usage` above: what a count is and is
+  not, why there is no persistence and no threshold, and the rules for the component's first shared
+  state (`src/usage`, bounded per account).
 - **Design amendment A13** (#34), the rationale for the key-id functions above: the decisions, what
   a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
   what is deliberately left out (a key version in the envelope, rotation). It also records a

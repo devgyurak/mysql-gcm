@@ -13,6 +13,7 @@
 
 #include "gcm.h"
 #include "key_source.h"
+#include "usage.h"
 
 namespace gcm {
 
@@ -57,6 +58,10 @@ struct UdfState {
   DetSession det;
   /* The *_kr functions only: the fetched key (design A13). Unused otherwise. */
   KeyHold kr;
+  /* The *_kr functions only: what this instance has done under kr's name and not
+     yet folded into the component's table (design A14). Plain integers, touched by
+     one thread; fold_usage moves them to the table and zeroes them. */
+  UsageCounts used;
 };
 
 /* Every helper below follows the UDF init convention: true means failure, with
@@ -74,7 +79,15 @@ bool init_argument_charset(UDF_ARGS *args, char *msg, unsigned index, const char
 bool init_argument_collation(UDF_ARGS *args, char *msg, unsigned index, const char *collation);
 
 bool init_state(UDF_INIT *initid, char *msg);
+/* Folds any usage not yet folded (design A14), then wipes and releases. */
 void free_state(UDF_INIT *initid);
+
+/* Moves the instance's counts into the component's table under the name its key
+   was read under, and zeroes them — so calling it twice counts once. One lock, and
+   none at all when there is nothing to fold. Called when the instance ends: from
+   free_state, and from the row that raises an error, because the server does not
+   always call deinit after one (design A14). */
+void fold_usage(UdfState *state);
 
 /* Gives the state its decrypt session (design A11). Call after init_state;
    free_state releases it. True on allocation failure, after releasing the state. */

@@ -22,6 +22,7 @@ MYSQL_ADD_COMPONENT(gcm
   udf_encrypt.cc
   udf_decrypt.cc
   udf_kr.cc
+  udf_usage.cc
   key_source.cc
   udf_glue.cc
   sysvar.cc

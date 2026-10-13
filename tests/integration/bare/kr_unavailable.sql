@@ -29,3 +29,8 @@ SELECT '# Scenario 4 — Given: a NULL key id';
 SELECT '# When: a key-id function is called';
 SELECT gcm_encrypt_kr('x', NULL) IS NULL AS null_result;
 SELECT '# Then: NULL, with no error — the keyring is not consulted (above)';
+
+SELECT '# Scenario 5 — Given: the same server, with no keyring';
+SELECT '# When: the usage of a key id is read';
+SELECT JSON_EXTRACT(gcm_key_usage('any_id'), '$.random_seals', '$.tag_failures', '$.complete') AS usage_counts;
+SELECT '# Then: zeros — gcm_key_usage reads the component''s own table and needs no keyring (above)';

@@ -1,6 +1,6 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 added 2026-10-12 with no byte change). v3 adds the AES-192 version bytes `0x06` and
+Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 and §4.3 added 2026-10-12 with no byte change). v3 adds the AES-192 version bytes `0x06` and
 `0x07`; v2 added the AES-128 bytes `0x04` and `0x05` and the key-length rule in §2.5. Neither changes
 a byte of any earlier envelope, and an older implementation reading a newer envelope rejects it as a
 reserved version, which §2.6 has required throughout. Supersedes the
@@ -295,6 +295,50 @@ Rules that follow, in addition to those of §4:
    key read from the keyring, any context or derived key kept for later rows, and the result buffer.
    It MUST NOT leave that to the function's de-initialisation, which the server does not always
    run after an error.
+
+### 4.3 `gcm_key_usage`
+
+`gcm_key_usage(key_id)` (`docs/design.md` amendment A14) returns what the key-id functions of §4.2
+have counted under one key name on this server. It is not part of the envelope contract and changes
+no byte of it; it is here because it is public surface.
+
+**The answer** is a VARCHAR tagged `utf8mb4` holding one JSON object, always with these six members
+in this order:
+
+| Member | Meaning |
+|---|---|
+| `random_seals` | successful `gcm_encrypt_kr` calls |
+| `det_seals` | successful `gcm_encrypt_det_kr` calls — calls, not distinct messages, and not statements either: the server may evaluate one call site several times |
+| `bytes_sealed` | plaintext bytes of those calls, after conversion to `utf8mb4`, without the AAD |
+| `tag_failures` | `gcm_decrypt_kr` calls that ended in a tag mismatch, with `gcm.strict` ON or OFF |
+| `since` | Unix time, in seconds, at which counting began: the component's initialisation |
+| `complete` | `false` once a name of the calling account did not fit in the table; some use by that account is then in no row |
+
+Rules an implementation MUST honour:
+
+1. **The name is (calling account, `key_id`)**, the account being §4.2's. The answer is for the
+   calling account only; no argument selects another.
+2. The function reads no keyring and does not report whether `key_id` names a key: a name with no
+   counts answers zeros. `key_id` is validated as in §4.2; an invalid one is an error. SQL NULL
+   yields SQL NULL.
+3. A call is counted when it returns successfully (a seal) or with a tag mismatch, whether or not
+   its statement later fails or its transaction rolls back. A count is a **lower bound**: an
+   instance the server abandons without de-initialising, and which did not itself raise, loses what
+   it counted. Successful decryptions, failed seals
+   and the key-argument functions of §1 are not counted.
+4. Counts become visible when the instance of the function that made them ends, not row by row. A
+   `gcm_key_usage` call in the same statement as a seal does not see that seal.
+5. Counts are 64-bit unsigned and saturate, in the instance and in the table. They start from zero whenever `since` changes: at server
+   start and when the component is installed.
+6. A row is created only by a non-zero count, which requires that a usable key was read under that
+   name. `gcm_key_usage` creates none.
+7. The table holds at most 64 names per account and 1024 in all, and never evicts one. One account
+   reaching its own bound MUST NOT change any other account's answer. When the whole table is full
+   and an account with no row loses a use, `complete` MAY be `false` for every account with no row;
+   it MUST NOT be `true` for an account that lost a use.
+
+A count is **not** a key's usage: it does not include other servers, other names for the same key
+bytes, the key-argument functions, or anything before `since`.
 
 ## 5. Worked examples
 

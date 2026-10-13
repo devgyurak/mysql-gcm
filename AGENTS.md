@@ -23,6 +23,9 @@ gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 →
 gcm_encrypt_kr(plaintext, key_id [, aad])       the same three, with the key read from the keyring
 gcm_encrypt_det_kr(plaintext, key_id [, aad])   under the calling account (amendment A13). Same
 gcm_decrypt_kr(ciphertext, key_id [, aad])      envelopes, byte for byte; optional to use
+
+gcm_key_usage(key_id)                     -> VARCHAR  JSON text: what the three above counted under
+                                                      this id for the caller (amendment A14)
 ```
 
 - `key`: 32 binary bytes (AES-256), 24 (AES-192) or 16 (AES-128). Any other length is an error
@@ -54,6 +57,10 @@ gcm_decrypt_kr(ciphertext, key_id [, aad])      envelopes, byte for byte; option
   per `UDF_INIT`, on the first non-NULL row; every key-source failure is an error regardless of
   `gcm.strict`, and no message names the id, the account or the entry. The contract is
   `spec/envelope.md` §4.2.
+- Usage counts (amendment A14): per (calling account, key id), random and deterministic seals,
+  plaintext bytes and tag failures of the `_kr` functions since the component started; folded once
+  per `UDF_INIT`; no persistence, no thresholds; the key-argument functions are not counted. A count
+  is an input to the usage budget, never the budget. The contract is `spec/envelope.md` §4.3.
 - Withdrawn (amendment A1) and still withdrawn: `gcm.key_id`, `gcm.nonce_key_id`, `gcm_key_id()`, a
   key id or key version in the envelope, and any function that writes to the keyring. If
   asked for one, turn it back into a proposal to amend the design.
@@ -73,6 +80,7 @@ src/                           The component (C++17)
   CMakeLists.txt               MYSQL_ADD_COMPONENT — copied into the server tree as components/gcm and built there
   component.cc                 DECLARE_COMPONENT, the REQUIRES_SERVICE list, init/deinit (including registration rollback)
   udf_encrypt.cc udf_decrypt.cc   The UDF glue — argument validation, charset tagging and error translation only
+  udf_usage.cc                 gcm_key_usage (amendment A14) — reads the table in usage.{h,cc}; no keyring, no crypto
   udf_kr.cc                    The key-id UDFs (amendment A13) — the same glue, with the key resolved from key_source
   key_source.{h,cc}            The caller's account and the keyring read behind the key-id UDFs (a server adapter, no crypto)
   udf_glue.{h,cc}              Arguments, buffers and error translation shared by the UDF glues (no crypto logic)
@@ -81,7 +89,7 @@ src/                           The component (C++17)
   nonce.{h,cc}                 The synthetic nonce and the nonce_key derivation (EVP_MAC HMAC-SHA256)
   usage.{h,cc}                 The table of usage counts for the key-id functions (amendment A14; no server header → unit testable)
   sysvar.{h,cc}                Registering and reading gcm.strict — the session scope is 9.0+ only (amendment A5)
-tests/unit/                    GoogleTest — gcm/envelope/nonce, linking libcrypto alone with no server
+tests/unit/                    GoogleTest — gcm/envelope/nonce/usage, linking libcrypto alone with no server
 tests/integration/             Real-server SQL scenarios on docker (sql + expected)
 mysql-test/suite/gcm/          MTR .test/.result (run from a server source tree build)
 tests/e2e/                     compose: mysql (ROW) + replica + a Python SQL runner → LIKE / replication / dual-read

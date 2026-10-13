@@ -9,6 +9,7 @@
    of a keyring entry. */
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -64,6 +65,10 @@ void give_up_secrets(UdfState *state) {
   hold->key_len = 0;
   hold->loaded = false;
   hold->spent = true;
+  /* What this instance counted must not depend on a deinit that may not come
+     either (design A14). After the key is gone, since the fold takes a lock and
+     the name it folds under — the id and the account — is not wiped here. */
+  gcm::fold_usage(state);
   gcm::det_session_clear(&state->det);
   gcm::decrypt_session_free(state->decrypt);
   state->decrypt = nullptr;
@@ -139,6 +144,21 @@ void raise_core(const char *func, Error err, size_t envelope_len) {
 using EncryptFn = Error (*)(UdfState *state, Bytes key, Bytes plaintext, Bytes aad,
                             unsigned char *out, size_t *out_len);
 
+/* design A14: one successful seal, counted in the instance and folded when it ends.
+   The bytes are the plaintext as sealed — after the server's conversion to
+   utf8mb4, without the AAD. */
+void count_random_seal(UdfState *state, size_t plaintext_len) {
+  state->used.random_seals = gcm::usage_saturating_add(state->used.random_seals, 1);
+  state->used.bytes_sealed = gcm::usage_saturating_add(state->used.bytes_sealed, plaintext_len);
+}
+
+void count_det_seal(UdfState *state, size_t plaintext_len) {
+  state->used.det_seals = gcm::usage_saturating_add(state->used.det_seals, 1);
+  state->used.bytes_sealed = gcm::usage_saturating_add(state->used.bytes_sealed, plaintext_len);
+}
+
+using CountFn = void (*)(UdfState *state, size_t plaintext_len);
+
 Error seal_random(UdfState *, Bytes key, Bytes plaintext, Bytes aad, unsigned char *out,
                   size_t *out_len) {
   return gcm::encrypt_random(key, plaintext, aad, out, out_len);
@@ -170,7 +190,7 @@ bool encrypt_init(UDF_INIT *initid, UDF_ARGS *args, char *msg, const char *usage
   return gcm::init_state(initid, msg);
 }
 
-char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *args,
+char *encrypt_row(const char *func, EncryptFn seal, CountFn count, UDF_INIT *initid, UDF_ARGS *args,
                   unsigned long *length, unsigned char *is_null, unsigned char *error) {
   auto *state = reinterpret_cast<UdfState *>(initid->ptr);
 
@@ -231,6 +251,7 @@ char *encrypt_row(const char *func, EncryptFn seal, UDF_INIT *initid, UDF_ARGS *
     return nullptr;
   }
 
+  count(state, plaintext.size);
   *length = static_cast<unsigned long>(out_len);
   return reinterpret_cast<char *>(state->out);
 }
@@ -252,7 +273,8 @@ bool gcm_encrypt_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
 
 char *gcm_encrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *length,
                          unsigned char *is_null, unsigned char *error) {
-  return encrypt_row("gcm_encrypt_kr", seal_random, initid, args, length, is_null, error);
+  return encrypt_row("gcm_encrypt_kr", seal_random, count_random_seal, initid, args, length,
+                     is_null, error);
 }
 
 void gcm_encrypt_kr_deinit(UDF_INIT *initid) { gcm::free_state(initid); }
@@ -266,7 +288,8 @@ bool gcm_encrypt_det_kr_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
    a keyring key too — one AAD convention per key, an independent key per mode. */
 char *gcm_encrypt_det_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *length,
                              unsigned char *is_null, unsigned char *error) {
-  return encrypt_row("gcm_encrypt_det_kr", seal_det, initid, args, length, is_null, error);
+  return encrypt_row("gcm_encrypt_det_kr", seal_det, count_det_seal, initid, args, length, is_null,
+                     error);
 }
 
 void gcm_encrypt_det_kr_deinit(UDF_INIT *initid) { gcm::free_state(initid); }
@@ -330,6 +353,11 @@ char *gcm_decrypt_kr_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long
      not an error, so the fetched key in state->kr stays and the next row decrypts
      without another keyring read (design A13). With strict ON it is an error like
      any other and falls through to give_up_secrets below. */
+  /* design A14: a tag mismatch is counted whichever way gcm.strict then sends it —
+     a forgery attempt counts against the GCM bound either way. */
+  if (err == Error::bad_tag) {
+    state->used.tag_failures = gcm::usage_saturating_add(state->used.tag_failures, 1);
+  }
   if (err == Error::bad_tag && !state->strict) {
     *is_null = 1;
     return nullptr;

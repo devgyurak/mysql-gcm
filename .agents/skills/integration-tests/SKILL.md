@@ -60,9 +60,10 @@ changed `.expected` has to be explained. Keep ciphertext and plaintext bytes out
 plus an assertion on the row count.
 
 ## Nested defect (`tests/integration/nested`)
-The server defect of issue #43: a statement's fix or re-prepare that fails **after** a loadable
-function has been fixed abandons that function's `UDF_INIT` — its `deinit` never runs and the
-component can no longer be uninstalled until the server restarts. The first shape found is a function
+The server defect of issue #43: a **prepared statement whose re-prepare at `EXECUTE`** fails after a
+loadable function has been fixed abandons that function's `UDF_INIT` — its `deinit` never runs and
+the component can no longer be uninstalled until the server restarts. Case `25_ddl_reprepare`'s
+control pins the other side: a re-prepare that fails *before* the function is fixed leaks nothing. The first shape found is a function
 that is the argument of another and takes a prepared-statement parameter: the inner call is evaluated
 while the outer function is being initialised, sees an empty string and raises. Nesting, the bound
 parameter and the raising are all incidental, and the cases say so —

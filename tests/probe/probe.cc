@@ -1,13 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* A test-only component that exists to pin one server behaviour (issue #43): a
-   statement's fix or re-prepare that fails *after* a loadable function has been
-   fixed abandons that function's `UDF_INIT` — its `deinit` is never called and the
-   component can no longer be uninstalled. The first shape found is a function that
-   raises while the server is evaluating it as the argument of another loadable
-   function, during that outer function's `init`; it is not the only one (a sibling
-   function, and a re-prepare invalidated by `ALTER TABLE`, leak the same way, and a
-   function that raises nothing is dropped too — cases 23 to 26). The cause is read
-   in `docs/upstream-udf-handler-leak.md`.
+   prepared statement whose **re-prepare at `EXECUTE`** fails after a loadable
+   function has been fixed abandons that function's `UDF_INIT` — its `deinit` is
+   never called and the component can no longer be uninstalled. The first shape found is a function
+   that raises while the server is evaluating it as the argument of another loadable function,
+   during that outer function's `init`; it is not the only one (a sibling function, and a re-prepare
+   invalidated by `ALTER TABLE`, leak the same way, and a function that raises nothing is dropped
+   too — cases 23 to 26). The cause is read in `docs/upstream-udf-handler-leak.md`.
 
    Why this is a component of its own rather than part of `component_gcm`: the
    behaviour must be observable independently of this project's code, and

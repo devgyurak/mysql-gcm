@@ -110,11 +110,12 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 - `tests/integration/nested/` pins the server defect of issue #43 and is run by
   `scripts/verify-nested.sh`, not `verify.sh`: a case that triggers the defect leaves the component
   unable to uninstall for every case after it, so the harness needs a throwaway server plus a per-case
-  reinstall-or-restart. What the defect is: a statement's fix or re-prepare that fails **after** a
-  loadable function has been fixed abandons that function's `UDF_INIT`, so its `deinit` never runs and
-  the component cannot be uninstalled. Nesting, a bound parameter and a raised error are only the
-  first shape found; the sibling, non-raising and `ALTER TABLE` shapes are cases 23 to 26 (the cause
-  is read in `docs/upstream-udf-handler-leak.md`). Its expected output is **per major**
+  reinstall-or-restart. What the defect is: a **prepared statement whose re-prepare at `EXECUTE`**
+  fails after a loadable function has been fixed abandons that function's `UDF_INIT`, so its `deinit`
+  never runs and the component cannot be uninstalled. Nesting, a bound parameter and a raised error
+  are only the first shape found; the sibling and non-raising shapes and the `ALTER TABLE` re-prepare
+  are cases 23 to 26, and case 25's control shows that a re-prepare which fails *before* the function
+  is fixed leaks nothing (the cause is read in `docs/upstream-udf-handler-leak.md`). Its expected output is **per major**
   (`<case>.<major>.expected`), because whether and how the defect reproduces differs by version.
   `tests/probe` (test-only, built by
   `scripts/build-probe.sh`, never shipped — enforced by `check-architecture.py`) counts a leaked

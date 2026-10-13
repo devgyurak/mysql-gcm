@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Server test for the server defect of issue #43: a statement's fix or re-prepare
-# that fails *after* a loadable function has been fixed abandons that function's
+# Server test for the server defect of issue #43: a prepared statement whose
+# re-prepare at `EXECUTE` fails *after* a loadable function has been fixed abandons that function's
 # `UDF_INIT` — its `deinit` is never called, and `UNINSTALL COMPONENT` is refused
 # until the server restarts. The first shape found, and the one the issue was filed
 # with, is a function that is the argument of another and takes a prepared-statement

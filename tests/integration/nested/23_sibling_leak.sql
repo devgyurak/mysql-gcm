@@ -2,8 +2,8 @@
 -- nested-uninstall: probe
 --
 -- The defect is not about nesting. A function that is a *sibling* of the one that
--- raises is dropped the same way: what matters is that the statement's fix or
--- re-prepare fails after the sibling has already been fixed. (Issue #43; A13's
+-- raises is dropped the same way: what matters is that the statement's re-prepare
+-- fails after the sibling has already been fixed. (Issue #43; A13's
 -- "Implementation notes"; the cause is read in
 -- docs/upstream-udf-handler-leak.md.)
 SELECT '# Given: two probe functions and four parameters';

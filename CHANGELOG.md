@@ -41,12 +41,28 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
   what is deliberately left out (a key version in the envelope, rotation). It also records a
   server defect found on the way (#43, operational constraint 18).
-- **The server cause behind the nested-call defect** (#43): a loadable function that raises while it
-  is being evaluated as a constant argument of another one is left holding its handler — the inner
-  `udf_handler` is never released on any of the three tested majors, which is why the component
-  cannot be uninstalled afterwards. Read from the 8.0.43, 8.4.11 and 9.4.0 sources, cross-checked
-  against the probe's init/deinit counts, and recorded with a reproducer in
+- **The nested-call server defect of issue #43 is pinned per major** (`tests/integration/nested`,
+  run by `scripts/verify-nested.sh` on a throwaway server; operational constraint 18). A test-only
+  probe component (`tests/probe`) counts the `init` and `deinit` calls the server makes, so the leak
+  is a number that does not depend on this component. Its trigger is different from its name: a
+  prepared statement whose **re-prepare** fails after a loadable function has been fixed abandons
+  every such function, so `UNINSTALL COMPONENT` is refused until the server restarts on 8.0, 8.4
+  and 9 — for `gcm_decrypt(gcm_encrypt(?, ?), ?)`, but also for a sibling function, for a key-id
+  instance that raised nothing (whose seal is then never counted) and for a re-prepare invalidated
+  by `ALTER TABLE`, with no nesting and no parameter.
+- **The server cause behind it** (#43): a failed re-prepare leaves every loadable function the
+  statement had already fixed holding its handler, because `udf_handler::cleanup()` returns early
+  while a statement is being (re)prepared. Read from the 8.0.43, 8.4.11 and 9.4.0 sources,
+  cross-checked against the probe's init/deinit counts, and recorded with a reproducer in
   `docs/upstream-udf-handler-leak.md` — a draft that is not submitted anywhere.
+
+### Changed
+- **An error row gives up everything its instance holds, in all six functions** (#43, amendment
+  A16). A13 gave this to the three `_kr` functions: a nested call that raises while the server is
+  initialising an outer one is never de-initialised, so nothing may be left to `deinit`. The code,
+  the spec, the rules and the adapter tests now say it for `gcm_encrypt`, `gcm_encrypt_det` and
+  `gcm_decrypt` as well. The success path is unchanged, no byte of any envelope changes, and nothing
+  new is counted.
 
 ## 0.1.0 — 2026-10-10
 

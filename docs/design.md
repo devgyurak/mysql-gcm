@@ -6,6 +6,128 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
+>
+> **Status: proposed (issue #43; PR review recorded below). This revision — 2026-10-13, after the
+> review of the whole #51–#55 stack — widens what the amendment *says*: the review measured that the
+> same server defect also drops instances that raise **nothing**, so the guarantee below is scoped to
+> the row that raised and the limit is stated rather than implied. Nothing is implemented by this
+> amendment; the implementation follows in its own PR.** A13 gave the three `_kr` functions this
+> rule. This gives it to the three key-argument functions as well, and says why the cost is zero.
+>
+> A13's "The key copy" already requires it of a `_kr` row that raises: the fetched key, the A11
+> context, the A11 nonce key and the result buffer are given up at once, not at `deinit`. It stopped
+> there because the function that needed it most was the one holding a key the statement's text does
+> not contain. **The reason is not specific to those three functions.** A13 recorded the shape that
+> shows it, and the sweep added for #43 pins it — `tests/integration/nested`, in the PR that precedes
+> this one, which is also where A13's "not pinned by a committed case" sentence is corrected: when a
+> loadable function raises while the server is evaluating it as the argument of another one — which
+> needs the *inner* call to take a prepared-statement parameter, the one condition A13 names — that
+> function's `deinit` is not called, not at the end of the statement, not on `DEALLOCATE PREPARE`,
+> not when the session ends; and afterwards `UNINSTALL COMPONENT` is refused until the server
+> restarts. What that `UDF_INIT` held would have stayed in memory, unwiped, for the life of the
+> server — which is what the rule below exists to prevent for the instance that raises.
+>
+> **The decision.** Every row callback of all six crypto functions — `gcm_encrypt`,
+> `gcm_encrypt_det` and `gcm_decrypt`, and the three `_kr` forms — gives up, before it returns an
+> error to the server:
+>
+> - the key fetched from the keyring (a `_kr` function only, A13);
+> - the A11 states: the scheduled `EVP_CIPHER_CTX` with its key schedule behind `gcm_decrypt`, and
+>   the cached nonce key with the key copy it is valid for behind `gcm_encrypt_det` (`gcm_encrypt`
+>   keeps neither);
+> - the result buffer, which at that moment may still hold the previous row's output — plaintext
+>   for the two decrypt functions, an envelope for the four encrypt ones.
+>
+> The instance is then **spent**: a further call on it raises instead of using a released session. (A
+> NULL argument still yields SQL NULL — the NULL check comes first and consults no session,
+> spec/envelope.md §4 rule 3.) The latch is what makes the wipe observable, because no such call can
+> be made except by a test (the reason is read in the sources, not pinned — see the paragraph below).
+>
+> **Why the cost is zero.** A11's invariant list lets a pre-check failure leave the schedule intact,
+> on the grounds that "a wrong-length key on one row is that row's SQL error, not a reason to
+> discard a valid schedule". That a wrong-length key is that row's SQL error is exactly why
+> discarding it costs nothing: the row's error ends the execution. **Read in the 8.0.43, 8.4.11 and
+> 9.4.0 sources rather than pinned by a test**: `udf_handler::get_arguments` returns early on the
+> handler's error flag, so the row callback is not entered again after it has reported an error, and
+> the wipe runs while that statement is ending. No success path changes — a row that succeeds keeps
+> the context and the nonce key for the next row exactly as A11 says. Nothing here rests on the
+> three majors behaving alike in the nested shape: they do not (A13, "Implementation notes", case
+> `20`), and the rule is what makes that difference irrelevant to what the instance that raised
+> leaves in memory — not to what an instance the server abandons *without* an error keeps.
+>
+> **What it does not cover, deliberately.**
+>
+> - **A `bad_tag` that `gcm.strict=OFF` turns into NULL does not wipe.** The row succeeded as far as
+>   the server is concerned and the statement continues, so the session is still wanted. A11's rule
+>   already applies there: the core discards the copy, the context and the nonce key on the failure,
+>   and only a `_kr` function keeps its fetched key, because the next row must still decrypt (A13).
+>   The result buffer is left alone too: the statement has not ended, and whatever ends it wipes —
+>   `deinit` on success, A16 on an error row. What the buffer may hold past the current row's output
+>   is the previous row's output of that same statement, not a secret the statement's end leaves
+>   behind.
+> - **`deinit` is still the normal exit** and still cleanses everything (A11). A16 removes the
+>   reliance on `deinit` from the error path only.
+> - **The row that raised, and only it.** The rule fires from a row callback, so it can cover only
+>   an instance whose row reports an error. The same server defect also drops instances that raise
+>   *nothing* — a sibling of the function that raised, a key-id instance that sealed successfully,
+>   any function a failed re-prepare abandons — and the component never regains control of those, so
+>   what they hold stays, a fetched keyring key included. No row callback can close that; whether it
+>   could be reduced at the price of the cross-row reuse A11 and A13 exist for is an open question,
+>   and this amendment states the limit rather than implying a guarantee it cannot give. Cases `23`
+>   to `25` of `tests/integration/nested` pin the three shapes; `26` is the `const_item` variant of
+>   `20`, the control that says constness is not the trigger.
+> - **It does not fix the server defect.** A leaked instance is still leaked, and `UNINSTALL
+>   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked per-instance
+>   state **of an instance whose row raised** holds no key material, no plaintext and no usable
+>   context; the server's own argument buffers are outside the component's reach, as A11 already
+>   says. The defect is issue #43, pinned by `tests/integration/nested` and summed up in operational
+>   constraint 18; a fix would be the server's.
+> - **`init` failures are not part of it.** A9's rollback already frees what `init` allocated; A16 is
+>   about the row callback.
+>
+> **What A11 loses.** Its invariant list says the pre-checks "leave it intact … untouched by a
+> `bad_key_len` pre-check". That sentence is replaced above: the pre-checks still do not touch it
+> while the call runs, and the call then raises, which does. Nothing else in A11 changes — not the
+> byte layout, not the measurements, not the threat model.
+>
+> **Review record.** An independent `crypto-reviewer` pass (2026-10-13, this PR) read the six row
+> callbacks, `udf_glue`, `gcm`, `nonce`, `key_source`, `spec/envelope.md` and `crypto-safety.md`
+> against this draft. It found the enumerated secret set complete for component-owned state, and the
+> "cost is zero" argument sound — no shape in the repository enters one `UDF_INIT`'s row callback
+> again after an error. Four things it raised are fixed above: the result buffer holds an envelope,
+> not plaintext, in the encoding functions; the `get_arguments` claim and the uniformity of the three
+> majors are source reads, now marked as such, and the major difference in the nested shape is named
+> rather than smoothed over; the NULL path's result buffer now says why it is not wiped; and the
+> guarantee is scoped to the per-instance state. Three are left to the implementation PR and are in
+> the table below: `architecture.md` §3 and §5 and `docs/ops-constraints.md` 18 still tie the wipe to
+> the `_kr` functions; `spec/envelope.md` states the rule only inside §4.2, so §4 has to carry it for
+> all six; and `tests/adapter/udf_kr_test.cc` asserts on the latch where it lives today. It did not
+> review the server-side claim — that is the next PR's subject — and this is not a human
+> cryptographic review.
+>
+> **Second review (2026-10-13, the whole #51–#55 stack).** It measured a wider scope than the record
+> above assumed: a *sibling* function, a key-id instance that raised nothing (whose seal is then
+> never counted) and a re-prepare invalidated by `ALTER TABLE` — no nesting, no parameter, no error —
+> all leak the same way. The guarantee above is therefore scoped to the instance whose row raised,
+> the limit is stated, and `tests/integration/nested` gained cases `23` to `26` for the shapes.
+>
+> **Impact, for the implementation PR:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/udf_glue.{h,cc}` | A13's `give_up_secrets` moves here from `udf_kr.cc`; its `spent` latch is lifted from the keyring state (`KeyHold`) to the per-instance state, so one rule and one message serve all six functions |
+> | `src/udf_encrypt.cc`, `src/udf_decrypt.cc` | call it before every error they raise |
+> | `src/udf_kr.cc` | uses the moved helper; its own behaviour does not change, its tests do (next row) |
+> | `tests/adapter/udf_kr_test.cc` | its assertions on `spent` follow the field to `UdfState`; the new cases go here |
+> | `src/usage.cc` | unchanged: the error row still folds what the instance counted (A14) |
+> | `spec/envelope.md` | the error-path rule moves into §4 and becomes normative for the three key-argument functions (§4.2 rule 7 currently states it only for the key-id ones). One sentence; no byte layout and no vector change |
+> | `architecture.md` §3, §5 | both still say a `_kr` function's key is what a raising row wipes; they have to say all six |
+> | `docs/design.md` A13's "Implementation notes" and its KO mirror | the defect's scope is corrected there: the nesting, the bound parameter and the error are incidental, and cases `23` to `26` pin the wider shapes (done in the PR that records the sweep) |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | constraint 18 is restated around the real trigger — a prepared statement whose re-prepare fails after a function has been fixed — and says that an instance abandoned *without* an error keeps what it holds, this amendment's rule notwithstanding (done in the same PR) |
+> | `CHANGELOG.md` | a Documented entry, as A15 has |
+> | `crypto-safety.md` (key handling), `.agents/rules/code-review.md`, `AGENTS.md` §5 | the wipe is unconditional on the error path, for all six |
+
 > ## Amendment A15 (2026-10-13) — a key version in the envelope: rotation and dual-read for the key-id functions
 >
 > **Status: proposed (issue #34, the part amendment A13 deferred). Nothing is implemented by this
@@ -321,12 +443,14 @@
 > - **Constraint 2.** The plaintext and the `LIKE` pattern are still in the statement.
 > - **The nested-call defect (#43)** applies to these functions as to the others, and the re-seal
 >   statement above nests one inside another — with literals, which is not the shape #43 was
->   observed in. #43 is about the *inner* call taking a prepared-statement parameter: with the
->   inner `gcm_decrypt_krv`'s key id bound as `?` it is the shape #43 describes and may fail the
->   same way. That is not established: #43 was observed with every argument of the inner call a
->   parameter, and here the inner call also has a column argument, which may keep the server from
->   evaluating it early. Neither that, nor a bound `key_version` (an argument of the outer call),
->   was tried.
+>   observed in. #43 is about the *inner* call taking a prepared-statement parameter, and the
+>   implemented `_kr` functions answer it: `tests/integration/nested/17_kr_reseal_chain` prepares
+>   `gcm_decrypt_kr(gcm_encrypt_kr(gcm_decrypt_kr(c, ?), ?), ?)` with every key id bound, and it
+>   round-trips on 8.0, 8.4 and 9 with the component uninstalling cleanly afterwards — the column
+>   argument of the innermost call keeps the server from evaluating it early. What is still untried
+>   is `gcm_decrypt_krv` and `gcm_envelope_key_version` with a bound `key_version`: those do not
+>   exist yet, and the PR that implements them has to pin that shape per major the way A7's
+>   finding is pinned.
 >
 > ### Open questions for review
 >
@@ -370,9 +494,10 @@
 > `src/udf_glue.cc`. Pinned: the table in
 > `tests/unit` (18 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
 > `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
-> 8.4; and on a server with no keyring, where the function still answers. Not pinned: counts lost
-> by an instance that is neither de-initialised nor raises (issue #43), which no test can produce
-> without poisoning its server.
+> 8.4; and on a server with no keyring, where the function still answers. Pinned since: the counts
+> lost by an instance the server abandons without de-initialising it, which
+> `tests/integration/nested/24_nonraising_kr_inner` produces — the seal inside the leaked instance
+> is not in the answer, and the instance's own figures never fold (issue #43).
 >
 > Amendment A8 and operational constraints 11 and 13 tell every deployment to set a usage budget per
 > key and then say "the component does not count uses", so the operator has no number to compare the
@@ -409,8 +534,9 @@
 >   reinstall within the same second leaves it unchanged, and a clock stepped backwards can make
 >   it earlier. The ledger A8 asks the operator to keep holds the previous value to compare with.
 > - Counts held by an instance that neither raises an error nor is de-initialised are lost. Issue
->   #43 shows the server skipping `deinit` in one shape (observed on 8.4.11 only); the fold in the
->   error row covers the case where the instance itself raised, and nothing covers the rest.
+>   #43 shows the server skipping `deinit` in one shape (observed on 8.0, 8.4 and 9 —
+>   `tests/integration/nested`); the fold in the error row covers the case where the instance
+>   itself raised, and nothing covers the rest.
 >
 > ### Decisions
 >
@@ -681,10 +807,12 @@
 > ### Observed on 2026-10-12 with a throwaway probe component
 >
 > Servers 8.0.46, 8.4.11 and 9.4.0 (the pinned images), the probe built against the 8.0.43, 8.4.11
-> and 9.4.0 trees. **Observed once and not yet pinned**: the probe is not committed, and each row
-> below becomes a committed server test in the implementation PR, the way A7's finding is pinned by
-> `tests/integration/91_*`. Until then these are observations, not guarantees. The three versions
-> gave the same output for every row of the three tables.
+> and 9.4.0 trees. **Observed once, and the tables below are still only an observation**: that
+> throwaway probe was not committed, and no committed test reproduces these rows. A smaller probe is
+> committed instead, as `tests/probe`, and what it pins is the *consequence* of the first table — a
+> call the server evaluates before its bound parameter has a value, and the instance that is then
+> never de-initialised — in `tests/integration/nested/20`–`22` (see "Implementation notes"). The
+> three versions gave the same output for every row of the three tables.
 >
 > | What the function is called with | What `init` sees | What the row function sees |
 > |---|---|---|
@@ -818,38 +946,83 @@
 >   `gcm.strict` ON and OFF across the rows of one statement, under MTR's check that nothing
 >   unexpected reaches the error log.
 >
-> **Observed, not pinned.** The `UDF_INIT` counts in the third table come from the probe's counter
-> and are not reproduced by a committed test. The wipe on the error path is pinned; the wipe in
-> `deinit` is established by reading `free_state`, since after `deinit` the memory is released and
-> there is nothing left for a test to look at.
+> **Observed, not pinned.** The `UDF_INIT` counts in the third table and the argument-visibility
+> rows of the first come from the throwaway probe's counter and are not reproduced by a committed
+> test. A committed probe (`tests/probe`, built by `scripts/build-probe.sh`) counts its own `init`
+> and `deinit` calls instead, and pins the consequence of the first table — the leaked instance of
+> a nested call — in `tests/integration/nested/20`–`22`. The wipe on the error path is pinned; the
+> wipe in `deinit` is established by reading `free_state`, since after `deinit` the memory is
+> released and there is nothing left for a test to look at.
 >
-> **A server defect found on the way, not specific to these functions.** When a loadable function is
-> an argument of another loadable function and takes a prepared-statement parameter, the outer
-> function's `init` evaluates the inner call before the parameter has its value. The inner function
-> sees an empty string: `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE`
-> with a 0-byte key, and the `_kr` form fails with *invalid id*. Two things follow, both observed on
-> 8.4.11 and not tried on 8.0 or 9.4:
+> **A server defect found on the way, not specific to these functions, pinned per major.** A
+> **prepared statement whose re-prepare at `EXECUTE` fails** after a loadable function has been fixed
+> abandons that function's `UDF_INIT`: its de-initialisation function is never called — not at the
+> end of the statement, not on `DEALLOCATE PREPARE`, not when the session ends — and the component
+> cannot be uninstalled until the server restarts. Every function the statement had already fixed is
+> dropped, whichever component it belongs to.
 >
-> - After that error `UNINSTALL COMPONENT` is refused until the server restarts. Seen with the
->   key-argument functions, so it predates this amendment and applies to 0.1.0.
-> - **The inner function's `deinit` is never called** — not at the end of the statement, not on
->   `DEALLOCATE PREPARE`, not when the session ends. A probe that counts its own `init` and `deinit`
->   calls showed three `init`s and one `deinit` after two failing executions. Whatever the inner
->   `UDF_INIT` holds at that moment is neither wiped nor freed for the life of the server. For the
->   key-argument functions that is a result buffer and an unkeyed context: the paths that raise in
->   this shape do so before a key is copied, or wipe it first as A11 requires. For a `_kr` function
->   it could have been the fetched key — for example an inner `gcm_decrypt_kr(?, 'id')`, which reads
->   the key and then rejects the empty envelope — which is why a row that raises an error gives up
->   every secret its `UDF_INIT` holds before it returns ("The key copy", above).
-> - Not every failure around a nested call does this. With the outer function's own `init` failing
->   over a successful inner call — `gcm_decrypt(gcm_encrypt_kr('x', 'id'), 'k', 'a', 'extra')`, an
->   argument-count error — `UNINSTALL COMPONENT` succeeded afterwards. Whether the inner `deinit`
->   ran there was not observed directly; the uninstall succeeding is the only evidence.
+> The trigger is the failed *re-prepare*, not a failure of the statement in general: case `25`'s
+> control is the same prepared form with the failing column first, so its re-prepare fails before the
+> function is ever fixed — it adds one `init` and its own `deinit`, and nothing is kept. A prepared
+> statement is what puts the handler in the (re)prepare state that `udf_handler::cleanup()` returns
+> early from; a plain statement's fix failure was not observed to leak. Until #55's cause was read,
+> the shape issue #43 was filed with (the table below) was described as needing the nesting and a
+> bound parameter.
 >
-> It is not pinned by a committed case, because a case that triggers it leaves the test server
-> unable to uninstall the component for every case after it. It needs its own issue. Until then: do
-> not nest one of these functions inside another with a bound parameter (operational constraint
-> 18). Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
+> The cause was read from the 8.0.43, 8.4.11 and 9.4.0 sources and is recorded, with a
+> self-contained reproducer, in `docs/upstream-udf-handler-leak.md`: `udf_handler::fix_fields`
+> defers its own RAII release as soon as the handler is worth keeping, which leaves
+> `udf_handler::cleanup()` as the only way back — and that one returns early while the statement is
+> being (re)prepared, because the handler is meant to survive into the execution that a failing
+> prepare never reaches.
+>
+> The first shape found, and the one issue #43 was filed with, is a function that is an argument of
+> another and takes a prepared-statement parameter: the outer function's `init` evaluates the inner
+> call before the parameter has its value, the inner sees an empty string, and
+> `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE` with a 0-byte key (the
+> `_kr` form fails with *invalid id*). Nesting, the bound parameter and the raising are all
+> **incidental** — what the leak needs is the failed re-prepare — and three cases added after the first
+> review show it: a *sibling* function in the same select list, a key-id instance that raises
+> nothing at all, and a plain `ALTER TABLE` re-prepare with no nesting and no parameter.
+>
+> `tests/integration/nested/*.sql` are run by `scripts/verify-nested.sh <major>` on a throwaway
+> server — a case that triggers the defect leaves the component unable to uninstall for every case
+> after it, so it cannot live in `scripts/verify.sh` — and their expected output is recorded per
+> major. Measured on the pinned images (8.0.46, 8.4.11 and 9.4.0). The per-major difference is
+> always the same one: on 8.0 the failing statement's *outer* function runs its own `init` — and
+> leaks it — where 8.4 and 9 abort before it, so the cases that contain an outer function's `init`
+> (`20`, `23`, `24`, `26`) show it in their counts, and the other cases are identical across the
+> three:
+>
+> | Case | Shape | Result |
+> |---|---|---|
+> | `10_prepared_decrypt_of_encrypt` | `gcm_decrypt(gcm_encrypt(?, ?), ?)`, prepared | the inner sees a 0-byte key; `UNINSTALL COMPONENT` refused afterwards |
+> | `11_prepared_decrypt_of_det` | the same, inner deterministic | same |
+> | `12_literal_det_bad_key`, `13_literal_encrypt_bad_key` | a literal inner whose key is one byte | inner key error; uninstall succeeds |
+> | `14_user_variable` | the inner plaintext in a user variable | round-trips; uninstall succeeds |
+> | `15_row_time_column_failure` | the inner key from a column, failing on the second row | row-time error; uninstall succeeds |
+> | `16_outer_init_fails` | the outer's own `init` fails over a successful `_kr` inner | argument-count error; uninstall succeeds |
+> | `17_kr_reseal_chain` | A15's re-seal shape with `?` in every key-id position | round-trips; uninstall succeeds |
+> | `20_probe_nested_bound` | the test-only probe instead of the crypto functions, prepared inner, two `EXECUTE`s | the inner's `init` runs twice with no deinit and the uninstall is refused; on 8.0 the outer leaks too |
+> | `21_probe_nested_literal`, `22_probe_direct_bound` | the probe with literals, or a `?` on a direct call | every `init` paired with its `deinit`; uninstall succeeds |
+> | `23_sibling_leak` | a sibling function beside one whose inner raises, no nesting | the sibling's `init` has no `deinit`; uninstall refused |
+> | `24_nonraising_kr_inner` | a key-id seal that succeeds inside an outer function, another item raising | the seal is never counted and the instance that holds the key is never de-initialised; `UNINSTALL COMPONENT gcm` refused |
+> | `25_ddl_reprepare` | `PREPARE … 'SELECT probe_outer(d), c FROM t'`, then `ALTER TABLE … DROP COLUMN c` and a second `EXECUTE` | `probe_outer` reaches two `init`s and one `deinit` — the failed re-prepare kept the handler it had fixed — and the control, the same prepared form with the failing column first, adds one `init` and its own `deinit` |
+> | `26_probe_nested_bound_const` | case `20` with the probe's `const_item` variant | the same counts as `20` |
+>
+> Two consequences are worth separating, because the component can act on only one of them:
+>
+> - **The leaked instance is held for the life of the server.** Nothing to change in the component:
+>   it is the server's, and the fix belongs in `sql/item_func.cc` (the two points are named in
+>   `docs/upstream-udf-handler-leak.md`).
+> - **The instance may hold secrets.** Amendment A16 gives up the secrets of the instance that
+>   *raises* an error; one the server abandons **without** an error keeps what it holds, a key
+>   fetched from the keyring included. Case `24` measures the visible half of that (the seal is
+>   never counted); whether the component could do more — at the price of the cross-row reuse
+>   A11 and A13 exist for — is an open design question, and A16 states the limit rather than
+>   implying a guarantee it cannot give.
+>
+> Operational constraint 18 carries the rule for users.
 >
 > **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
 > backward compatible: no envelope a released build wrote or reads is affected.
@@ -871,8 +1044,12 @@
 > The defect above was diagnosed from the 8.0.43, 8.4.11 and 9.4.0 sources and cross-checked against
 > the probe's counts. The full account — the code, the per-major difference and a self-contained
 > reproducer — is `docs/upstream-udf-handler-leak.md`, a draft that is not submitted anywhere.
-> In one paragraph: the failure happens while the *outer* function's `init` is running.
-> `udf_handler::call_init_func` evaluates a constant argument by calling `args[i]->val_str(...)`, and
+> In one paragraph: the leaked handler is one the statement had already fixed, and the release path,
+> `udf_handler::cleanup()`, returns early while the statement is being (re)prepared — by design, so
+> that the handler survives into the execution that a failing (re)prepare never reaches. The first
+> shape found, and the one issue #43 was filed with, fails while the *outer* function's `init` is
+> running: `udf_handler::call_init_func` evaluates a constant argument by calling
+> `args[i]->val_str(...)`, and
 > for an argument that is itself a loadable function that is the inner function's row callback — with
 > the bound parameter still valueless, which is the empty string the inner sees. The inner's
 > `udf_handler` was already fixed, and its RAII release was **deferred** (`udf_fun_guard.defer()`,
@@ -1094,9 +1271,11 @@
 > - On **every** failure of the cipher operation — an OpenSSL error at any step, and `bad_tag` — the
 >   copy is cleansed and the context is forgotten. The next row starts from scratch and never trusts a
 >   context that has just reported an error. The pre-checks that return *before* the context is
->   consulted — a key length no suite has, a malformed envelope — leave it intact: a wrong-length key
->   on one row is that row's SQL error, not a reason to discard a valid schedule. The nonce-key cache
->   follows the same rule: forgotten on an HMAC failure, untouched by a `bad_key_len` pre-check.
+>   consulted — a key length no suite has, a malformed envelope — do not touch it while the call runs
+>   (a wrong-length key on one row is that row's SQL error, not a reason to discard a valid schedule
+>   *mid-call*), and the call then raises, which gives up the copy, the context, the nonce key and the
+>   result buffer at once (amendment A16, above). The nonce-key cache follows the same rule: forgotten
+>   on an HMAC failure, and given up by the row that raises.
 > - `deinit` cleanses both.
 > - When the key is forgotten, the context is reset as well: the key schedule inside the
 >   `EVP_CIPHER_CTX` is key-equivalent material and does not outlive the copy it was made from.
@@ -1132,12 +1311,18 @@
 > copy and its derived material lived for one operation, one row. After it, the **last key used**
 > by a UDF item — its copy, its schedule in the context, and for the deterministic variant its
 > `nonce_key` — lives until a row reaches the cipher with a different key or suite, a cipher
-> operation fails, or the item's `deinit` at the end of the execution. Rows that never reach the
-> cipher do not replace it: a NULL argument, an over-long one, a malformed envelope, a key length no
-> suite has, and a legacy `0x01` envelope (which never uses the session) all leave the previous key
-> in place. The bound is unchanged — nothing outlives the execution — but "the next row" is not
-> always what ends it. How much that adds depends on where the key comes from,
-> and the two cases are not the same:
+> operation fails, or the item's `deinit` at the end of the execution. Two kinds of row leave the
+> previous key in place without using the cipher: a NULL argument, and a legacy `0x01` envelope that
+> opens (one that fails raises, and a row that raises gives the whole state up — amendment A16,
+> above). Every other row that does not reach the cipher for real raises — an over-long argument, a
+> malformed envelope, a key length no suite has — and a row that raises gives the whole state up
+> (A16, above). Inside the execution the bound is unchanged — the next row, or the row that raises,
+> ends the retention — but an instance the *server* abandons without calling `deinit` **and without
+> an error** does not end at all: it keeps what it holds, this copy included, for the life of the
+> server. That is the defect of issue #43, pinned by
+> `tests/integration/nested/24_nonraising_kr_inner`, and neither A11
+> nor A16 can close it from inside a row callback. How much the retention adds depends on where the
+> key comes from, and the two cases are not the same:
 >
 > - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
 >   bound parameter. This is the usage the README documents. The server already holds that key for

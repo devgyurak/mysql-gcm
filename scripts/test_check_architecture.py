@@ -1,4 +1,4 @@
-"""Regression checks for scripts/check-architecture.py's fault-macro rule."""
+"""Regression checks for scripts/check-architecture.py's fault-macro and probe rules."""
 
 import importlib.util
 import shutil
@@ -82,6 +82,36 @@ class FaultMacro(unittest.TestCase):
         problems = checker.fault_macro_problems(root)
         # Then
         self.assertEqual(problems, [])
+        shutil.rmtree(root)
+
+
+class ProbeNotShipped(unittest.TestCase):
+    def test_given_the_repository_when_checked_then_the_reserved_name_is_absent(self) -> None:
+        # Given: src/ and docker/ as committed, which name the probe nowhere.
+        root = ROOT
+        # When
+        problems = checker.probe_problems(root)
+        # Then
+        self.assertEqual(problems, [])
+
+    def test_given_a_component_source_naming_the_probe_when_checked_then_refused(self) -> None:
+        # Given: the plausible slip of pointing a component source at the scaffolding.
+        root = tree_with("src/udf_glue.cc", "// value mirrored from tests/probe")
+        # When
+        problems = checker.probe_problems(root)
+        # Then
+        self.assertEqual(len(problems), 1)
+        self.assertIn("src/udf_glue.cc", problems[0])
+        shutil.rmtree(root)
+
+    def test_given_a_docker_build_copying_the_probe_when_checked_then_refused(self) -> None:
+        # Given: a Docker build step that would carry the scaffolding into an image.
+        root = tree_with("docker/build-component.sh", 'cp -r tests/probe "$MYSQL_SRC/components/"')
+        # When
+        problems = checker.probe_problems(root)
+        # Then
+        self.assertEqual(len(problems), 1)
+        self.assertIn("docker/build-component.sh", problems[0])
         shutil.rmtree(root)
 
 

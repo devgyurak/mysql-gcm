@@ -13,7 +13,10 @@ usage() {
 ver="$1"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-name="mysql-dev-${ver}"
+# GCM_DEV_NAME renames the container. scripts/verify-nested.sh uses it to get the
+# keyring setup below on a throwaway container without touching the development
+# server; the default is the name it has always had.
+name="${GCM_DEV_NAME:-mysql-dev-${ver}}"
 
 image="$(
   python3 - "${root}/docker/versions.json" "${ver}" <<'PY'

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* gcm_decrypt: argument checks, the utf8mb4 result tag that makes native LIKE
-   work, and the one place gcm.strict changes an outcome.
+   work, the one place gcm.strict changes an outcome, and the rule that a row which
+   raises gives up everything the item held before it returns (design A16).
    The envelope and the cryptography live in gcm.cc (component-src rule). */
 
 #include <cstddef>
@@ -57,18 +58,28 @@ char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *l
     return nullptr;
   }
 
+  /* design A16: this item has already raised an error and given up the context it
+     was scheduled with. The server makes no further row call after an error; one
+     made anyway is refused rather than served from what was released. */
+  if (gcm::refuse_if_spent(state, "gcm_decrypt")) {
+    *error = 1;
+    return nullptr;
+  }
+
   const Bytes envelope = gcm::arg_bytes(args, 0);
   const Bytes key = gcm::arg_bytes(args, 1);
   const Bytes aad = gcm::optional_arg_bytes(args, 2);
 
   if (gcm::too_long(envelope.size) || gcm::too_long(aad.size)) {
     gcm::raise_too_long("gcm_decrypt", envelope.size > aad.size ? envelope.size : aad.size);
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
 
   if (gcm::reserve(state, gcm::decrypt_out_len(envelope.size) + 1)) {
     gcm::raise_message("gcm_decrypt", "out of memory");
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }
@@ -88,6 +99,7 @@ char *gcm_decrypt_udf(UDF_INIT *initid, UDF_ARGS *args, char *, unsigned long *l
     /* bad_envelope and bad_key_len stay errors under strict=OFF: corrupt data
        and misconfiguration are not hidden by a setting (§4 rule 2). */
     gcm::raise("gcm_decrypt", err, key.size, envelope.size);
+    gcm::give_up_secrets(state);
     *error = 1;
     return nullptr;
   }

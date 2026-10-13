@@ -14,7 +14,9 @@ usage() {
 ver="$1"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-name="mysql-dev-${ver}"
+# Must match what scripts/dev-up.sh below creates, including a GCM_DEV_NAME override
+# (scripts/verify-nested.sh relies on the same variable).
+name="${GCM_DEV_NAME:-mysql-dev-${ver}}"
 so="${root}/build/${ver}/component_gcm.so"
 outdir="${root}/build/${ver}"
 

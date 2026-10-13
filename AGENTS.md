@@ -94,6 +94,9 @@ src/                           The component (C++17)
   sysvar.{h,cc}                Registering and reading gcm.strict — the session scope is 9.0+ only (amendment A5)
 tests/unit/                    GoogleTest — gcm/envelope/nonce/usage, linking libcrypto alone with no server
 tests/integration/             Real-server SQL scenarios on docker (sql + expected)
+tests/integration/nested/      issue #43 nested-function cases, per-major expected, run by scripts/verify-nested.sh
+tests/probe/                   Test-only component pinning issue #43. Not shipped: scripts/check-architecture.py
+                               refuses the reserved name under src/ and docker/
 mysql-test/suite/gcm/          MTR .test/.result (run from a server source tree build)
 tests/e2e/                     compose: mysql (ROW) + replica + a Python SQL runner → LIKE / replication / dual-read
 tests/load/                    Load: decrypt + LIKE over 10k/100k/300k rows, with a regression gate against AES_DECRYPT
@@ -101,6 +104,8 @@ tests/bench/                   Core micro-benchmarks (Google Benchmark) — rati
 tests/adapter/                 The component install and uninstall paths — failure injected through stub services, inside the build image
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
   verify-bare.sh               The same kind of check on a throwaway server with no keyring (amendment A13)
+  build-probe.sh               Builds the test-only probe component (tests/probe) inside the build image
+  verify-nested.sh             Runs tests/integration/nested on a throwaway server (issue #43)
   bench.sh                     Builds and runs the core micro-benchmarks and the ratio gate
   adapter-tests.sh             Verifies the install and uninstall paths against stub services (reusing the build image)
   unit-in-docker.sh            Runs the unit tests on the same GCC and ubuntu as CI (catching what the host clang lets through)
@@ -130,6 +135,7 @@ site/                          Landing page and docs site (Astro Starlight, Node
 | Unit tests | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` | `unit-tests` |
 | Integration smoke | `scripts/verify.sh 8.4` (installs the .so in a container, then diffs the SQL scenarios) | `integration-tests` |
 | Integration, no keyring | `scripts/verify-bare.sh 8.4` (a throwaway server without a keyring: install, the key-id functions fail cleanly, uninstall) | `integration-tests` |
+| Nested UDF defect | `scripts/build-probe.sh 8.4` then `scripts/verify-nested.sh 8.4` (a throwaway server: per-major cases for issue #43) | `integration-tests` |
 | MTR | `scripts/mtr.sh 8.4` (`GCM_RECORD=1` re-records the `.result` files) | `integration-tests` |
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |
 | Load | `python tests/load/run.py --rows 300000 --baseline aes` | `e2e-load-tests` |
@@ -151,7 +157,9 @@ different build method on your own.
   `OPENSSL_cleanse` the key and plaintext buffers. The per-`UDF_INIT` key copies amendment A11 allows
   (beside `gcm_decrypt`'s scheduled context and `gcm_encrypt_det`'s nonce key), and the key a `_kr`
   function fetched from the keyring (amendment A13), are the exceptions, on the conditions in
-  `crypto-safety.md` "Key handling".
+  `crypto-safety.md` "Key handling". In all six functions a row that raises gives up everything the
+  instance holds — a fetched key, both A11 states and the result buffer — before it returns
+  (amendment A16); never leave that to `deinit`.
 - A tag verification failure is an error when `gcm.strict=ON`. Do not swallow it as NULL. Never return
   unauthenticated plaintext.
 - The key length is 32, 24 or 16 bytes and selects the suite (amendment A10); the two encryption

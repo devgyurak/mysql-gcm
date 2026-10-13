@@ -8,7 +8,10 @@
 
 > ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
 >
-> **Status: proposed (issue #43, PR review recorded below). Nothing is implemented by this
+> **Status: proposed (issue #43; PR review recorded below). This revision — 2026-10-13, after the
+> review of the whole #51–#55 stack — widens what the amendment *says*: the review measured that the
+> same server defect also drops instances that raise **nothing**, so the guarantee below is scoped to
+> the row that raised and the limit is stated rather than implied. Nothing is implemented by this
 > amendment; the implementation follows in its own PR.** A13 gave the three `_kr` functions this
 > rule. This gives it to the three key-argument functions as well, and says why the cost is zero.
 >
@@ -35,9 +38,10 @@
 > - the result buffer, which at that moment may still hold the previous row's output — plaintext
 >   for the two decrypt functions, an envelope for the four encrypt ones.
 >
-> The instance is then **spent**: a further call on it raises instead of using a released session.
-> The latch is what makes the wipe observable, because no such call can be made except by a test
-> (the reason is read in the sources, not pinned — see the paragraph below).
+> The instance is then **spent**: a further call on it raises instead of using a released session. (A
+> NULL argument still yields SQL NULL — the NULL check comes first and consults no session,
+> spec/envelope.md §4 rule 3.) The latch is what makes the wipe observable, because no such call can
+> be made except by a test (the reason is read in the sources, not pinned — see the paragraph below).
 >
 > **Why the cost is zero.** A11's invariant list lets a pre-check failure leave the schedule intact,
 > on the grounds that "a wrong-length key on one row is that row's SQL error, not a reason to
@@ -62,12 +66,20 @@
 >   behind.
 > - **`deinit` is still the normal exit** and still cleanses everything (A11). A16 removes the
 >   reliance on `deinit` from the error path only.
+> - **The row that raised, and only it.** The rule fires from a row callback, so it can cover only
+>   an instance whose row reports an error. The same server defect also drops instances that raise
+>   *nothing* — a sibling of the function that raised, a key-id instance that sealed successfully,
+>   any function a failed re-prepare abandons — and the component never regains control of those, so
+>   what they hold stays, a fetched keyring key included. No row callback can close that; whether it
+>   could be reduced at the price of the cross-row reuse A11 and A13 exist for is an open question,
+>   and this amendment states the limit rather than implying a guarantee it cannot give. Cases `23`
+>   to `26` of `tests/integration/nested` pin it.
 > - **It does not fix the server defect.** A leaked instance is still leaked, and `UNINSTALL
->   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked **per-instance
->   state** holds no key material, no plaintext and no usable context; the server's own argument
->   buffers are outside the component's reach, as A11 already says. The defect is issue #43, pinned
->   by `tests/integration/nested` and summed up in operational constraint 18; a fix would be the
->   server's.
+>   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked per-instance
+>   state **of an instance whose row raised** holds no key material, no plaintext and no usable
+>   context; the server's own argument buffers are outside the component's reach, as A11 already
+>   says. The defect is issue #43, pinned by `tests/integration/nested` and summed up in operational
+>   constraint 18; a fix would be the server's.
 > - **`init` failures are not part of it.** A9's rollback already frees what `init` allocated; A16 is
 >   about the row callback.
 >
@@ -91,6 +103,12 @@
 > review the server-side claim — that is the next PR's subject — and this is not a human
 > cryptographic review.
 >
+> **Second review (2026-10-13, the whole #51–#55 stack).** It measured a wider scope than the record
+> above assumed: a *sibling* function, a key-id instance that raised nothing (whose seal is then
+> never counted) and a re-prepare invalidated by `ALTER TABLE` — no nesting, no parameter, no error —
+> all leak the same way. The guarantee above is therefore scoped to the instance whose row raised,
+> the limit is stated, and `tests/integration/nested` gained cases `23` to `26` for the shapes.
+>
 > **Impact, for the implementation PR:**
 >
 > | Area | Change |
@@ -102,7 +120,8 @@
 > | `src/usage.cc` | unchanged: the error row still folds what the instance counted (A14) |
 > | `spec/envelope.md` | the error-path rule moves into §4 and becomes normative for the three key-argument functions (§4.2 rule 7 currently states it only for the key-id ones). One sentence; no byte layout and no vector change |
 > | `architecture.md` §3, §5 | both still say a `_kr` function's key is what a raising row wipes; they have to say all six |
-> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | "the key-id functions therefore wipe everything their instance holds" becomes "every function does" |
+> | `docs/design.md` A13's "Implementation notes" and its KO mirror | the defect's scope is corrected there: the nesting, the bound parameter and the error are incidental, and cases `23` to `26` pin the wider shapes (done in the PR that records the sweep) |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | constraint 18 is restated around the real trigger — a statement's fix or re-prepare that fails after a function has been fixed — and says that an instance abandoned *without* an error keeps what it holds, this amendment's rule notwithstanding (done in the same PR) |
 > | `CHANGELOG.md` | a Documented entry, as A15 has |
 > | `crypto-safety.md` (key handling), `.agents/rules/code-review.md`, `AGENTS.md` §5 | the wipe is unconditional on the error path, for all six |
 
@@ -1171,7 +1190,7 @@
 >   consulted — a key length no suite has, a malformed envelope — do not touch it while the call runs
 >   (a wrong-length key on one row is that row's SQL error, not a reason to discard a valid schedule
 >   *mid-call*), and the call then raises, which gives up the copy, the context, the nonce key and the
->   result buffer at once (amendment A16 below). The nonce-key cache follows the same rule: forgotten
+>   result buffer at once (amendment A16, above). The nonce-key cache follows the same rule: forgotten
 >   on an HMAC failure, and given up by the row that raises.
 > - `deinit` cleanses both.
 > - When the key is forgotten, the context is reset as well: the key schedule inside the
@@ -1210,11 +1229,15 @@
 > `nonce_key` — lives until a row reaches the cipher with a different key or suite, a cipher
 > operation fails, or the item's `deinit` at the end of the execution. Two kinds of row leave the
 > previous key in place without using the cipher: a NULL argument, and a legacy `0x01` envelope that
-> opens (one that fails raises, and a row that raises gives the whole state up — amendment A16). Every other row that does not reach the cipher for real
-> raises — an over-long argument, a malformed envelope, a key length no suite has — and a row that
-> raises gives the whole state up (amendment A16 below). The bound is unchanged — nothing outlives
-> the execution — but "the next row" is not always what ends it. How much that adds depends on
-> where the key comes from, and the two cases are not the same:
+> opens (one that fails raises, and a row that raises gives the whole state up — amendment A16,
+> above). Every other row that does not reach the cipher for real raises — an over-long argument, a
+> malformed envelope, a key length no suite has — and a row that raises gives the whole state up
+> (A16, above). Inside the execution the bound is unchanged — the next row, or the row that raises,
+> ends the retention — but an instance the *server* abandons without calling `deinit` does not end
+> at all: it keeps what it holds, this copy included, for the life of the server. That is the
+> defect of issue #43, pinned by `tests/integration/nested/24_nonraising_kr_inner`, and neither A11
+> nor A16 can close it from inside a row callback. How much the retention adds depends on where the
+> key comes from, and the two cases are not the same:
 >
 > - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
 >   bound parameter. This is the usage the README documents. The server already holds that key for

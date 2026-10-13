@@ -95,12 +95,16 @@ void fold_usage(UdfState *state);
 /* Gives up every secret this instance holds and marks it spent (design A16): the
    fetched key, the A11 context, the A11 nonce key and the result buffer, at once,
    without waiting for deinit. Every row callback of every crypto UDF calls this
-   before it reports an error, and nothing is lost by it — the server does not enter
-   the row callback again once the function has raised, and deinit cannot be relied
-   on, because a loadable function that raises while an outer one is being initialised
+   before it returns, and nothing is lost by it — the server does not enter the row
+   callback again once the function has raised, and deinit cannot be relied on,
+   because a loadable function that raises while an outer one is being initialised
    never gets its deinit (design A13, "Implementation notes"); what it held would stay
    in memory, unwiped, for the life of the server. A row that ends in a NULL — a NULL
-   argument, or gcm.strict=OFF on a bad tag — is not an error and does not call this. */
+   argument, or gcm.strict=OFF on a bad tag — is not an error and does not call this.
+
+   This covers the instance that raised. One the server abandons *without* an error —
+   the same leak drops those too (design A16, "What the rule does not reach") — keeps
+   what it held, keyring key included; the component never regains control of it. */
 void give_up_secrets(UdfState *state);
 
 /* The refusal such a call gets when it is made anyway: true when it refused, after

@@ -790,10 +790,10 @@ TEST_F(KrUdf, GivenARowRaisedAnError_WhenTheItemIsCalledAgain_ThenRefusedWithout
   gcm_decrypt_kr_deinit(&opener);
 }
 
-/* The error row of the three key-argument functions (design A16): the same rule the
-   *_kr cases above pin, for the item whose key is in the statement text. */
+/* The error row of the three key-argument functions (design A16). */
 
-TEST_F(KrUdf, GivenADecryptItemWithAScheduledContext_WhenARowRaisesATagError_ThenTheContextIsReleased) {
+TEST_F(KrUdf,
+       GivenADecryptItemWithAScheduledContext_WhenARowRaisesATagError_ThenTheContextIsReleased) {
   // Given: a good row left the context scheduled and a plaintext in the result buffer
   const std::string good = seal(kName);
   std::string bad = good;
@@ -844,7 +844,8 @@ TEST_F(KrUdf, GivenADecryptItemHeldAKeyCopy_WhenTheNextRowIsMalformed_ThenThePre
   gcm_decrypt_deinit(&opener);
 }
 
-TEST_F(KrUdf, GivenADeterministicItemWithACachedNonceKey_WhenTheNextRowIsBelowTheFloor_ThenBothKeysGo) {
+TEST_F(KrUdf,
+       GivenADeterministicItemWithACachedNonceKey_WhenTheNextRowIsBelowTheFloor_ThenBothKeysGo) {
   // Given: gcm_encrypt_det cached its nonce key and the key copy it belongs to (A11)
   const std::string key16(16, '\x01');
   Args good_row(&kName, &kKey32);
@@ -867,7 +868,8 @@ TEST_F(KrUdf, GivenADeterministicItemWithACachedNonceKey_WhenTheNextRowIsBelowTh
   gcm_encrypt_det_deinit(&item);
 }
 
-TEST_F(KrUdf, GivenAnEncryptItemHeldAnEnvelope_WhenTheNextRowIsOverTheArgumentLimit_ThenTheBufferIsWiped) {
+TEST_F(KrUdf,
+       GivenAnEncryptItemHeldAnEnvelope_WhenTheNextRowIsOverTheArgumentLimit_ThenTheBufferIsWiped) {
   // Given: a good row, so the buffer holds an envelope; the check reads the declared
   //        length, so no 2 GB value is needed
   Args good_row(&kName, &kKey32);
@@ -953,6 +955,52 @@ TEST_F(KrUdf, GivenAnEncryptItemThatRaisedAnError_WhenTheRowCallbackIsCalledAgai
   EXPECT_EQ(second.error, 1);
   EXPECT_EQ(error_messages().back(), kSpent);
   gcm_encrypt_deinit(&item);
+}
+
+TEST_F(KrUdf,
+       GivenADecryptItemHeldAPlaintext_WhenTheNextRowIsOverTheArgumentLimit_ThenTheBufferIsWiped) {
+  // Given: a good row left a plaintext in the buffer; the check reads the declared
+  //        length only, so no 2 GB value is needed
+  const std::string envelope = seal(kName);
+  Args good_row(&envelope, &kKey32);
+  Args over_row(&envelope, &kKey32);
+  over_row.lengths[0] = static_cast<unsigned long>(gcm::kMaxArgLen) + 1;
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_init(&opener, &good_row.args, message_)) << message_;
+  ASSERT_TRUE(call(gcm_decrypt_udf, &opener, &good_row).returned);
+
+  // When
+  const Row row = call(gcm_decrypt_udf, &opener, &over_row);
+
+  // Then: this failure never reaches the core, so only the error row can have wiped it
+  EXPECT_EQ(row.error, 1);
+  EXPECT_TRUE(state_of(opener)->spent);
+  EXPECT_TRUE(all_zero(state_of(opener)->out, state_of(opener)->capacity));
+  gcm_decrypt_deinit(&opener);
+}
+
+TEST_F(KrUdf,
+       GivenADeterministicItemHeldAnEnvelope_WhenTheNextKeyIsFiveBytes_ThenTheSealErrorWipesIt) {
+  // Given: a good row, then a key length no suite has — the floor does not answer for
+  //        it, so the failure comes back from the cipher
+  const std::string key5(5, '\x02');
+  Args good_row(&kName, &kKey32);
+  Args bad_row(&kName, &key5);
+  UDF_INIT item{};
+  ASSERT_FALSE(gcm_encrypt_det_init(&item, &good_row.args, message_)) << message_;
+  ASSERT_TRUE(call(gcm_encrypt_det_udf, &item, &good_row).returned);
+
+  // When
+  const Row row = call(gcm_encrypt_det_udf, &item, &bad_row);
+
+  // Then
+  EXPECT_EQ(row.error, 1);
+  EXPECT_EQ(error_messages().back(),
+            std::string("key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on "
+                        "decryption must match the envelope version; got 5"));
+  EXPECT_TRUE(state_of(item)->spent);
+  EXPECT_TRUE(all_zero(state_of(item)->out, state_of(item)->capacity));
+  gcm_encrypt_det_deinit(&item);
 }
 
 /* gcm.min_key_bytes is an encryption-side policy: both encryption functions, and only they. */

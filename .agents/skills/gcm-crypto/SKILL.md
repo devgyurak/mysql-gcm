@@ -68,6 +68,8 @@ Error open(const uint8_t key[32], const uint8_t nonce[12], span ct, span aad, co
   cleansed and forgotten on any cipher-operation failure (`bad_tag` included; the `bad_key_len` and
   `bad_envelope` pre-checks leave it alone), cleansed in `deinit`, and never shared —
   the full list is in `crypto-safety.md` "Key handling" and design A11. `gcm_encrypt` stays per call.
+  Under amendment A16 a row that raises gives the whole `UDF_INIT` up — that context included —
+  rather than waiting for a `deinit` the server does not always call.
 
 ## Tests that must come with it (the unit-tests skill, GWT)
 Convert the IV-96 / tag-128 cases from the NIST CAVP `gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp`

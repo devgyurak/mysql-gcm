@@ -50,10 +50,11 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as
   soon as a failure is latched.
 - **A row that raises gives up every secret the `UDF_INIT` holds (amendment A16).** All six crypto
-  functions, not only the `_kr` three: before it returns, the fetched key, the A11 context
-  with its key copy, the A11 nonce key and the result buffer are cleansed and released, and the
-  instance is marked spent, so a call made afterwards is refused rather than served from what was
-  released. Nothing may depend on `deinit` for such a row — the server does not always call it (A13,
+  functions, not only the `_kr` three: before it returns, the fetched key, the A11 context with its
+  key copy and the A11 nonce key are cleansed and released, the result buffer's contents are
+  cleansed (the buffer itself stays allocated for the next row's output and is freed in `deinit`),
+  and the instance is marked spent, so a call made afterwards is refused rather than served from
+  what was released. Nothing may depend on `deinit` for such a row — the server does not always call it (A13,
   "Implementation notes") — nor on being called again, which it does not do either. A row that ends
   in NULL — a NULL argument, or a `bad_tag` under `gcm.strict=OFF` — is not an error and is not
   covered: it keeps what the next row needs, the `_kr` key included. This is the rule for the

@@ -8,11 +8,17 @@
 
 > ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
 >
-> **Status: proposed (issue #43; PR review recorded below). This revision — 2026-10-13, after the
-> review of the whole #51–#55 stack — widens what the amendment *says*: the review measured that the
-> same server defect also drops instances that raise **nothing**, so the guarantee below is scoped to
-> the row that raised and the limit is stated rather than implied. Nothing is implemented by this
-> amendment; the implementation follows in its own PR.** A13 gave the three `_kr` functions this
+> **Status: implemented and merged (issue #43; PRs #53 and #54, 2026-10-13, merged by the repository
+> owner after the reviews recorded below).** The rule is `give_up_secrets` in `src/udf_glue.cc`,
+> called by every row callback of all six functions; the refusal is `refuse_if_spent` beside it.
+> Pinned: `tests/adapter/udf_kr_test.cc` (the wipes, the refusal, and the two paths that were
+> unpinned until the second review) and `tests/integration/nested` (cases 20 to 26, per major).
+> Measured: `scripts/bench.sh --gate` on the merge, and the ASan/UBSan adapter run recorded on #54.
+> The server cause is read in `docs/upstream-udf-handler-leak.md`. **This revision — made while it
+> was still proposed — widened what the amendment *says*: the review of the whole #51–#55 stack
+> measured that the same server defect also drops instances that raise **nothing**, so the guarantee
+> is scoped to the row that raised and the limit is stated rather than implied.** A13 gave the three
+> `_kr` functions this
 > rule. This gives it to the three key-argument functions as well, and says why the cost is zero.
 >
 > A13's "The key copy" already requires it of a `_kr` row that raises: the fetched key, the A11

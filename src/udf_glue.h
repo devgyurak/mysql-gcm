@@ -103,8 +103,8 @@ void fold_usage(UdfState *state);
    argument, or gcm.strict=OFF on a bad tag — is not an error and does not call this.
 
    This covers the instance that raised. One the server abandons *without* an error —
-   the same leak drops those too (design A16, "What the rule does not reach") — keeps
-   what it held, keyring key included; the component never regains control of it. */
+   the same leak drops those too (design A16, "The row that raised, and only it") —
+   keeps what it held, keyring key included; the component never regains control of it. */
 void give_up_secrets(UdfState *state);
 
 /* The refusal such a call gets when it is made anyway: true when it refused, after

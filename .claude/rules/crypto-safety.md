@@ -51,13 +51,17 @@ This whole project is "make AEAD safe inside a MySQL server". Nothing below is n
   entry is wiped from the scratch buffer before the read returns, and the fetched key is wiped as
   soon as a failure is latched.
 - **A row that raises gives up every secret the `UDF_INIT` holds (amendment A16).** All six crypto
-  functions, not only the `_kr` three: before the error is reported, the fetched key, the A11 context
+  functions, not only the `_kr` three: before it returns, the fetched key, the A11 context
   with its key copy, the A11 nonce key and the result buffer are cleansed and released, and the
   instance is marked spent, so a call made afterwards is refused rather than served from what was
   released. Nothing may depend on `deinit` for such a row — the server does not always call it (A13,
   "Implementation notes") — nor on being called again, which it does not do either. A row that ends
   in NULL — a NULL argument, or a `bad_tag` under `gcm.strict=OFF` — is not an error and is not
-  covered: it keeps what the next row needs, the `_kr` key included.
+  covered: it keeps what the next row needs, the `_kr` key included. This is the rule for the
+  instance whose **row raised**, and only that one: an instance the server abandons *without* an
+  error — the same server defect drops those too (design A16, "The row that raised, and only it",
+  and `tests/integration/nested/23` to `26`) — keeps everything it held, a fetched keyring key
+  included, and this component cannot reach it from a row callback.
 - Derive the deterministic nonce key as `HMAC-SHA256(key, "mysql-gcm/v1/det-nonce")`. Never use the
   encryption key directly as an HMAC key (domain separation). The label string is a single constant in
   `nonce.h`.

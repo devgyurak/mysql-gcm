@@ -110,7 +110,7 @@
 > | `spec/envelope.md` | 에러 경로 규칙이 §4 로 올라가 키 인자 함수 세 개에 대해서도 규범이 된다(지금은 §4.2 규칙 7 이 키 id 함수에 대해서만 적는다). 문장 하나; 바이트 레이아웃과 벡터 변경 없음 |
 > | `architecture.md` §3, §5 | 둘 다 아직 "_kr 함수의 키를 에러 행이 지운다" 고 적는다; 여섯 모두라고 적어야 한다 |
 > | `docs/design.md` A13 의 "구현 기록" 과 그 KO 미러 | 결함의 범위를 거기서 고친다: 중첩·바인딩 인자·에러는 부수적이고, 케이스 `23`~`26` 이 넓은 형태들을 고정한다 (스윕을 기록하는 PR 에서) |
-> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | 제약 18 을 실제 발동 조건 — 함수가 fix 된 뒤 문장의 fix 나 재-prepare 가 실패하는 것 — 으로 다시 쓰고, 에러 **없이** 버려진 인스턴스는 이 개정의 규칙에도 불구하고 들고 있던 것을 그대로 둔다고 적는다 (같은 PR 에서) |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | 제약 18 을 실제 발동 조건 — 함수가 fix 된 뒤 prepared statement 의 재-prepare 가 실패하는 것 — 으로 다시 쓰고, 에러 **없이** 버려진 인스턴스는 이 개정의 규칙에도 불구하고 들고 있던 것을 그대로 둔다고 적는다 (같은 PR 에서) |
 > | `CHANGELOG.md` | A15 처럼 Documented 항목 하나 |
 > | `crypto-safety.md`(키 취급), `.agents/rules/code-review.md`, `AGENTS.md` §5 | 에러 경로의 삭제가 여섯 함수 모두에서 무조건이다 |
 

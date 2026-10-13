@@ -124,7 +124,7 @@
 > | `spec/envelope.md` | the error-path rule moves into §4 and becomes normative for the three key-argument functions (§4.2 rule 7 currently states it only for the key-id ones). One sentence; no byte layout and no vector change |
 > | `architecture.md` §3, §5 | both still say a `_kr` function's key is what a raising row wipes; they have to say all six |
 > | `docs/design.md` A13's "Implementation notes" and its KO mirror | the defect's scope is corrected there: the nesting, the bound parameter and the error are incidental, and cases `23` to `26` pin the wider shapes (done in the PR that records the sweep) |
-> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | constraint 18 is restated around the real trigger — a statement's fix or re-prepare that fails after a function has been fixed — and says that an instance abandoned *without* an error keeps what it holds, this amendment's rule notwithstanding (done in the same PR) |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | constraint 18 is restated around the real trigger — a prepared statement whose re-prepare fails after a function has been fixed — and says that an instance abandoned *without* an error keeps what it holds, this amendment's rule notwithstanding (done in the same PR) |
 > | `CHANGELOG.md` | a Documented entry, as A15 has |
 > | `crypto-safety.md` (key handling), `.agents/rules/code-review.md`, `AGENTS.md` §5 | the wipe is unconditional on the error path, for all six |
 

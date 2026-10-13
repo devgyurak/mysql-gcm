@@ -21,6 +21,8 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **The table of usage counts** (#35, design amendment A14) is in the tree as `src/usage`, with its
+  unit tests. Nothing calls it yet, so no SQL behaviour changes.
 - **Design amendment A14, proposed** (#35): a count of seals per key name for the key-id functions,
   and one function, `gcm_key_usage`, to read the caller's own. No persistence and no thresholds.
   Nothing is implemented by the amendment.

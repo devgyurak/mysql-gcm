@@ -26,7 +26,10 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
 | `gcm.{h,cc}` | The encryption and decryption construction, the authentication result, crypto resource init/deinit | `envelope`, `nonce`, OpenSSL |
 | `nonce.{h,cc}` | Domain separation and nonce derivation | The shared byte and error types, OpenSSL |
 | `envelope.{h,cc}` | Version, length, offset and field parsing; the shared types | The C++ standard library |
+| `usage.{h,cc}` | The table of usage counts for the key-id functions (amendment A14): names and integers, one lock. No key material, no cryptography, no SQL policy | The C++ standard library |
 
+- `usage` is not part of the cryptographic core, but it is held to the same independence: no MySQL
+  header, service or type, so that `tests/unit` builds and tests it, concurrency included.
 - The core (`gcm`, `envelope`, `nonce`) must stay independent of the server. No direct or indirect
   dependency on MySQL headers, services, version macros, UDF types or sysvars, and no reference back
   into an adapter.

@@ -1,7 +1,7 @@
 # Given: the probe functions
 # When: the inner, whose arguments are literals, is nested in the outer
 x
-# Then: the after block should show every init paired with its deinit
+# Then: every init has its deinit and the uninstall succeeds — literal arguments do not leak
 --- after the case ---
 probe_counts: {"probe_outer":{"init":1,"deinit":1},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":1,"deinit":1}}
 uninstall probe: ok

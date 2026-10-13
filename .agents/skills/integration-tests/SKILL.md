@@ -60,10 +60,16 @@ changed `.expected` has to be explained. Keep ciphertext and plaintext bytes out
 plus an assertion on the row count.
 
 ## Nested defect (`tests/integration/nested`)
-The server defect of issue #43: a loadable function that is the argument of another and takes a
-prepared-statement parameter is evaluated while the outer function is being initialised, before the
-parameter has a value. The inner call raises, and after that the outer `UDF_INIT` is leaked — the
-component can no longer be uninstalled and the inner `deinit` never runs.
+The server defect of issue #43: a statement's fix or re-prepare that fails **after** a loadable
+function has been fixed abandons that function's `UDF_INIT` — its `deinit` never runs and the
+component can no longer be uninstalled until the server restarts. The first shape found is a function
+that is the argument of another and takes a prepared-statement parameter: the inner call is evaluated
+while the outer function is being initialised, sees an empty string and raises. Nesting, the bound
+parameter and the raising are all incidental, and the cases say so —
+`23_sibling_leak` (a sibling function), `24_nonraising_kr_inner` (a key-id instance that raises
+nothing, and whose seal is never counted), `25_ddl_reprepare` (a plain `ALTER TABLE` re-prepare, no
+nesting and no parameter) and `26_probe_nested_bound_const`. The cause is read in
+`docs/upstream-udf-handler-leak.md`.
 
 These cases run **not** through `verify.sh` but through `scripts/verify-nested.sh <ver>`, which:
 - starts its own throwaway container, reusing the `dev-up.sh` keyring setup through `GCM_DEV_NAME`, so
@@ -95,7 +101,15 @@ Case files (the shape each pins):
 20_probe_nested_bound.sql            ★ the probe: a bound inner, counts init against deinit
 21_probe_nested_literal.sql          the probe with a literal inner, as a control
 22_probe_direct_bound.sql            the probe with a bound argument but no outer, as a control
+23_sibling_leak.sql                  ★ a sibling function beside the raising one: no nesting
+24_nonraising_kr_inner.sql            ★ a key-id seal that raises nothing is dropped; the count is lost
+25_ddl_reprepare.sql                 ★ a re-prepare invalidated by ALTER TABLE: no nesting, no parameter
+26_probe_nested_bound_const.sql      the probe's const_item variant in the bound-inner shape
 ```
+
+Cases 23 to 26 are the ones that showed the defect's trigger is the failed fix, not the nesting; a
+case that pins a leak has to leave the component uninstallable, so the harness restarts the server
+after it.
 
 ## MTR
 - Location: `mysql-test/suite/gcm/{t,r,include}`. `scripts/mtr.sh` **copies** it to

@@ -1,0 +1,11 @@
+# Given: the probe functions with the const variant as the inner, and two parameters
+# When: the const inner is nested in the outer with a ? and the statement is EXECUTEd twice
+# Then: the same leak as case 20 — the inner has one init per EXECUTE and no deinit,
+#       the component cannot be uninstalled, and the after block counts both
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 14: probe_raise_const UDF failed; no value for the argument: the server evaluated this function before its bound parameter had one
+ERROR 3200 (HY000) at line 15: probe_raise_const UDF failed; no value for the argument: the server evaluated this function before its bound parameter had one
+--- after the case ---
+probe_counts: {"probe_outer":{"init":2,"deinit":0},"probe_raise_const":{"init":2,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall probe: refused: ERROR 3538 (HY000) at line 1: De-initialization method provided by component 'probe' failed.
+restarted: probe re-loaded at server start

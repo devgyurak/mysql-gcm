@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Server test for the nested-function defect of issue #43: a loadable function that
-# is the argument of another and takes a prepared-statement parameter is evaluated
-# while the outer function is being initialised, before the parameter has a value.
-# The inner call fails, and after that `UNINSTALL COMPONENT` is refused and the
-# inner function's `deinit` is never called.
+# Server test for the server defect of issue #43: a statement's fix or re-prepare
+# that fails *after* a loadable function has been fixed abandons that function's
+# `UDF_INIT` — its `deinit` is never called, and `UNINSTALL COMPONENT` is refused
+# until the server restarts. The first shape found, and the one the issue was filed
+# with, is a function that is the argument of another and takes a prepared-statement
+# parameter: the inner call is evaluated while the outer function is being
+# initialised, before the parameter has a value, and raises. Nesting, the parameter
+# and the error are incidental — a sibling function, a key-id function that raises
+# nothing, and a re-prepare invalidated by `ALTER TABLE` leak the same way (cases 23
+# to 26). The cause is read in docs/upstream-udf-handler-leak.md.
 #
 #   scripts/verify-nested.sh 8.4
 #   GCM_RECORD=1 scripts/verify-nested.sh 8.4    # rewrite .expected (review the diff!)
@@ -45,7 +50,14 @@ for so in "${so_gcm}" "${so_probe}"; do
   }
 done
 
-cleanup() { docker rm -f "${name}" >/dev/null 2>&1 || true; }
+cleanup() {
+  # The CI diagnostics step runs after this trap has removed the container, and it reads
+  # mysql-dev-<ver>, not this container's name — so the log has to be taken here.
+  if docker container inspect "${name}" >/dev/null 2>&1; then
+    docker logs --tail 200 "${name}" > "${outdir}/nested_server.log" 2>&1 || true
+  fi
+  docker rm -f -v "${name}" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 cleanup
 

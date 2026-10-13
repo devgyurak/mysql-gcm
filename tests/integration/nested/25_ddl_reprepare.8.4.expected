@@ -1,0 +1,13 @@
+# Given: a table and a prepared statement that calls a function on one of its columns
+d1	c1
+# When: the column is dropped, and the statement is executed again
+# And the control: the failing column first, which fails before the function is fixed
+# Then: probe_outer has two inits and one deinit — the failed second EXECUTE kept the
+#       handler it fixed — and the control adds no init. The after block shows the refusal
+--- errors, in statement order ---
+ERROR 1054 (42S22) at line 18: Unknown column 'c' in 'field list'
+ERROR 1054 (42S22) at line 21: Unknown column 'c' in 'field list'
+--- after the case ---
+probe_counts: {"probe_outer":{"init":2,"deinit":1},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall probe: refused: ERROR 3538 (HY000) at line 1: De-initialization method provided by component 'probe' failed.
+restarted: probe re-loaded at server start

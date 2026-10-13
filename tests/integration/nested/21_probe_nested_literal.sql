@@ -8,4 +8,4 @@
 SELECT '# Given: the probe functions';
 SELECT '# When: the inner, whose arguments are literals, is nested in the outer';
 SELECT probe_outer(probe_raise_volatile('x', 'y'), 'y') AS nested_ok;
-SELECT '# Then: the after block should show every init paired with its deinit';
+SELECT '# Then: every init has its deinit and the uninstall succeeds — literal arguments do not leak';

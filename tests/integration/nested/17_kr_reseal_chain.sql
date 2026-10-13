@@ -17,6 +17,6 @@ SELECT '# When: the A15 re-seal shape is prepared, with a ? in every key-id posi
 PREPARE s FROM 'SELECT gcm_decrypt_kr(gcm_encrypt_kr(gcm_decrypt_kr(c, ?), ?), ?) = ? AS resealed FROM nested_reseal';
 EXECUTE s USING @id, @id, @id, @pt;
 DEALLOCATE PREPARE s;
-SELECT '# Then: 1 if the re-sealed row opens again, and the after block says whether the';
-SELECT '#       defect reached this shape';
+SELECT '# Then: 1 — the re-sealed row opens again — and the uninstall succeeds: the defect';
+SELECT '#       does not reach this shape';
 DROP TEMPORARY TABLE nested_reseal;

@@ -1,6 +1,7 @@
 # Given: the fixture key, a table, and one row whose key is a single byte
 # When: the nested call reads the key from the column, one row at a time
-# Then: row 1 seals and row 2 fails at row time — the after block is the control
+# Then: row 1 seals, row 2 fails on its one-byte key at row time, and the uninstall
+#       succeeds — a failure after the init is not this defect
 --- errors, in statement order ---
 ERROR 3200 (HY000) at line 14: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 1
 --- after the case ---

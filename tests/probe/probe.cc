@@ -1,7 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* A test-only component that exists to pin one server behaviour (issue #43): a
-   loadable function that raises an error while the server is evaluating it as the
-   argument of another loadable function, during that outer function's `init`.
+   statement's fix or re-prepare that fails *after* a loadable function has been
+   fixed abandons that function's `UDF_INIT` — its `deinit` is never called and the
+   component can no longer be uninstalled. The first shape found is a function that
+   raises while the server is evaluating it as the argument of another loadable
+   function, during that outer function's `init`; it is not the only one (a sibling
+   function, and a re-prepare invalidated by `ALTER TABLE`, leak the same way, and a
+   function that raises nothing is dropped too — cases 23 to 26). The cause is read
+   in `docs/upstream-udf-handler-leak.md`.
 
    Why this is a component of its own rather than part of `component_gcm`: the
    behaviour must be observable independently of this project's code, and
@@ -163,16 +169,16 @@ bool probe_counts_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
 char *probe_counts(UDF_INIT *, UDF_ARGS *, char *, unsigned long *length, unsigned char *is_null,
                    unsigned char *error) {
   static_assert(sizeof(g_json) >= 512);
-  const int written = std::snprintf(
-      g_json, sizeof(g_json),
-      "{\"probe_outer\":{\"init\":%llu,\"deinit\":%llu},"
-      "\"probe_raise_const\":{\"init\":%llu,\"deinit\":%llu},"
-      "\"probe_raise_volatile\":{\"init\":%llu,\"deinit\":%llu}}",
-      g_outer.init.load(std::memory_order_relaxed), g_outer.deinit.load(std::memory_order_relaxed),
-      g_raise_const.init.load(std::memory_order_relaxed),
-      g_raise_const.deinit.load(std::memory_order_relaxed),
-      g_raise_volatile.init.load(std::memory_order_relaxed),
-      g_raise_volatile.deinit.load(std::memory_order_relaxed));
+  const int written = std::snprintf(g_json, sizeof(g_json),
+                                    "{\"probe_outer\":{\"init\":%llu,\"deinit\":%llu},"
+                                    "\"probe_raise_const\":{\"init\":%llu,\"deinit\":%llu},"
+                                    "\"probe_raise_volatile\":{\"init\":%llu,\"deinit\":%llu}}",
+                                    g_outer.init.load(std::memory_order_relaxed),
+                                    g_outer.deinit.load(std::memory_order_relaxed),
+                                    g_raise_const.init.load(std::memory_order_relaxed),
+                                    g_raise_const.deinit.load(std::memory_order_relaxed),
+                                    g_raise_volatile.init.load(std::memory_order_relaxed),
+                                    g_raise_volatile.deinit.load(std::memory_order_relaxed));
   if (written < 0 || static_cast<size_t>(written) >= sizeof(g_json)) {
     *error = 1;
     return nullptr;
@@ -218,8 +224,8 @@ struct UdfSpec {
 const UdfSpec kUdfs[] = {
     {"probe_outer", reinterpret_cast<Udf_func_any>(probe_outer), probe_outer_init,
      probe_outer_deinit},
-    {"probe_raise_const", reinterpret_cast<Udf_func_any>(probe_raise_const),
-     probe_raise_const_init, probe_raise_const_deinit},
+    {"probe_raise_const", reinterpret_cast<Udf_func_any>(probe_raise_const), probe_raise_const_init,
+     probe_raise_const_deinit},
     {"probe_raise_volatile", reinterpret_cast<Udf_func_any>(probe_raise_volatile),
      probe_raise_volatile_init, probe_raise_volatile_deinit},
     {"probe_counts", reinterpret_cast<Udf_func_any>(probe_counts), probe_counts_init,
@@ -234,10 +240,16 @@ mysql_service_status_t probe_component_init() {
   for (size_t i = 0; i < kUdfCount; ++i) {
     const UdfSpec &udf = kUdfs[i];
     if (mysql_service_udf_registration->udf_register(udf.name, STRING_RESULT, udf.func, udf.init,
-                                                    udf.deinit)) {
-      /* The probe is not shipped and has no resources of its own, so a partial
-         registration is not rolled back: a test that cannot install it should
-         fail loudly, not half-work. */
+                                                     udf.deinit)) {
+      /* The probe is not shipped and has no resources of its own, but a
+         half-registered component is worse than a failed install: the server would
+         keep function names pointing into this library and the caller could not
+         uninstall them. Roll the first i registrations back, as `component_gcm`
+         does. */
+      for (size_t j = i; j > 0; --j) {
+        int was_present = 0;
+        (void)mysql_service_udf_registration->udf_unregister(kUdfs[j - 1].name, &was_present);
+      }
       return 1;
     }
   }
@@ -266,8 +278,7 @@ BEGIN_COMPONENT_PROVIDES(probe)
 END_COMPONENT_PROVIDES();
 
 BEGIN_COMPONENT_REQUIRES(probe)
-REQUIRES_SERVICE(udf_registration), REQUIRES_SERVICE(mysql_runtime_error),
-    END_COMPONENT_REQUIRES();
+REQUIRES_SERVICE(udf_registration), REQUIRES_SERVICE(mysql_runtime_error), END_COMPONENT_REQUIRES();
 
 BEGIN_COMPONENT_METADATA(probe)
 METADATA("mysql.author", "mysql-gcm contributors"), METADATA("mysql.license", "GPL"),

@@ -9,4 +9,4 @@ SELECT '# Given: the fixture key and an inner gcm_encrypt whose key argument is 
 SET @k = UNHEX('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');
 SELECT '# When: the inner call is the argument of gcm_decrypt, with no prepared statement';
 SELECT gcm_decrypt(gcm_encrypt('x', UNHEX('00')), @k) AS never_reached;
-SELECT '# Then: the key-length error is expected either way — the after block is the answer';
+SELECT '# Then: the key-length error is expected and the uninstall succeeds, as in 12';

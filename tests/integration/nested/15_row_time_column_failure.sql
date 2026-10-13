@@ -13,5 +13,6 @@ INSERT INTO nested_keys VALUES (1, @k), (2, UNHEX('00'));
 SELECT '# When: the nested call reads the key from the column, one row at a time';
 SELECT id, gcm_decrypt(gcm_encrypt('x', k), @k) IS NOT NULL AS sealed
 FROM nested_keys ORDER BY id;
-SELECT '# Then: row 1 seals and row 2 fails at row time — the after block is the control';
+SELECT '# Then: row 1 seals, row 2 fails on its one-byte key at row time, and the uninstall';
+SELECT '#       succeeds — a failure after the init is not this defect';
 DROP TEMPORARY TABLE nested_keys;

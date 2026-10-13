@@ -10,4 +10,4 @@ SET @k = UNHEX('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
 DO keyring_key_generate('it_nested', 'AES', 32);
 SELECT '# When: the outer gcm_decrypt is given four arguments, so its init fails';
 SELECT gcm_decrypt(gcm_encrypt_kr('x', 'it_nested'), @k, 'a', 'extra') AS never_reached;
-SELECT '# Then: an argument-count error, and the after block records whether gcm uninstalls';
+SELECT '# Then: an argument-count error from the outer init, and the uninstall succeeds';

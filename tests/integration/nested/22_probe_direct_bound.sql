@@ -11,4 +11,4 @@ SELECT '# When: the function is called directly, with a ? and no outer function 
 PREPARE s FROM 'SELECT probe_raise_volatile(?, ?)';
 EXECUTE s USING @a, @b;
 DEALLOCATE PREPARE s;
-SELECT '# Then: the after block shows a bound parameter on its own is harmless';
+SELECT '# Then: every init has its deinit and the uninstall succeeds — a bound parameter alone is harmless';

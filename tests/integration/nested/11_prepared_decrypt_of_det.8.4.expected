@@ -1,6 +1,6 @@
 # Given: the public fixture key and a plaintext bound with a prepared statement
 # When: EXECUTE evaluates gcm_encrypt_det first, as the argument of gcm_decrypt
-# Then: see .expected — the const_item variant may differ from 10 above
+# Then: as in 10, the EXECUTE fails with a 0-byte key and gcm cannot be uninstalled
 --- errors, in statement order ---
 ERROR 3200 (HY000) at line 14: gcm_encrypt_det UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 0
 --- after the case ---

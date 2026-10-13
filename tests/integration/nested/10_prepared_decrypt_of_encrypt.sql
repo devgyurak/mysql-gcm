@@ -12,5 +12,5 @@ SELECT '# When: EXECUTE evaluates gcm_encrypt first, as the argument of gcm_decr
 PREPARE s FROM 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)';
 EXECUTE s USING @pt, @k, @k;
 DEALLOCATE PREPARE s;
-SELECT '# Then: the statement either fails with a key-length error, which is the defect, or';
-SELECT '#       round-trips — and the after block records whether gcm was still uninstallable';
+SELECT '# Then: the EXECUTE fails with a 0-byte key — the inner was evaluated before its';
+SELECT '#       parameters had values — and gcm cannot be uninstalled afterwards';

@@ -13,4 +13,4 @@ SELECT '# When: EXECUTE evaluates gcm_encrypt_det first, as the argument of gcm_
 PREPARE s FROM 'SELECT gcm_decrypt(gcm_encrypt_det(?, ?), ?)';
 EXECUTE s USING @pt, @k, @k;
 DEALLOCATE PREPARE s;
-SELECT '# Then: see .expected — the const_item variant may differ from 10 above';
+SELECT '# Then: as in 10, the EXECUTE fails with a 0-byte key and gcm cannot be uninstalled';

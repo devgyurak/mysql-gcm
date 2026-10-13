@@ -1,7 +1,7 @@
 # Given: the probe functions and two parameters
 # When: the function is called directly, with a ? and no outer function around it
 x
-# Then: the after block shows a bound parameter on its own is harmless
+# Then: every init has its deinit and the uninstall succeeds — a bound parameter alone is harmless
 --- after the case ---
 probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":1,"deinit":1}}
 uninstall probe: ok

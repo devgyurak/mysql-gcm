@@ -34,10 +34,10 @@ jobs:
       # A second, throwaway server with no keyring: the component must still install there,
       # and only the key-id functions may fail (docs/design.md amendment A13).
       - run: scripts/verify-bare.sh "${{ matrix.mysql }}"
-      # The nested-function server defect of issue #43 needs its own throwaway server: a
-      # case that triggers it leaves the component unable to uninstall for every case
-      # after it. The probe (tests/probe) is the counter that separates a leaked
-      # `UDF_INIT` from a re-run init.
+      # The server defect of issue #43 needs its own throwaway server: a case that
+      # triggers it leaves the component unable to uninstall for every case after it.
+      # The probe (tests/probe) is the counter that separates a leaked `UDF_INIT` from
+      # a re-run init.
       - run: scripts/build-probe.sh "${{ matrix.mysql }}"
       - run: scripts/verify-nested.sh "${{ matrix.mysql }}"
       - name: Collect diagnostics
@@ -56,3 +56,6 @@ jobs:
             build/${{ matrix.mysql }}/*.actual
             build/${{ matrix.mysql }}/components.txt
             build/${{ matrix.mysql }}/server.log
+            # verify-nested.sh dumps its own throwaway server's log in its EXIT trap,
+            # because the diagnostics step above cannot reach that container.
+            build/${{ matrix.mysql }}/nested_server.log

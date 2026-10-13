@@ -20,6 +20,7 @@ jobs:
           git ls-files -z 'src/*.cc' 'src/*.h' 'tests/unit/*.cc' 'tests/unit/*.h' \
                          'tests/bench/*.cc' 'tests/bench/*.h' \
                          'tests/adapter/*.cc' 'tests/adapter/*.h' \
+                         'tests/probe/*.cc' 'tests/probe/*.h' \
             | xargs -0 clang-format-18 --dry-run --Werror
   python:
     runs-on: ubuntu-24.04

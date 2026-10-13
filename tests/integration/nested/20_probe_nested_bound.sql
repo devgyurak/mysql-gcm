@@ -13,4 +13,5 @@ PREPARE s FROM 'SELECT probe_outer(probe_raise_volatile(?, ?), ?)';
 EXECUTE s USING @a, @b, @b;
 EXECUTE s USING @a, @b, @b;
 DEALLOCATE PREPARE s;
-SELECT '# Then: the after block counts the inits against the deinits the server actually ran';
+SELECT '# Then: the inner has one init per EXECUTE and no deinit, so the component cannot be';
+SELECT '#       uninstalled; on 8.0 the outer leaks too (see the per-major counts)';

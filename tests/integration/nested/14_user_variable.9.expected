@@ -1,0 +1,8 @@
+# Given: the fixture key and the plaintext in a user variable
+# When: the nested call takes the user variable, with no prepared statement
+1
+# Then: 1 — a user variable arrives intact, so the after block should show an ok uninstall
+--- after the case ---
+probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall gcm: ok
+install gcm: ok

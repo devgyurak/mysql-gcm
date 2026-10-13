@@ -108,6 +108,14 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
   affect an existing session.
 - Print `SHOW STATUS LIKE 'Created_tmp_disk_tables'` before and after to record whether `gcm_decrypt`
   caused a disk temporary table (design §5.3).
+- `tests/integration/nested/` pins the nested-function server defect (issue #43) and is run by
+  `scripts/verify-nested.sh`, not `verify.sh`: a case that triggers the defect leaves the component
+  unable to uninstall for every case after it, so the harness needs a throwaway server plus a per-case
+  reinstall-or-restart. Its expected output is **per major** (`<case>.<major>.expected`), because
+  whether and how the defect reproduces differs by version. `tests/probe` (test-only, built by
+  `scripts/build-probe.sh`, never shipped — enforced by `check-architecture.py`) counts a leaked
+  `UDF_INIT` against the deinits the server actually ran, so a case can show the leak without relying
+  on this project's own code.
 - MTR runs from `mtr.yml` only on PRs and merges that touch `src/**`, `mysql-test/**`, `spec/**` or the
   build tooling (measured at 49–63 minutes). It catches things only the server's own harness catches —
   an unexpected line in the error log fails it. The smoke suite (`verify.sh` across three majors)

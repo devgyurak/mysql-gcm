@@ -1,0 +1,9 @@
+# Given: a keyring entry, one sealed row, the plaintext, and the key id bound as a ?
+# When: the A15 re-seal shape is prepared, with a ? in every key-id position
+1
+# Then: 1 if the re-sealed row opens again, and the after block says whether the
+#       defect reached this shape
+--- after the case ---
+probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall gcm: ok
+install gcm: ok

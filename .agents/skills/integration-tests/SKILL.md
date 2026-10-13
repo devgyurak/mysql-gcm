@@ -10,6 +10,8 @@ Two layers. Both are GWT (`--echo # Given/When/Then`).
 | Layer | Location | When | Needs |
 |---|---|---|---|
 | SQL smoke | `tests/integration/<case>.sql` + `<case>.expected` | local loop, PR CI | the official `mysql:<ver>` image plus the `.so` |
+| SQL smoke, no keyring | `tests/integration/bare/` | PR CI | `scripts/verify-bare.sh` |
+| Nested defect | `tests/integration/nested/<case>.sql` + `<case>.<major>.expected` | PR CI | `scripts/verify-nested.sh`, `scripts/build-probe.sh` |
 | MTR | `mysql-test/suite/gcm/t/*.test`, `r/*.result` | PR CI (the server-tree build job), releases | a server source tree build |
 
 ## SQL smoke
@@ -57,6 +59,44 @@ changed `.expected` has to be explained. Keep ciphertext and plaintext bytes out
 — an error that prints a value, such as a UNIQUE violation message, is replaced by `INSERT IGNORE`
 plus an assertion on the row count.
 
+## Nested defect (`tests/integration/nested`)
+The server defect of issue #43: a loadable function that is the argument of another and takes a
+prepared-statement parameter is evaluated while the outer function is being initialised, before the
+parameter has a value. The inner call raises, and after that the outer `UDF_INIT` is leaked — the
+component can no longer be uninstalled and the inner `deinit` never runs.
+
+These cases run **not** through `verify.sh` but through `scripts/verify-nested.sh <ver>`, which:
+- starts its own throwaway container, reusing the `dev-up.sh` keyring setup through `GCM_DEV_NAME`, so
+  the development server and its data are untouched;
+- before each case, reinstalls the components, resets the probe counters, restores
+  `gcm.strict = DEFAULT` and drops the `it_%` keys;
+- after each case, prints `probe_counts:` and then `UNINSTALL COMPONENT`. When the uninstall is
+  refused — the observable the case exists to pin — it restarts the server, which reloads the
+  component from `mysql.component`, and continues. That branching lives in the harness and never in a
+  case body;
+- diffs per major against `<case>.<major>.expected` (`GCM_RECORD=1` records; read the diff by eye).
+
+`tests/probe` is a test-only component (`scripts/build-probe.sh <ver>`; no crypto, not shipped) whose
+functions count their own `init` and `deinit`. `probe_counts()` lets a case separate a *leaked*
+`UDF_INIT` — an `init` with no matching `deinit` — from a re-run init, independently of
+`component_gcm`. A case that has to tell the harness which component to put back writes
+`-- nested-uninstall: <component>`.
+
+Case files (the shape each pins):
+```
+10_prepared_decrypt_of_encrypt.sql   outer decrypt, inner encrypt, bound parameter
+11_prepared_decrypt_of_det.sql       outer decrypt, inner det, bound parameter (det claims const_item)
+12_literal_det_bad_key.sql           a literal inner with a bad key
+13_literal_encrypt_bad_key.sql       a literal inner with a bad key
+14_user_variable.sql                 a user-variable argument
+15_row_time_column_failure.sql       a per-row column failure
+16_outer_init_fails.sql              the outer's own init fails
+17_kr_reseal_chain.sql               the _kr open/re-seal/open chain (amendment A15 shape)
+20_probe_nested_bound.sql            ★ the probe: a bound inner, counts init against deinit
+21_probe_nested_literal.sql          the probe with a literal inner, as a control
+22_probe_direct_bound.sql            the probe with a bound argument but no outer, as a control
+```
+
 ## MTR
 - Location: `mysql-test/suite/gcm/{t,r,include}`. `scripts/mtr.sh` **copies** it to
   `$MYSQL_SRC/mysql-test/suite/gcm` (no symlink, because the mount is read-only).
@@ -88,4 +128,5 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 ## Done when
 - [ ] `20_korean_like` passes (without it the project misses its purpose)
 - [ ] The smoke suite passes on 8.0, 8.4 and 9.x, with identical output outside the per-major cases
+- [ ] `scripts/verify-nested.sh` passes on 8.0, 8.4 and 9.x for every `tests/integration/nested` case
 - [ ] Every MTR `.result` is a `--record` output and the reason it changed is in the PR description

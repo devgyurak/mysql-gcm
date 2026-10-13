@@ -1,0 +1,10 @@
+# Given: the probe functions, whose inner raises on an empty argument, and two parameters
+# When: the inner is nested in the outer with a ? and the statement is EXECUTEd twice
+# Then: the after block counts the inits against the deinits the server actually ran
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 13: probe_raise_volatile UDF failed; no value for the argument: the server evaluated this function before its bound parameter had one
+ERROR 3200 (HY000) at line 14: probe_raise_volatile UDF failed; no value for the argument: the server evaluated this function before its bound parameter had one
+--- after the case ---
+probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":2,"deinit":0}}
+uninstall probe: refused: ERROR 3538 (HY000) at line 1: De-initialization method provided by component 'probe' failed.
+restarted: probe re-loaded at server start

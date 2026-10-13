@@ -11,7 +11,7 @@
 > **Status: implemented, awaiting review (issue #35).** The table is in `src/usage`, the function
 > in `src/udf_usage.cc`, the counting and the fold in `src/udf_kr.cc` and `src/udf_glue.cc`. It
 > becomes the design when the PR that carries this revision merges. Pinned: the table in
-> `tests/unit` (14 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
+> `tests/unit` (18 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
 > `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
 > 8.4; and on a server with no keyring, where the function still answers. Not pinned: counts lost
 > by an instance that is neither de-initialised nor raises (issue #43), which no test can produce
@@ -33,7 +33,8 @@
 > `random_seals` is a lower bound on the nonces drawn under the key those bytes are. `det_seals` is
 > not a bound on anything: it counts **calls**, so a repeated lookup
 > (`WHERE c = gcm_encrypt_det_kr(?, 'id')`) and an evaluation folded at optimisation each add one
-> though they seal no new message.
+> though they seal no new message. (Measured in the implementation: a lookup with a constant
+> argument adds three per statement on 8.0, 8.4 and 9.4.)
 >
 > - The budget is about key **bytes**; the count is about a **name**. The same bytes under another id
 >   or another account are counted separately. An id whose entry was removed and generated again is
@@ -142,7 +143,7 @@
 > | `tests/unit`, `tests/adapter` | the table (folding, the bound, concurrent folds); when a count becomes visible, the error-row fold, account isolation, that the key-argument functions add nothing |
 > | `tests/integration`, `mysql-test` | counts after seals of each kind and after a tag failure, on every major |
 > | `architecture.md` §1, §3 and §5, `crypto-safety.md` (operational responsibility: "do not assume the component counts per-key usage") | the module, the component-level state and its rules; that the table holds no key material; what may and may not be assumed from a count |
-> | README, `docs/ops-constraints.md` 11, 12, 13 and 17, A13's "the component still counts nothing", `AGENTS.md`, `CHANGELOG.md` | the function, and what is now counted and what still is not |
+> | README, `docs/ops-constraints.md` 11 and 13 and a new item, §6's A8 entry, A13's "the component still counts nothing", `AGENTS.md`, `CHANGELOG.md` | the function, and what is now counted and what still is not |
 
 > ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
 >
@@ -1722,7 +1723,8 @@ default and it raises an error.
 
 - (Amendment A8) Sum the usage across every server, column and application that shares a key, and have
   the per-key usage budget and rotation criteria security-reviewed before deployment. The component
-  does not count usage or rotate automatically.
+  does not hold a budget or rotate automatically. For the key-id functions it publishes a count per
+  key name (`gcm_key_usage`, amendment A14), which is one input to this sum and not the sum.
 - (Amendment A8) Copying or restoring an envelope is not a new encryption. Distinguish the conditions
   for re-encryption and for a deterministic retry, and do not let a database restore roll back the
   accumulated usage. If the usage history or the safety of the RNG state is uncertain, stop writing;

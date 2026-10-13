@@ -239,6 +239,71 @@ TEST_F(Usage, GivenStrictOnAndATamperedRow_WhenTheRowRaises_ThenTheFailureIsVisi
   gcm_decrypt_kr_deinit(&opener);
 }
 
+/* Decryption errors that are not a tag mismatch. Only bad_tag counts: a malformed envelope
+   or a key of the wrong suite is corrupt data or misconfiguration, not a forgery attempt. */
+struct NotATagFailure {
+  const char *name;
+  std::string envelope;
+  size_t key_len;
+};
+
+class UsageNotATagFailure : public Usage, public ::testing::WithParamInterface<NotATagFailure> {};
+
+TEST_P(UsageNotATagFailure, GivenADecryptionErrorThatIsNotATagMismatch_WhenRead_ThenNoTagFailure) {
+  // Given: a key of the parameter's length under its own id, and the parameter's envelope
+  const std::string id = "decrypt_key";
+  gcm_adapter::put_keyring_entry(kAccount, id, "AES", std::string(GetParam().key_len, 'k'));
+  Args args(2, &GetParam().envelope, &id);
+  UDF_INIT opener{};
+  ASSERT_FALSE(gcm_decrypt_kr_init(&opener, &args.args, message_)) << message_;
+
+  // When
+  row(gcm_decrypt_kr_udf, &opener, GetParam().envelope, id);
+  gcm_decrypt_kr_deinit(&opener);
+
+  // Then: an error, and nothing counted
+  const std::string answer = usage_of(id);
+  EXPECT_EQ(last_error_, 1);
+  EXPECT_EQ(answer.rfind(counts(0, 0, 0, 0), 0), 0u) << answer;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Usage, UsageNotATagFailure,
+    ::testing::Values(
+        /* bad_envelope: a version byte and nothing else */
+        NotATagFailure{"ATruncatedEnvelope", std::string("\x02", 1), 32},
+        /* bad_key_len: a well-formed AES-256 envelope opened with an AES-128 key */
+        NotATagFailure{"AKeyOfAnotherSuite", std::string("\x02", 1) + std::string(28, 'x'), 16}),
+    [](const ::testing::TestParamInfo<NotATagFailure> &info) { return info.param.name; });
+
+TEST_F(Usage, GivenAKeyBelowTheFloor_WhenSealingIsRefused_ThenNothingIsCountedUnderIt) {
+  // Given: an AES-128 key and the default floor of 32
+  const std::string id = "short_key";
+  gcm_adapter::put_keyring_entry(kAccount, id, "AES", std::string(16, 'k'));
+
+  // When: the key is read, and then refused by the floor
+  seal_once(kName, id);
+
+  // Then: a refusal is not a seal and makes no row
+  const std::string answer = usage_of(id);
+  EXPECT_EQ(last_error_, 1);
+  EXPECT_EQ(answer.rfind(counts(0, 0, 0, 0), 0), 0u) << answer;
+}
+
+TEST_F(Usage, GivenTheComponentHasStoppedCounting_WhenUsageIsRead_ThenAnErrorNotZeros) {
+  // Given: the table has been released, as after a completed unload
+  ASSERT_EQ(gcm_adapter::component_deinit(), 0);
+  gcm_adapter::reset();
+
+  // When
+  const std::string answer = usage_of(kId);
+
+  // Then: zeros would claim nothing was counted
+  EXPECT_TRUE(answer.empty());
+  EXPECT_EQ(gcm_adapter::error_messages(),
+            std::vector<std::string>{"usage counting is not available"});
+}
+
 TEST_F(Usage, GivenARowRaisedAndFolded_WhenDeinitFollows_ThenNothingIsCountedTwice) {
   // Given: two good rows, then one that raises (another key id), all in one instance
   const std::string other = "another_key";

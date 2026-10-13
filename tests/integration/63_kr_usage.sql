@@ -88,5 +88,20 @@ SELECT gcm_key_usage(CONCAT('it_', CHAR(0), 'usage')) AS never_reached;
 SELECT gcm_key_usage() AS never_reached;
 SELECT '# Then: zero without asking whether the key exists, zero for the longest id, NULL, and an error for each of the rest (above, errors section)';
 
+SELECT '# Scenario 10 — Given: a UNIQUE column of deterministic envelopes, and the count before a lookup';
+CREATE TABLE usage_lookup (id INT PRIMARY KEY, mrn_enc VARBINARY(128), UNIQUE KEY (mrn_enc));
+INSERT INTO usage_lookup VALUES
+  (1, gcm_encrypt_det_kr('EMR-001', 'it_usage')),
+  (2, gcm_encrypt_det_kr('EMR-002', 'it_usage')),
+  (3, gcm_encrypt_det_kr('EMR-003', 'it_usage'));
+SET @det_before = CAST(JSON_EXTRACT(gcm_key_usage('it_usage'), '$.det_seals') AS UNSIGNED);
+SELECT '# When: one row is looked up by sealing the search value, twice';
+SELECT id FROM usage_lookup WHERE mrn_enc = gcm_encrypt_det_kr('EMR-002', 'it_usage');
+SELECT id FROM usage_lookup WHERE mrn_enc = gcm_encrypt_det_kr('EMR-002', 'it_usage');
+SELECT CAST(JSON_EXTRACT(gcm_key_usage('it_usage'), '$.det_seals') AS UNSIGNED) - @det_before AS det_seals_added;
+SELECT '# Then: the row each time, and six counted for two lookups — the server evaluates the constant';
+SELECT '#       call three times per statement, and det_seals counts calls, not messages (above)';
+
+DROP TABLE usage_lookup;
 DROP TABLE usage_copy;
 DROP TABLE usage_rows;

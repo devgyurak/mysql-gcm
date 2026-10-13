@@ -10,7 +10,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   under a key id for the calling account since the component started — random seals, deterministic
   seals, plaintext bytes sealed and tag failures — as JSON text, with the start time. It reads no
   keyring. **It is a count, not a key's usage**: the key-argument functions, other servers and
-  anything before the last start are not in it; operational constraint 19 lists what it leaves out.
+  anything before the last server start or reinstall are not in it; operational constraint 19 lists what it leaves out.
   No persistence, no thresholds. No new server service and no envelope change.
 - **Key-id functions** (#34, design amendment A13): `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and
   `gcm_decrypt_kr` take a key id and use the `AES` key stored under it in the MySQL keyring for the

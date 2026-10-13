@@ -308,7 +308,7 @@ in this order:
 | Member | Meaning |
 |---|---|
 | `random_seals` | successful `gcm_encrypt_kr` calls |
-| `det_seals` | successful `gcm_encrypt_det_kr` calls — calls, not distinct messages |
+| `det_seals` | successful `gcm_encrypt_det_kr` calls — calls, not distinct messages, and not statements either: the server may evaluate one call site several times |
 | `bytes_sealed` | plaintext bytes of those calls, after conversion to `utf8mb4`, without the AAD |
 | `tag_failures` | `gcm_decrypt_kr` calls that ended in a tag mismatch, with `gcm.strict` ON or OFF |
 | `since` | Unix time, in seconds, at which counting began: the component's initialisation |

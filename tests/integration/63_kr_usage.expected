@@ -39,6 +39,13 @@
 # When: their usage is read
 0	0	1
 # Then: zero without asking whether the key exists, zero for the longest id, NULL, and an error for each of the rest (above, errors section)
+# Scenario 10 — Given: a UNIQUE column of deterministic envelopes, and the count before a lookup
+# When: one row is looked up by sealing the search value, twice
+2
+2
+6
+# Then: the row each time, and six counted for two lookups — the server evaluates the constant
+#       call three times per statement, and det_seals counts calls, not messages (above)
 --- errors, in statement order ---
 ERROR 3200 (HY000) at line 45: gcm_decrypt_kr UDF failed; authentication tag verification failed
 ERROR 3200 (HY000) at line 85: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte

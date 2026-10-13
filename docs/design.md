@@ -1239,9 +1239,14 @@
 
 > ## Amendment A11 (2026-10-07) — Per-statement reuse of the decrypt context and the deterministic nonce key
 >
-> **Status: proposed — implemented behind this PR; takes effect on merge.** The numbers below are
-> developer-machine prototypes (an arm64 laptop with other containers running) and are quoted for the
-> shape of the saving, not its size. CI measurements follow in `docs/perf.md` and replace them.
+> **Status: implemented and merged (PR #23, 2026-10-07, merged by the repository owner after the
+> reviews recorded on that PR).** The two retained states live in `UdfState` (`src/udf_glue.h`),
+> implemented in `src/gcm.cc` and `src/nonce.{h,cc}` and driven from the row callbacks in
+> `src/udf_*.cc`. Pinned: `tests/unit` (`gcm_test.cc`, `det_session_test.cc`) and `tests/adapter`
+> (one state per `init`, and the key checks); `docs/perf.md` carries the CI measurements that replace
+> the prototype numbers below, which are kept for the shape of the saving, not its size. Amendment
+> A16 later replaced the sentence about a pre-check leaving the schedule intact and rewrote the
+> exposure paragraph at the end of this amendment; both now point at A16.
 >
 > §8 left one item open on purpose: `derive_nonce_key` depends only on the key, `encrypt_det`
 > recomputes it on every row, and caching it per `UDF_INIT` means **keeping a copy of the key between

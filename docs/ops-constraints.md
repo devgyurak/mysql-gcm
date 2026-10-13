@@ -1,6 +1,6 @@
 # Operational constraints (must appear on the README first screen)
 
-Source: `docs/design.md` §6 and amendments A1, A3, A5, A7, A8, A10, A12, A13, A14. Keep the two in sync.
+Source: `docs/design.md` §6 and amendments A1, A3, A5, A7, A8, A10, A12, A13, A14, A16. Keep the two in sync.
 
 1. **`gcm_encrypt` is non-deterministic.** Under statement-based replication the primary and replica produce different bytes. ROW binlog is required. Non-deterministic functions cannot be used in generated columns or indexes.
 2. **Keys and plaintext appear in server logs.** Keys and plaintext are SQL arguments (same surface as `AES_ENCRYPT`), so they can land in the general log, slow log, `performance_schema.events_statements_*` and SBR binlog. `LIKE '%kim%'` patterns are plaintext fragments too. Control log access; this cannot be avoided by the component. The key-id functions (item 17) take the *key* out of the encryption and decryption statements; the plaintext and the `LIKE` pattern stay.

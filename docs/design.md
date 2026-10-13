@@ -321,12 +321,14 @@
 > - **Constraint 2.** The plaintext and the `LIKE` pattern are still in the statement.
 > - **The nested-call defect (#43)** applies to these functions as to the others, and the re-seal
 >   statement above nests one inside another — with literals, which is not the shape #43 was
->   observed in. #43 is about the *inner* call taking a prepared-statement parameter: with the
->   inner `gcm_decrypt_krv`'s key id bound as `?` it is the shape #43 describes and may fail the
->   same way. That is not established: #43 was observed with every argument of the inner call a
->   parameter, and here the inner call also has a column argument, which may keep the server from
->   evaluating it early. Neither that, nor a bound `key_version` (an argument of the outer call),
->   was tried.
+>   observed in. #43 is about the *inner* call taking a prepared-statement parameter, and the
+>   implemented `_kr` functions answer it: `tests/integration/nested/17_kr_reseal_chain` prepares
+>   `gcm_decrypt_kr(gcm_encrypt_kr(gcm_decrypt_kr(c, ?), ?), ?)` with every key id bound, and it
+>   round-trips on 8.0, 8.4 and 9 with the component uninstalling cleanly afterwards — the column
+>   argument of the innermost call keeps the server from evaluating it early. What is still untried
+>   is `gcm_decrypt_krv` and `gcm_envelope_key_version` with a bound `key_version`: those do not
+>   exist yet, and the PR that implements them has to pin that shape per major the way A7's
+>   finding is pinned.
 >
 > ### Open questions for review
 >
@@ -370,9 +372,10 @@
 > `src/udf_glue.cc`. Pinned: the table in
 > `tests/unit` (18 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
 > `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
-> 8.4; and on a server with no keyring, where the function still answers. Not pinned: counts lost
-> by an instance that is neither de-initialised nor raises (issue #43), which no test can produce
-> without poisoning its server.
+> 8.4; and on a server with no keyring, where the function still answers. Pinned since: the counts
+> lost by an instance the server abandons without de-initialising it, which
+> `tests/integration/nested/24_nonraising_kr_inner` produces — the seal inside the leaked instance
+> is not in the answer, and the instance's own figures never fold (issue #43).
 >
 > Amendment A8 and operational constraints 11 and 13 tell every deployment to set a usage budget per
 > key and then say "the component does not count uses", so the operator has no number to compare the
@@ -409,8 +412,9 @@
 >   reinstall within the same second leaves it unchanged, and a clock stepped backwards can make
 >   it earlier. The ledger A8 asks the operator to keep holds the previous value to compare with.
 > - Counts held by an instance that neither raises an error nor is de-initialised are lost. Issue
->   #43 shows the server skipping `deinit` in one shape (observed on 8.4.11 only); the fold in the
->   error row covers the case where the instance itself raised, and nothing covers the rest.
+>   #43 shows the server skipping `deinit` in one shape (observed on 8.0, 8.4 and 9 —
+>   `tests/integration/nested`); the fold in the error row covers the case where the instance
+>   itself raised, and nothing covers the rest.
 >
 > ### Decisions
 >
@@ -681,10 +685,12 @@
 > ### Observed on 2026-10-12 with a throwaway probe component
 >
 > Servers 8.0.46, 8.4.11 and 9.4.0 (the pinned images), the probe built against the 8.0.43, 8.4.11
-> and 9.4.0 trees. **Observed once and not yet pinned**: the probe is not committed, and each row
-> below becomes a committed server test in the implementation PR, the way A7's finding is pinned by
-> `tests/integration/91_*`. Until then these are observations, not guarantees. The three versions
-> gave the same output for every row of the three tables.
+> and 9.4.0 trees. **Observed once, and the tables below are still only an observation**: that
+> throwaway probe was not committed, and no committed test reproduces these rows. A smaller probe is
+> committed instead, as `tests/probe`, and what it pins is the *consequence* of the first table — a
+> call the server evaluates before its bound parameter has a value, and the instance that is then
+> never de-initialised — in `tests/integration/nested/20`–`22` (see "Implementation notes"). The
+> three versions gave the same output for every row of the three tables.
 >
 > | What the function is called with | What `init` sees | What the row function sees |
 > |---|---|---|
@@ -818,38 +824,83 @@
 >   `gcm.strict` ON and OFF across the rows of one statement, under MTR's check that nothing
 >   unexpected reaches the error log.
 >
-> **Observed, not pinned.** The `UDF_INIT` counts in the third table come from the probe's counter
-> and are not reproduced by a committed test. The wipe on the error path is pinned; the wipe in
-> `deinit` is established by reading `free_state`, since after `deinit` the memory is released and
-> there is nothing left for a test to look at.
+> **Observed, not pinned.** The `UDF_INIT` counts in the third table and the argument-visibility
+> rows of the first come from the throwaway probe's counter and are not reproduced by a committed
+> test. A committed probe (`tests/probe`, built by `scripts/build-probe.sh`) counts its own `init`
+> and `deinit` calls instead, and pins the consequence of the first table — the leaked instance of
+> a nested call — in `tests/integration/nested/20`–`22`. The wipe on the error path is pinned; the
+> wipe in `deinit` is established by reading `free_state`, since after `deinit` the memory is
+> released and there is nothing left for a test to look at.
 >
-> **A server defect found on the way, not specific to these functions.** When a loadable function is
-> an argument of another loadable function and takes a prepared-statement parameter, the outer
-> function's `init` evaluates the inner call before the parameter has its value. The inner function
-> sees an empty string: `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE`
-> with a 0-byte key, and the `_kr` form fails with *invalid id*. Two things follow, both observed on
-> 8.4.11 and not tried on 8.0 or 9.4:
+> **A server defect found on the way, not specific to these functions, pinned per major.** A
+> **prepared statement whose re-prepare at `EXECUTE` fails** after a loadable function has been fixed
+> abandons that function's `UDF_INIT`: its de-initialisation function is never called — not at the
+> end of the statement, not on `DEALLOCATE PREPARE`, not when the session ends — and the component
+> cannot be uninstalled until the server restarts. Every function the statement had already fixed is
+> dropped, whichever component it belongs to.
 >
-> - After that error `UNINSTALL COMPONENT` is refused until the server restarts. Seen with the
->   key-argument functions, so it predates this amendment and applies to 0.1.0.
-> - **The inner function's `deinit` is never called** — not at the end of the statement, not on
->   `DEALLOCATE PREPARE`, not when the session ends. A probe that counts its own `init` and `deinit`
->   calls showed three `init`s and one `deinit` after two failing executions. Whatever the inner
->   `UDF_INIT` holds at that moment is neither wiped nor freed for the life of the server. For the
->   key-argument functions that is a result buffer and an unkeyed context: the paths that raise in
->   this shape do so before a key is copied, or wipe it first as A11 requires. For a `_kr` function
->   it could have been the fetched key — for example an inner `gcm_decrypt_kr(?, 'id')`, which reads
->   the key and then rejects the empty envelope — which is why a row that raises an error gives up
->   every secret its `UDF_INIT` holds before it returns ("The key copy", above).
-> - Not every failure around a nested call does this. With the outer function's own `init` failing
->   over a successful inner call — `gcm_decrypt(gcm_encrypt_kr('x', 'id'), 'k', 'a', 'extra')`, an
->   argument-count error — `UNINSTALL COMPONENT` succeeded afterwards. Whether the inner `deinit`
->   ran there was not observed directly; the uninstall succeeding is the only evidence.
+> The trigger is the failed *re-prepare*, not a failure of the statement in general: case `25`'s
+> control is the same prepared form with the failing column first, so its re-prepare fails before the
+> function is ever fixed — it adds one `init` and its own `deinit`, and nothing is kept. A prepared
+> statement is what puts the handler in the (re)prepare state that `udf_handler::cleanup()` returns
+> early from; a plain statement's fix failure was not observed to leak. Until #55's cause was read,
+> the shape issue #43 was filed with (the table below) was described as needing the nesting and a
+> bound parameter.
 >
-> It is not pinned by a committed case, because a case that triggers it leaves the test server
-> unable to uninstall the component for every case after it. It needs its own issue. Until then: do
-> not nest one of these functions inside another with a bound parameter (operational constraint
-> 18). Nesting inside a builtin (`LENGTH(gcm_encrypt(?, ?))`) is unaffected.
+> The cause was read from the 8.0.43, 8.4.11 and 9.4.0 sources and is recorded, with a
+> self-contained reproducer, in `docs/upstream-udf-handler-leak.md`: `udf_handler::fix_fields`
+> defers its own RAII release as soon as the handler is worth keeping, which leaves
+> `udf_handler::cleanup()` as the only way back — and that one returns early while the statement is
+> being (re)prepared, because the handler is meant to survive into the execution that a failing
+> prepare never reaches.
+>
+> The first shape found, and the one issue #43 was filed with, is a function that is an argument of
+> another and takes a prepared-statement parameter: the outer function's `init` evaluates the inner
+> call before the parameter has its value, the inner sees an empty string, and
+> `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE` with a 0-byte key (the
+> `_kr` form fails with *invalid id*). Nesting, the bound parameter and the raising are all
+> **incidental** — what the leak needs is the failed re-prepare — and three cases added after the first
+> review show it: a *sibling* function in the same select list, a key-id instance that raises
+> nothing at all, and a plain `ALTER TABLE` re-prepare with no nesting and no parameter.
+>
+> `tests/integration/nested/*.sql` are run by `scripts/verify-nested.sh <major>` on a throwaway
+> server — a case that triggers the defect leaves the component unable to uninstall for every case
+> after it, so it cannot live in `scripts/verify.sh` — and their expected output is recorded per
+> major. Measured on the pinned images (8.0.46, 8.4.11 and 9.4.0). The per-major difference is
+> always the same one: on 8.0 the failing statement's *outer* function runs its own `init` — and
+> leaks it — where 8.4 and 9 abort before it, so the cases that contain an outer function's `init`
+> (`20`, `23`, `24`, `26`) show it in their counts, and the other cases are identical across the
+> three:
+>
+> | Case | Shape | Result |
+> |---|---|---|
+> | `10_prepared_decrypt_of_encrypt` | `gcm_decrypt(gcm_encrypt(?, ?), ?)`, prepared | the inner sees a 0-byte key; `UNINSTALL COMPONENT` refused afterwards |
+> | `11_prepared_decrypt_of_det` | the same, inner deterministic | same |
+> | `12_literal_det_bad_key`, `13_literal_encrypt_bad_key` | a literal inner whose key is one byte | inner key error; uninstall succeeds |
+> | `14_user_variable` | the inner plaintext in a user variable | round-trips; uninstall succeeds |
+> | `15_row_time_column_failure` | the inner key from a column, failing on the second row | row-time error; uninstall succeeds |
+> | `16_outer_init_fails` | the outer's own `init` fails over a successful `_kr` inner | argument-count error; uninstall succeeds |
+> | `17_kr_reseal_chain` | A15's re-seal shape with `?` in every key-id position | round-trips; uninstall succeeds |
+> | `20_probe_nested_bound` | the test-only probe instead of the crypto functions, prepared inner, two `EXECUTE`s | the inner's `init` runs twice with no deinit and the uninstall is refused; on 8.0 the outer leaks too |
+> | `21_probe_nested_literal`, `22_probe_direct_bound` | the probe with literals, or a `?` on a direct call | every `init` paired with its `deinit`; uninstall succeeds |
+> | `23_sibling_leak` | a sibling function beside one whose inner raises, no nesting | the sibling's `init` has no `deinit`; uninstall refused |
+> | `24_nonraising_kr_inner` | a key-id seal that succeeds inside an outer function, another item raising | the seal is never counted and the instance that holds the key is never de-initialised; `UNINSTALL COMPONENT gcm` refused |
+> | `25_ddl_reprepare` | `PREPARE … 'SELECT probe_outer(d), c FROM t'`, then `ALTER TABLE … DROP COLUMN c` and a second `EXECUTE` | `probe_outer` reaches two `init`s and one `deinit` — the failed re-prepare kept the handler it had fixed — and the control, the same prepared form with the failing column first, adds one `init` and its own `deinit` |
+> | `26_probe_nested_bound_const` | case `20` with the probe's `const_item` variant | the same counts as `20` |
+>
+> Two consequences are worth separating, because the component can act on only one of them:
+>
+> - **The leaked instance is held for the life of the server.** Nothing to change in the component:
+>   it is the server's, and the fix belongs in `sql/item_func.cc` (the two points are named in
+>   `docs/upstream-udf-handler-leak.md`).
+> - **The instance may hold secrets.** Amendment A16 gives up the secrets of the instance that
+>   *raises* an error; one the server abandons **without** an error keeps what it holds, a key
+>   fetched from the keyring included. Case `24` measures the visible half of that (the seal is
+>   never counted); whether the component could do more — at the price of the cross-row reuse
+>   A11 and A13 exist for — is an open design question, and A16 states the limit rather than
+>   implying a guarantee it cannot give.
+>
+> Operational constraint 18 carries the rule for users.
 >
 > **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
 > backward compatible: no envelope a released build wrote or reads is affected.

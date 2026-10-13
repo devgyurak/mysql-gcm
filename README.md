@@ -87,9 +87,13 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
     boundary is the account, not a privilege. With the file keyring — the only one in MySQL
     Community — the key sits beside the data; external backends are untested. Share a key through a
     definer routine with the id hard-coded, never through a view.
-18. **Do not nest one of these functions inside another with a bound parameter.**
-    `gcm_decrypt(gcm_encrypt(?, ?), ?)` in a prepared statement fails, and afterwards
-    `UNINSTALL COMPONENT` is refused until the server restarts. A server defect, seen on 8.4.
+18. **A prepared statement whose re-prepare fails after one of these functions has been fixed can
+    leave that instance unreleased.** `gcm_decrypt(gcm_encrypt(?, ?), ?)` fails on `EXECUTE`, and
+    afterwards `UNINSTALL COMPONENT` is refused until the server restarts — as it also is after a
+    sibling function, a seal that raised nothing, or a re-prepare invalidated by `ALTER TABLE`.
+    Nesting one of them inside another with a bound parameter is the shape that leaks by
+    construction; avoid it. Server defect, pinned per major on 8.0, 8.4 and 9
+    (`tests/integration/nested`).
 19. **`gcm_key_usage` is a count, not your key's usage.** It covers the key-id functions only, this
     server only, since the last start or reinstall, per account and key id. The key-argument functions are not
     counted. Nothing is persisted and nothing is refused.

@@ -83,9 +83,12 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
     아니라 계정입니다. file keyring — MySQL Community 에 있는 유일한 keyring — 에서는 키가 데이터 옆에
     있고, 외부 백엔드는 검증되지 않았습니다. 키 공유는 id 를 하드코딩한 definer 루틴으로 하고, 뷰로는
     하지 마세요.
-18. **바인딩 인자와 함께 이 함수들을 서로 중첩하지 마세요.** prepared statement 의
-    `gcm_decrypt(gcm_encrypt(?, ?), ?)` 는 실패하고, 그 뒤에는 서버를 재시작할 때까지
-    `UNINSTALL COMPONENT` 가 거부됩니다. 서버 결함이며 8.4 에서 확인했습니다.
+18. **이 함수들 중 하나가 fix 된 뒤 prepared statement 의 재-prepare 가 실패하면 그 인스턴스가
+    해제되지 않고 남을 수 있습니다.** `gcm_decrypt(gcm_encrypt(?, ?), ?)` 는 `EXECUTE` 에서 실패하고,
+    그 뒤에는 서버를 재시작할 때까지 `UNINSTALL COMPONENT` 가 거부됩니다 — 형제 함수, 아무것도 올리지
+    않은 봉인, `ALTER TABLE` 로 무효화된 재-prepare 도 마찬가지입니다. 바인딩 인자와 함께 서로 중첩하는 것이 구조적으로 새는
+    형태이니 피하세요. 서버 결함이며 8.0, 8.4, 9 에서 major 별로 고정했습니다
+    (`tests/integration/nested`).
 19. **`gcm_key_usage` 는 카운트이지 키의 사용량이 아닙니다.** 키 id 함수만, 이 서버만, 마지막 시작
     또는 재설치 이후만, 계정과 키 id 별로 셉니다. 키 인자 함수는 세지 않습니다. 영속화도 거부도 없습니다.
 

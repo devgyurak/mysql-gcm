@@ -11,7 +11,10 @@ paths:
 - C++17, with the same flags as the server tree. No dependence on exceptions or RTTI. `-Werror`.
 - Manage OpenSSL handles with RAII wrappers, following the
   `std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>` pattern. Raw `new`/`delete` and
-  direct `malloc` are confined to the `initid->ptr` result buffer, paired in `deinit`.
+  direct `malloc` are confined to the `initid->ptr` result buffer, paired in `deinit`. The one other place is the table of
+  usage counts (`src/usage.cc`, amendment A14): its rows and their names are `calloc`/`malloc`'d in
+  `usage_init` and `usage_fold` and freed in `usage_deinit`, because a container that throws on
+  allocation failure is not available under `-fno-exceptions`.
 - Return errors as `enum class GcmError { ok, bad_envelope, bad_tag, key_unavailable, openssl_failure, ... }`.
   No string errors — that is how data ends up in a message.
 - Bytes are `std::span<const unsigned char>`, or a `const unsigned char *, size_t` pair where C++20 is

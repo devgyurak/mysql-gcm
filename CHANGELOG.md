@@ -50,6 +50,11 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   and 9 — for `gcm_decrypt(gcm_encrypt(?, ?), ?)`, but also for a sibling function, for a key-id
   instance that raised nothing (whose seal is then never counted) and for a re-prepare invalidated
   by `ALTER TABLE`, with no nesting and no parameter.
+- **The server cause behind it** (#43): a failed re-prepare leaves every loadable function the
+  statement had already fixed holding its handler, because `udf_handler::cleanup()` returns early
+  while a statement is being (re)prepared. Read from the 8.0.43, 8.4.11 and 9.4.0 sources,
+  cross-checked against the probe's init/deinit counts, and recorded with a reproducer in
+  `docs/upstream-udf-handler-leak.md` — a draft that is not submitted anywhere.
 
 ### Changed
 - **An error row gives up everything its instance holds, in all six functions** (#43, amendment

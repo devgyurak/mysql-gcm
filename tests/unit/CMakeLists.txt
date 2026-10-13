@@ -15,6 +15,8 @@ if(GCM_SANITIZE)
 endif()
 
 find_package(OpenSSL 3.0 REQUIRED)
+# usage_test.cc starts threads; before glibc 2.34 that needs an explicit link.
+find_package(Threads REQUIRED)
 
 find_package(GTest QUIET)
 if(NOT GTest_FOUND)
@@ -56,7 +58,7 @@ add_executable(gcm_unit
 target_include_directories(gcm_unit PRIVATE ${GCM_REPO_ROOT}/third_party)
 target_compile_definitions(gcm_unit PRIVATE GCM_REPO_ROOT="${GCM_REPO_ROOT}")
 target_compile_options(gcm_unit PRIVATE -Wall -Wextra -Werror)
-target_link_libraries(gcm_unit PRIVATE gcm_core GTest::gtest_main)
+target_link_libraries(gcm_unit PRIVATE gcm_core GTest::gtest_main Threads::Threads)
 
 # enable_testing() must come first: without it CMake writes no CTestTestfile.cmake and
 # `ctest` reports "No tests were found" while still exiting 0 — a green gate that ran

@@ -47,13 +47,19 @@ inline constexpr size_t kMaxUsageNames = 1024;
 inline constexpr size_t kMaxUsageNamesPerAccount = 64;
 
 /* A name is (account, key id): the keyring namespace of amendment A13. Neither
-   part may contain a NUL byte; the callers have checked both. */
+   part may be empty or contain a NUL byte; the callers have checked both. The
+   account is the string A13 builds, so its one ambiguity carries over: 'a@b'@'c'
+   and 'a'@'b@c' are one account here as they are one keyring namespace. */
 struct UsageName {
   const char *account;
   size_t account_len;
   const char *key_id;
   size_t key_id_len;
 };
+
+/* a + b, or UINT64_MAX when that would wrap. Shared so that the counters an
+   instance keeps before folding saturate the same way the table does. */
+uint64_t usage_saturating_add(uint64_t a, uint64_t b);
 
 /* Starts counting from zero, at time `now` (Unix seconds). Returns 0 on success
    and 1 when the table cannot be allocated. Calling it again while counting is a

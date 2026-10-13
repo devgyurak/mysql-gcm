@@ -55,6 +55,30 @@ void fill_table_with_accounts_but_one_share() {
   }
 }
 
+/* `threads` threads, each folding one random seal `folds` times under a name of its own —
+   so rows are being added while others are folded — with one more thread reading throughout.
+   Returns the number of reads that reported a count above what any writer could have made. */
+size_t fold_distinct_names_from_threads_while_reading(const std::string &account, size_t threads,
+                                                      size_t folds) {
+  size_t impossible_reads = 0;
+  std::thread reader([&account, &impossible_reads, folds] {
+    for (size_t i = 0; i < folds; ++i) {
+      if (read(account, "thread_0").counts.random_seals > folds) ++impossible_reads;
+    }
+  });
+  std::vector<std::thread> workers;
+  for (size_t t = 0; t < threads; ++t) {
+    workers.emplace_back([&account, t, folds] {
+      for (size_t i = 0; i < folds; ++i) {
+        fold(account, "thread_" + std::to_string(t), UsageCounts{1, 0, 0, 0});
+      }
+    });
+  }
+  for (std::thread &worker : workers) worker.join();
+  reader.join();
+  return impossible_reads;
+}
+
 /* `threads` threads, each folding one random seal of one byte `folds` times. */
 void fold_from_threads(const std::string &account, const std::string &key_id, size_t threads,
                        size_t folds) {
@@ -255,6 +279,35 @@ TEST_F(Usage, GivenEightThreadsFoldingUnderOneName_WhenRead_ThenNoFoldWasLost) {
   // Then
   EXPECT_EQ(answer.counts.random_seals, 40000u);
   EXPECT_EQ(answer.counts.bytes_sealed, 40000u);
+}
+
+TEST_F(Usage,
+       GivenEightThreadsEachAddingItsOwnName_WhenAnotherReadsThroughout_ThenEveryRowIsWhole) {
+  // Given: rows being added and folded at once, with a reader in the middle of it
+  const size_t impossible = fold_distinct_names_from_threads_while_reading("app@%", 8, 2000);
+
+  // When
+  const UsageAnswer first = read("app@%", "thread_0");
+  const UsageAnswer last = read("app@%", "thread_7");
+
+  // Then: no lost update, no torn read, and nothing was pushed out
+  EXPECT_EQ(impossible, 0u);
+  EXPECT_EQ(first.counts.random_seals, 2000u);
+  EXPECT_EQ(last.counts.random_seals, 2000u);
+  EXPECT_TRUE(last.complete);
+}
+
+TEST_F(Usage, GivenDeterministicSealsAndTagFailuresNearTheLimit_WhenMoreIsFolded_ThenTheySaturate) {
+  // Given
+  fold("app@%", "k1", UsageCounts{0, UINT64_MAX - 1, 0, UINT64_MAX});
+
+  // When
+  fold("app@%", "k1", UsageCounts{0, 5, 0, 1});
+
+  // Then: every field saturates, not only the two the other case covers
+  const UsageAnswer answer = read("app@%", "k1");
+  EXPECT_EQ(answer.counts.det_seals, UINT64_MAX);
+  EXPECT_EQ(answer.counts.tag_failures, UINT64_MAX);
 }
 
 TEST_F(Usage, GivenCountingAlreadyStarted_WhenInitIsCalledAgain_ThenCountsAndStartTimeAreKept) {

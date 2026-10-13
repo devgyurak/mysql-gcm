@@ -38,15 +38,14 @@ int64_t g_since = 0;
    whole table is full or memory ran out — see usage_read for what it costs. */
 bool g_rowless_account_lost = false;
 
-uint64_t saturating_add(uint64_t a, uint64_t b) {
-  const uint64_t sum = a + b;
-  return sum < a ? UINT64_MAX : sum;
-}
-
 bool is_zero(const UsageCounts &c) {
   return c.random_seals == 0 && c.det_seals == 0 && c.bytes_sealed == 0 && c.tag_failures == 0;
 }
 
+/* The callers bound both parts — an account by kMaxAccountLen and a key id by
+   kMaxKeyIdLen (src/key_source.h), and neither is empty — so this cannot overflow
+   and a name is at most a few kilobytes. The module does not re-check: it has no
+   server dependency to take those constants from. */
 size_t joined_len(const UsageName &name) { return name.account_len + 1 + name.key_id_len; }
 
 bool matches(const Row &row, const UsageName &name) {
@@ -102,11 +101,21 @@ Row *add(const UsageName &name, size_t names_of_account) {
   row->name_len = len;
   row->account_len = name.account_len;
   row->counts = UsageCounts{0, 0, 0, 0};
-  row->account_lost = false;
+  /* An account that lost a use while it had no row — which only a failed
+     allocation can cause, since a full table stays full — is one of the accounts
+     the shared flag stands for. Its first row takes the mark over, so that getting
+     a row later does not turn `complete` back to true. This can mark an account
+     that lost nothing; saying "incomplete" too often is the safe direction. */
+  row->account_lost = names_of_account == 0 && g_rowless_account_lost;
   return row;
 }
 
 }  // namespace
+
+uint64_t usage_saturating_add(uint64_t a, uint64_t b) {
+  const uint64_t sum = a + b;
+  return sum < a ? UINT64_MAX : sum;
+}
 
 int usage_init(int64_t now) {
   const std::lock_guard<std::mutex> lock(g_mutex);
@@ -141,10 +150,10 @@ void usage_fold(const UsageName &name, const UsageCounts &delta) {
     note_lost(name, view.names);
     return;
   }
-  row->counts.random_seals = saturating_add(row->counts.random_seals, delta.random_seals);
-  row->counts.det_seals = saturating_add(row->counts.det_seals, delta.det_seals);
-  row->counts.bytes_sealed = saturating_add(row->counts.bytes_sealed, delta.bytes_sealed);
-  row->counts.tag_failures = saturating_add(row->counts.tag_failures, delta.tag_failures);
+  row->counts.random_seals = usage_saturating_add(row->counts.random_seals, delta.random_seals);
+  row->counts.det_seals = usage_saturating_add(row->counts.det_seals, delta.det_seals);
+  row->counts.bytes_sealed = usage_saturating_add(row->counts.bytes_sealed, delta.bytes_sealed);
+  row->counts.tag_failures = usage_saturating_add(row->counts.tag_failures, delta.tag_failures);
 }
 
 bool usage_read(const UsageName &name, UsageAnswer *out) {

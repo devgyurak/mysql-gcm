@@ -25,7 +25,8 @@
 > needs the *inner* call to take a prepared-statement parameter, the one condition A13 names — that
 > function's `deinit` is not called, not at the end of the statement, not on `DEALLOCATE PREPARE`,
 > not when the session ends; and afterwards `UNINSTALL COMPONENT` is refused until the server
-> restarts. Whatever that `UDF_INIT` holds stays in memory, unwiped, for the life of the server.
+> restarts. What that `UDF_INIT` held would have stayed in memory, unwiped, for the life of the
+> server — which is what the rule below exists to prevent for the instance that raises.
 >
 > **The decision.** Every row callback of all six crypto functions — `gcm_encrypt`,
 > `gcm_encrypt_det` and `gcm_decrypt`, and the three `_kr` forms — gives up, before it returns an
@@ -52,7 +53,8 @@
 > the wipe runs while that statement is ending. No success path changes — a row that succeeds keeps
 > the context and the nonce key for the next row exactly as A11 says. Nothing here rests on the
 > three majors behaving alike in the nested shape: they do not (A13, "Implementation notes", case
-> `20`), and the rule is what makes that difference irrelevant to what is left in memory.
+> `20`), and the rule is what makes that difference irrelevant to what the instance that raised
+> leaves in memory — not to what an instance the server abandons *without* an error keeps.
 >
 > **What it does not cover, deliberately.**
 >
@@ -73,7 +75,8 @@
 >   what they hold stays, a fetched keyring key included. No row callback can close that; whether it
 >   could be reduced at the price of the cross-row reuse A11 and A13 exist for is an open question,
 >   and this amendment states the limit rather than implying a guarantee it cannot give. Cases `23`
->   to `26` of `tests/integration/nested` pin it.
+>   to `25` of `tests/integration/nested` pin the three shapes; `26` is the `const_item` variant of
+>   `20`, the control that says constness is not the trigger.
 > - **It does not fix the server defect.** A leaked instance is still leaked, and `UNINSTALL
 >   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked per-instance
 >   state **of an instance whose row raised** holds no key material, no plaintext and no usable
@@ -1233,9 +1236,10 @@
 > above). Every other row that does not reach the cipher for real raises — an over-long argument, a
 > malformed envelope, a key length no suite has — and a row that raises gives the whole state up
 > (A16, above). Inside the execution the bound is unchanged — the next row, or the row that raises,
-> ends the retention — but an instance the *server* abandons without calling `deinit` does not end
-> at all: it keeps what it holds, this copy included, for the life of the server. That is the
-> defect of issue #43, pinned by `tests/integration/nested/24_nonraising_kr_inner`, and neither A11
+> ends the retention — but an instance the *server* abandons without calling `deinit` **and without
+> an error** does not end at all: it keeps what it holds, this copy included, for the life of the
+> server. That is the defect of issue #43, pinned by
+> `tests/integration/nested/24_nonraising_kr_inner`, and neither A11
 > nor A16 can close it from inside a row callback. How much the retention adds depends on where the
 > key comes from, and the two cases are not the same:
 >

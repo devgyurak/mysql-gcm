@@ -6,6 +6,106 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
+>
+> **Status: proposed (issue #43, PR review recorded below). Nothing is implemented by this
+> amendment; the implementation follows in its own PR.** A13 gave the three `_kr` functions this
+> rule. This gives it to the three key-argument functions as well, and says why the cost is zero.
+>
+> A13's "The key copy" already requires it of a `_kr` row that raises: the fetched key, the A11
+> context, the A11 nonce key and the result buffer are given up at once, not at `deinit`. It stopped
+> there because the function that needed it most was the one holding a key the statement's text does
+> not contain. **The reason is not specific to those three functions.** A13 recorded the shape that
+> shows it, and the sweep added for #43 pins it — `tests/integration/nested`, in the PR that precedes
+> this one, which is also where A13's "not pinned by a committed case" sentence is corrected: when a
+> loadable function raises while the server is evaluating it as the argument of another one — which
+> needs the *inner* call to take a prepared-statement parameter, the one condition A13 names — that
+> function's `deinit` is not called, not at the end of the statement, not on `DEALLOCATE PREPARE`,
+> not when the session ends; and afterwards `UNINSTALL COMPONENT` is refused until the server
+> restarts. Whatever that `UDF_INIT` holds stays in memory, unwiped, for the life of the server.
+>
+> **The decision.** Every row callback of all six crypto functions — `gcm_encrypt`,
+> `gcm_encrypt_det` and `gcm_decrypt`, and the three `_kr` forms — gives up, before it returns an
+> error to the server:
+>
+> - the key fetched from the keyring (a `_kr` function only, A13);
+> - the A11 states: the scheduled `EVP_CIPHER_CTX` with its key schedule behind `gcm_decrypt`, and
+>   the cached nonce key with the key copy it is valid for behind `gcm_encrypt_det` (`gcm_encrypt`
+>   keeps neither);
+> - the result buffer, which at that moment may still hold the previous row's output — plaintext
+>   for the two decrypt functions, an envelope for the four encrypt ones.
+>
+> The instance is then **spent**: a further call on it raises instead of using a released session.
+> The latch is what makes the wipe observable, because no such call can be made except by a test
+> (the reason is read in the sources, not pinned — see the paragraph below).
+>
+> **Why the cost is zero.** A11's invariant list lets a pre-check failure leave the schedule intact,
+> on the grounds that "a wrong-length key on one row is that row's SQL error, not a reason to
+> discard a valid schedule". That a wrong-length key is that row's SQL error is exactly why
+> discarding it costs nothing: the row's error ends the execution. **Read in the 8.0.43, 8.4.11 and
+> 9.4.0 sources rather than pinned by a test**: `udf_handler::get_arguments` returns early on the
+> handler's error flag, so the row callback is not entered again after it has reported an error, and
+> the wipe runs while that statement is ending. No success path changes — a row that succeeds keeps
+> the context and the nonce key for the next row exactly as A11 says. Nothing here rests on the
+> three majors behaving alike in the nested shape: they do not (A13, "Implementation notes", case
+> `20`), and the rule is what makes that difference irrelevant to what is left in memory.
+>
+> **What it does not cover, deliberately.**
+>
+> - **A `bad_tag` that `gcm.strict=OFF` turns into NULL does not wipe.** The row succeeded as far as
+>   the server is concerned and the statement continues, so the session is still wanted. A11's rule
+>   already applies there: the core discards the copy, the context and the nonce key on the failure,
+>   and only a `_kr` function keeps its fetched key, because the next row must still decrypt (A13).
+>   The result buffer is left alone too: the statement has not ended, and whatever ends it wipes —
+>   `deinit` on success, A16 on an error row. What the buffer may hold past the current row's output
+>   is the previous row's output of that same statement, not a secret the statement's end leaves
+>   behind.
+> - **`deinit` is still the normal exit** and still cleanses everything (A11). A16 removes the
+>   reliance on `deinit` from the error path only.
+> - **It does not fix the server defect.** A leaked instance is still leaked, and `UNINSTALL
+>   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked **per-instance
+>   state** holds no key material, no plaintext and no usable context; the server's own argument
+>   buffers are outside the component's reach, as A11 already says. The defect is issue #43, pinned
+>   by `tests/integration/nested` and summed up in operational constraint 18; a fix would be the
+>   server's.
+> - **`init` failures are not part of it.** A9's rollback already frees what `init` allocated; A16 is
+>   about the row callback.
+>
+> **What A11 loses.** Its invariant list says the pre-checks "leave it intact … untouched by a
+> `bad_key_len` pre-check". That sentence is replaced above: the pre-checks still do not touch it
+> while the call runs, and the call then raises, which does. Nothing else in A11 changes — not the
+> byte layout, not the measurements, not the threat model.
+>
+> **Review record.** An independent `crypto-reviewer` pass (2026-10-13, this PR) read the six row
+> callbacks, `udf_glue`, `gcm`, `nonce`, `key_source`, `spec/envelope.md` and `crypto-safety.md`
+> against this draft. It found the enumerated secret set complete for component-owned state, and the
+> "cost is zero" argument sound — no shape in the repository enters one `UDF_INIT`'s row callback
+> again after an error. Four things it raised are fixed above: the result buffer holds an envelope,
+> not plaintext, in the encoding functions; the `get_arguments` claim and the uniformity of the three
+> majors are source reads, now marked as such, and the major difference in the nested shape is named
+> rather than smoothed over; the NULL path's result buffer now says why it is not wiped; and the
+> guarantee is scoped to the per-instance state. Three are left to the implementation PR and are in
+> the table below: `architecture.md` §3 and §5 and `docs/ops-constraints.md` 18 still tie the wipe to
+> the `_kr` functions; `spec/envelope.md` states the rule only inside §4.2, so §4 has to carry it for
+> all six; and `tests/adapter/udf_kr_test.cc` asserts on the latch where it lives today. It did not
+> review the server-side claim — that is the next PR's subject — and this is not a human
+> cryptographic review.
+>
+> **Impact, for the implementation PR:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/udf_glue.{h,cc}` | A13's `give_up_secrets` moves here from `udf_kr.cc`; its `spent` latch is lifted from the keyring state (`KeyHold`) to the per-instance state, so one rule and one message serve all six functions |
+> | `src/udf_encrypt.cc`, `src/udf_decrypt.cc` | call it before every error they raise |
+> | `src/udf_kr.cc` | uses the moved helper; its own behaviour does not change, its tests do (next row) |
+> | `tests/adapter/udf_kr_test.cc` | its assertions on `spent` follow the field to `UdfState`; the new cases go here |
+> | `src/usage.cc` | unchanged: the error row still folds what the instance counted (A14) |
+> | `spec/envelope.md` | the error-path rule moves into §4 and becomes normative for the three key-argument functions (§4.2 rule 7 currently states it only for the key-id ones). One sentence; no byte layout and no vector change |
+> | `architecture.md` §3, §5 | both still say a `_kr` function's key is what a raising row wipes; they have to say all six |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | "the key-id functions therefore wipe everything their instance holds" becomes "every function does" |
+> | `CHANGELOG.md` | a Documented entry, as A15 has |
+> | `crypto-safety.md` (key handling), `.agents/rules/code-review.md`, `AGENTS.md` §5 | the wipe is unconditional on the error path, for all six |
+
 > ## Amendment A15 (2026-10-13) — a key version in the envelope: rotation and dual-read for the key-id functions
 >
 > **Status: proposed (issue #34, the part amendment A13 deferred). Nothing is implemented by this
@@ -1068,9 +1168,11 @@
 > - On **every** failure of the cipher operation — an OpenSSL error at any step, and `bad_tag` — the
 >   copy is cleansed and the context is forgotten. The next row starts from scratch and never trusts a
 >   context that has just reported an error. The pre-checks that return *before* the context is
->   consulted — a key length no suite has, a malformed envelope — leave it intact: a wrong-length key
->   on one row is that row's SQL error, not a reason to discard a valid schedule. The nonce-key cache
->   follows the same rule: forgotten on an HMAC failure, untouched by a `bad_key_len` pre-check.
+>   consulted — a key length no suite has, a malformed envelope — do not touch it while the call runs
+>   (a wrong-length key on one row is that row's SQL error, not a reason to discard a valid schedule
+>   *mid-call*), and the call then raises, which gives up the copy, the context, the nonce key and the
+>   result buffer at once (amendment A16 below). The nonce-key cache follows the same rule: forgotten
+>   on an HMAC failure, and given up by the row that raises.
 > - `deinit` cleanses both.
 > - When the key is forgotten, the context is reset as well: the key schedule inside the
 >   `EVP_CIPHER_CTX` is key-equivalent material and does not outlive the copy it was made from.
@@ -1106,12 +1208,13 @@
 > copy and its derived material lived for one operation, one row. After it, the **last key used**
 > by a UDF item — its copy, its schedule in the context, and for the deterministic variant its
 > `nonce_key` — lives until a row reaches the cipher with a different key or suite, a cipher
-> operation fails, or the item's `deinit` at the end of the execution. Rows that never reach the
-> cipher do not replace it: a NULL argument, an over-long one, a malformed envelope, a key length no
-> suite has, and a legacy `0x01` envelope (which never uses the session) all leave the previous key
-> in place. The bound is unchanged — nothing outlives the execution — but "the next row" is not
-> always what ends it. How much that adds depends on where the key comes from,
-> and the two cases are not the same:
+> operation fails, or the item's `deinit` at the end of the execution. Two kinds of row leave the
+> previous key in place without using the cipher: a NULL argument, and a legacy `0x01` envelope that
+> opens (one that fails raises, and a row that raises gives the whole state up — amendment A16). Every other row that does not reach the cipher for real
+> raises — an over-long argument, a malformed envelope, a key length no suite has — and a row that
+> raises gives the whole state up (amendment A16 below). The bound is unchanged — nothing outlives
+> the execution — but "the next row" is not always what ends it. How much that adds depends on
+> where the key comes from, and the two cases are not the same:
 >
 > - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
 >   bound parameter. This is the usage the README documents. The server already holds that key for

@@ -7,8 +7,9 @@
 
 > ## 개정 A14 (2026-10-12) — 키 id 함수의 키별 사용량 카운트
 >
-> **상태: 구현됨, 검토 대기 (이슈 #35).** 표는 `src/usage`, 함수는 `src/udf_usage.cc`, 세기와 합치기는
-> `src/udf_kr.cc` 와 `src/udf_glue.cc` 에 있다. 이 판을 담은 PR 이 머지될 때 설계가 된다. 고정한 것: 표는
+> **상태: 구현되어 머지됨 (이슈 #35; PR #44, #45, #46, 2026-10-13, 해당 PR 들에 기록된 검토 뒤 저장소
+> owner 가 머지).** 표는 `src/usage`, 함수는 `src/udf_usage.cc`, 세기와 합치기는 `src/udf_kr.cc` 와
+> `src/udf_glue.cc` 에 있다. 고정한 것: 표는
 > `tests/unit`(18 케이스, 스레드 포함), 배선은 `tests/adapter/udf_usage_test.cc`, 8.0·8.4·9.4 의
 > `tests/integration/63_kr_usage`, 8.4 의 `mysql-test/suite/gcm/t/gcm_kr_usage`, 그리고 keyring 이 없는
 > 서버에서도 함수가 답한다는 것. 고정하지 못한 것: de-initialise 되지도 에러를 내지도 않는 인스턴스가

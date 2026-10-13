@@ -8,9 +8,10 @@
 
 > ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions
 >
-> **Status: implemented, awaiting review (issue #35).** The table is in `src/usage`, the function
-> in `src/udf_usage.cc`, the counting and the fold in `src/udf_kr.cc` and `src/udf_glue.cc`. It
-> becomes the design when the PR that carries this revision merges. Pinned: the table in
+> **Status: implemented and merged (issue #35; PRs #44, #45 and #46, 2026-10-13, merged by the
+> repository owner after the reviews recorded on those PRs).** The table is in `src/usage`, the
+> function in `src/udf_usage.cc`, the counting and the fold in `src/udf_kr.cc` and
+> `src/udf_glue.cc`. Pinned: the table in
 > `tests/unit` (18 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
 > `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
 > 8.4; and on a server with no keyring, where the function still answers. Not pinned: counts lost

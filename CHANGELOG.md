@@ -27,6 +27,13 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **Design amendment A15, proposed** (#34, the part A13 deferred): a key version in the envelope,
+  under a new version byte `0x10`, so that the key-id functions can read a half-rotated column and
+  re-seal it without a second column. What is authenticated and how the deterministic nonce is
+  derived do not change: the header is as unauthenticated as today's version byte. **Nothing is
+  implemented, and nothing may be until it has been reviewed** — it changes the envelope, and an
+  earlier draft that put the header into the associated data without changing the nonce derivation
+  was blocked for a nonce reuse.
 - **Design amendment A14** (#35), the rationale for `gcm_key_usage` above: what a count is and is
   not, why there is no persistence and no threshold, and the rules for the component's first shared
   state (`src/usage`, bounded per account).

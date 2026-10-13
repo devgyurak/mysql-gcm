@@ -46,7 +46,7 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   `udf_handler` is never released on any of the three tested majors, which is why the component
   cannot be uninstalled afterwards. Read from the 8.0.43, 8.4.11 and 9.4.0 sources, cross-checked
   against the probe's init/deinit counts, and recorded with a reproducer in
-  `docs/upstream-udf-nested-handler-leak.md` — a draft that is not submitted anywhere.
+  `docs/upstream-udf-handler-leak.md` — a draft that is not submitted anywhere.
 
 ## 0.1.0 — 2026-10-10
 

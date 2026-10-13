@@ -757,7 +757,7 @@
 > #### 서버 원인, 소스에서 읽은 것 (2026-10-13)
 >
 > 위 결함은 8.0.43·8.4.11·9.4.0 소스에서 진단하고 프로브의 카운트와 대조해 확인했다. 전체 기록 —
-> 코드, major 간 차이, 그리고 자기완결적 재현 — 은 `docs/upstream-udf-nested-handler-leak.md` 에
+> 코드, major 간 차이, 그리고 자기완결적 재현 — 은 `docs/upstream-udf-handler-leak.md` 에
 > 있으며, 어디에도 제출하지 않은 초안이다. 한 문단으로: 실패는 *바깥* 함수의 `init` 이 실행되는
 > 동안 일어난다. `udf_handler::call_init_func` 는 상수 인자를 `args[i]->val_str(...)` 로 평가하는데,
 > 그 인자가 그 자체로 loadable function 이면 그것이 안쪽 함수의 행 콜백이다 — 바인딩된 매개변수가

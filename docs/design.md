@@ -870,7 +870,7 @@
 >
 > The defect above was diagnosed from the 8.0.43, 8.4.11 and 9.4.0 sources and cross-checked against
 > the probe's counts. The full account — the code, the per-major difference and a self-contained
-> reproducer — is `docs/upstream-udf-nested-handler-leak.md`, a draft that is not submitted anywhere.
+> reproducer — is `docs/upstream-udf-handler-leak.md`, a draft that is not submitted anywhere.
 > In one paragraph: the failure happens while the *outer* function's `init` is running.
 > `udf_handler::call_init_func` evaluates a constant argument by calling `args[i]->val_str(...)`, and
 > for an argument that is itself a loadable function that is the inner function's row callback — with

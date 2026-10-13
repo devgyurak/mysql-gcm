@@ -39,8 +39,11 @@
 >   `keyring_key_fetch` lets an application move a keyring key into that uncounted family.
 > - Other servers are other counts. A replica under ROW replication calls no function and counts
 >   nothing; copying or restoring an envelope is not a seal.
-> - It starts again from zero when the server restarts or the component is reinstalled. `since`
->   changes when it does, which is how a reader detects the reset.
+> - It starts again from zero when the server restarts or the component is reinstalled. A reader
+>   detects the reset by **`since` changing or a count being smaller than the one it last read**,
+>   not by `since` alone: `since` has one-second resolution and follows the wall clock, so a
+>   reinstall within the same second leaves it unchanged, and a clock stepped backwards can make
+>   it earlier. The ledger A8 asks the operator to keep holds the previous value to compare with.
 > - Counts held by an instance that neither raises an error nor is de-initialised are lost. Issue
 >   #43 shows the server skipping `deinit` in one shape (observed on 8.4.11 only); the fold in the
 >   error row covers the case where the instance itself raised, and nothing covers the rest.
@@ -103,8 +106,11 @@
 >   is not attributed, and `complete` turns false in that account's answers from then on. The
 >   per-account bound is what keeps one account from switching counting off for the others: an
 >   account that fills its share loses its own later names and changes nothing in anyone else's
->   answer. Filling the whole table takes sixteen accounts acting together; an account that then
->   has no row at all is told `complete: false`. Names are never evicted: evicting would make a
+>   answer. The whole table fills when sixteen accounts each hold their 64 names — which needs no
+>   collusion, only that many busy accounts. From then on every new name is lost: an account that
+>   has rows is told `complete: false` when it loses one, and an account with no row at all is told
+>   `false` as soon as any rowless account has lost a use, because the table has nowhere to keep
+>   which one. That last case is the one way another account's use shows in an answer. Names are never evicted: evicting would make a
 >   count go backwards.
 > - **Lifetime:** created in init before any function is registered, released in deinit after every
 >   function is unregistered. An instance the server never de-initialises (issue #43) has already

@@ -41,6 +41,12 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
   what is deliberately left out (a key version in the envelope, rotation). It also records a
   server defect found on the way (#43, operational constraint 18).
+- **The server cause behind the nested-call defect** (#43): a loadable function that raises while it
+  is being evaluated as a constant argument of another one is left holding its handler — the inner
+  `udf_handler` is never released on any of the three tested majors, which is why the component
+  cannot be uninstalled afterwards. Read from the 8.0.43, 8.4.11 and 9.4.0 sources, cross-checked
+  against the probe's init/deinit counts, and recorded with a reproducer in
+  `docs/upstream-udf-nested-handler-leak.md` — a draft that is not submitted anywhere.
 
 ## 0.1.0 — 2026-10-10
 

@@ -866,6 +866,32 @@
 > | `crypto-safety.md` (key handling, failure semantics, blocked patterns), `architecture.md` §1, §3 and §5 | the widened key-copy rule, the module and lifetime rows, and the one cross-row value keyed on (account, key id) |
 > | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the function table, constraints 2 and 14, what verbose keyring logging records, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
 
+> #### The server cause, read from the sources (2026-10-13)
+>
+> The defect above was diagnosed from the 8.0.43, 8.4.11 and 9.4.0 sources and cross-checked against
+> the probe's counts. The full account — the code, the per-major difference and a self-contained
+> reproducer — is `docs/upstream-udf-nested-handler-leak.md`, a draft that is not submitted anywhere.
+> In one paragraph: the failure happens while the *outer* function's `init` is running.
+> `udf_handler::call_init_func` evaluates a constant argument by calling `args[i]->val_str(...)`, and
+> for an argument that is itself a loadable function that is the inner function's row callback — with
+> the bound parameter still valueless, which is the empty string the inner sees. The inner's
+> `udf_handler` was already fixed, and its RAII release was **deferred** (`udf_fun_guard.defer()`,
+> because the handler is meant to survive into execution), so from then on only
+> `udf_handler::cleanup()` can release it; that one returns early while the statement is being
+> (re)prepared, by design, so the execution it was keeping the handler for never arrives and nothing
+> releases it. The `usage_count` that `find_udf()` took therefore stays,
+> `mysql_udf_registration::udf_unregister` only succeeds at `usage_count == 1` (the idle state of a
+> component-registered function), and the component's de-initialisation fails — which is the ER 3538
+> `UNINSTALL` error in the table above. The de-initialisation function of the leaked handler is never
+> called. 8.0.43 leaks the *outer* function's handler as well as the inner's, because its
+> `call_init_func` does not check `thd->is_error()` after evaluating a constant argument where 8.4.11
+> and 9.4.0 do; that is why the probe's outer-init count is 2 on 8.0 and 0 on the other two.
+>
+> This is a source read plus the probe's counts, not a pinned test. No fix was attempted on either
+> side of the boundary: the server would have to give the handler back on the abort path, and the
+> component's part of the consequence is amendment A16 (a row that raises gives up every secret
+> rather than waiting for a `deinit` that does not come).
+
 > ## Amendment A12 (2026-10-07) — Cross-suite nonce-key linkage, and deterministic AES-128: analysis for review
 >
 > **Status: decisions recorded on 2026-10-07 by Codex (AI design reviewer).** The analysis and

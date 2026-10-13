@@ -117,6 +117,10 @@ crypto safety `crypto-safety.md`, and for how to write tests `testing.md`.
   point. Both are listed in `scripts/check-architecture.py`.
 - Do not ship experimental code that skips encryption or returns plaintext as a successful result under
   an environment variable or a debug option. Experiments belong in a target that is not shipped.
+- `tests/probe` is a test-only component that registers throwaway UDFs to pin a server defect
+  (issue #43). Its name, `probe`, is reserved: `scripts/build-probe.sh` builds it from its own
+  directory only, and `scripts/check-architecture.py` refuses the word anywhere under `src/` or
+  `docker/`, so the scaffolding cannot reach the component build or an image.
 - `python3 scripts/check-architecture.py` checks the core's explicit include dependencies and
   references to known test entry points from the adapters. When you add an allowed header, review this
   rule and the checker's list together.

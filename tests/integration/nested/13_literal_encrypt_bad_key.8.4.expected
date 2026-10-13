@@ -1,0 +1,9 @@
+# Given: the fixture key and an inner gcm_encrypt whose key argument is one byte
+# When: the inner call is the argument of gcm_decrypt, with no prepared statement
+# Then: the key-length error is expected and the uninstall succeeds, as in 12
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 11: gcm_encrypt UDF failed; key must be 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128), and on decryption must match the envelope version; got 1
+--- after the case ---
+probe_counts: {"probe_outer":{"init":0,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":0,"deinit":0}}
+uninstall gcm: ok
+install gcm: ok

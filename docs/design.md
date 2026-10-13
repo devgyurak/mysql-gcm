@@ -10,11 +10,10 @@
 >
 > **Status: proposed (issue #34, the part amendment A13 deferred). Nothing is implemented by this
 > amendment, and it changes the envelope, so nothing may be implemented from it until it has had the
-> `crypto-reviewer` pass and two human reviewers.** It introduces a new version byte, changes what
-> is authenticated, and changes the deterministic nonce derivation; each of those is a decision for
-> review, not a detail. The first draft of this text was blocked by `crypto-reviewer` for a nonce
-> reuse it would have created; "The header, the nonce and why they go together" below is the
-> corrected design and says what was wrong.
+> `crypto-reviewer` pass and two human reviewers.** It adds a version byte and a header. **It does
+> not change what is authenticated or how the deterministic nonce is derived** — earlier drafts
+> did, and "Why the header is not authenticated" below records what they proposed, why the first
+> was unsafe, and why review chose the smaller design.
 >
 > A13 made the key a keyring entry named by id. It left rotation where it was: an application that
 > wants to move a column to a new key has to know, row by row, which key sealed it, and A13 refuses
@@ -70,7 +69,10 @@
 >   An A13 id that ends that way, or is longer than 243 bytes, cannot be used with `_krv`.
 >   **The entry is still an ordinary keyring entry**: `gcm_decrypt_kr(…, 'patient_name.v2')` reads
 >   the same key through A13, and seals plain `0x02`–`0x07` envelopes with it if asked. The
->   component does not prevent that; the derivation below is built so that it is not a nonce reuse.
+>   component does not prevent that, and it is not a nonce reuse: the two families derive and
+>   authenticate identically, so the same key, plaintext and AAD give the same nonce, ciphertext
+>   and tag in both. "One AAD convention per key" (constraint 7) therefore spans both families for
+>   such an entry.
 > - **Encryption names the version.** There is no "current version": the component does not
 >   enumerate the keyring to find the highest, and a setting that says which is current would be the
 >   `gcm.key_id` that A1 withdrew. Which version writers use is the application's configuration.
@@ -126,57 +128,47 @@
 >   A definer routine over `_krv` adds one thing to A13's oracle: its callers learn which versions
 >   exist.
 >
-> ### The header, the nonce and why they go together
+> ### Why the header is not authenticated
 >
-> - **The header is authenticated.** The associated data of a `0x10` envelope is exactly
->   `header(6) || aad`: the envelope's own first six bytes — with `suite` being `0x03`, `0x05` or
->   `0x07` for the deterministic variant — followed by the caller's AAD, an absent AAD being the
->   empty string. It is never shorter than six bytes, and the fixed length makes the split
->   unambiguous. For a `0x02`–`0x07` envelope read by `gcm_decrypt_krv` the associated data is the
->   caller's alone, as it always was.
->   Without this, where two entries hold the same key bytes, whoever can write the column could
->   relabel a row from one version to another, or rewrap a `0x10` envelope as a `0x02` one and back.
-> - **So the header is also an input to the deterministic nonce, under a second label:**
+> **Decision: the six header bytes are not part of the associated data, and the deterministic nonce
+> is derived exactly as today** — one label, `HMAC-SHA256(nonce_key, plaintext)[:12]`, the caller's
+> AAD the only associated data, and `spec/envelope.md` §3's "the AAD is not an input to the nonce"
+> unchanged. The header is as unauthenticated as the version byte of `0x02`–`0x07` already is.
+> Under the header, the bytes of a `0x10` envelope are those of the `0x02`–`0x07` envelope the same
+> key, plaintext and AAD would give.
 >
->   ```
->   nonce_key = HMAC-SHA256(key, "mysql-gcm/v2/det-nonce")
->   nonce     = HMAC-SHA256(nonce_key, header(6) || plaintext)[:12]
->   ```
->
->   `spec/envelope.md` §3 allows one AAD per (key, nonce): the deterministic nonce comes from the key
->   and the plaintext, so the same plaintext under the same key with two different AADs reuses the
->   pair, and with it GCM's authentication. Putting the header in the AAD and leaving the nonce as it
->   was would create exactly that whenever one key's bytes sit under two versions — `id.v1` and
->   `id.v2`, or two ids, or two accounts: same key, same plaintext, same nonce, different header.
->   **The first draft of this amendment did that**, and added a second label that covered only one
->   of the cases (the same bytes as `id` and `id.v1`). Making the header part of what is hashed
->   removes all of them: a different header is a different nonce. The `header` hashed is the same
->   six bytes that are authenticated.
-> - **The second label is still needed**, for a different reason: without it, `header || plaintext`
->   under `0x10` and a legacy plaintext that happens to consist of those very bytes would derive the
->   same nonce under the same key for two different messages — keystream reuse, which is worse than
->   the case above.
-> - **The alternative is to authenticate nothing and change nothing**: no header in the AAD, one
->   label, the nonce as today. Identical inputs then give identical output and there is no reuse. It
->   is the smaller change; what it gives up is the relabelling protection above. The hybrid — header
->   authenticated, nonce unchanged — is the one that is not safe. **Both safe designs are believed
->   safe on the assumption that HMAC-SHA256 is a PRF; neither has been independently reviewed.**
-> - **A side effect on A12.** A12 Q1 accepted that a key and its zero-extension derive one nonce key
->   and therefore link equal plaintexts across suites. They still derive one nonce key here — HMAC
->   pads the key as before — but under the extended header `suite` is hashed with the plaintext, so
->   the nonces differ and that linkage is gone for these envelopes. It remains for `0x02`–`0x07`.
-> - What a caller must still not do is unchanged: vary their own AAD under one key for the same
->   plaintext (constraint 7).
-> - **One confusion remains, and it is the caller's to avoid.** The two labels keep the *nonces* of
->   the two families apart. The associated data can still coincide: a `0x02`–`0x07` envelope sealed
->   through A13 under the entry `id.vN`, with a caller AAD that itself begins with the six bytes of
->   a header, authenticates the same bytes as a `0x10` envelope does, and can be rewrapped as one
->   (and back). It needs an honest writer to have chosen such an AAD. **Do not seal with
->   `gcm_encrypt_kr` under a versioned entry; if you must, not with an AAD that starts with
->   `0x10`.**
-> - A deterministic value is equal to another only within one key, one suite, **one version** and one
->   envelope family. `crypto-safety.md` says the label is one constant; it becomes two, each with
->   its one use.
+> - **What that leaves open, exactly.** Whoever can write the column can change `key_version`, or
+>   rewrap a `0x10` envelope as a `0x02`–`0x07` one and back. If the entry the changed header points
+>   to holds *different* key bytes, the tag fails, as for any wrong key. If it holds the *same* key
+>   bytes — the same key stored under two versions, or as `id` and `id.v1` — the value opens to the
+>   same plaintext it always did. Nothing is forged and nothing is disclosed; the one effect is that
+>   `gcm_envelope_key_version` reports a version the row was not sealed under. That function is not
+>   authenticated in any design, and the rule above — open every row before deleting an entry —
+>   already assumes it can be lied to.
+> - **No (key, nonce) pair is reused.** Under one key, the same plaintext gives the same nonce, and
+>   with the same AAD the same ciphertext and tag: one message, however many headers it is stored
+>   under. A different plaintext gives a different nonce. The caller's obligation is the existing
+>   one and no more: do not vary the AAD under one key for the same plaintext (constraint 7).
+> - **What the earlier drafts did.** The first put the header into the associated data and left the
+>   nonce as it was. That is unsafe: the same key bytes under two versions would seal the same
+>   plaintext with the same key and nonce and *different* associated data, the pair §3 forbids, and
+>   `crypto-reviewer` blocked it. The second also hashed the header into the nonce, under a second
+>   derivation label, which removes that reuse and was reviewed as sound on the assumption that
+>   HMAC-SHA256 is a PRF. It is not what is proposed, for three reasons given in review:
+>   - what it protects against exists only where two entries hold the same key bytes, and there it
+>     prevents a relabelling that gains an attacker nothing;
+>   - it changes the associated data, adds a second label, needs new vectors for every suite, alters
+>     A12's cross-suite linkage, and leaves a confusion of its own (an A13 envelope whose caller AAD
+>     begins with the header bytes) — a larger surface in the part of the project that has had no
+>     independent cryptographic review;
+>   - choosing the smaller design now does not prevent the other later, and the reverse is not true.
+> - **If an independent review asks for header binding**, it is added as a further version byte —
+>   `0x11`, "extended header, authenticated" — with the derivation the second draft described. `0x10`
+>   envelopes would stay as they are and stay readable.
+> - A deterministic value is equal to another, as stored bytes, only within one key, one suite, **one
+>   version** and one envelope family, because the header is part of the stored value. The bytes
+>   after the header are equal whenever key, plaintext and AAD are — so equal plaintexts under one
+>   key remain linkable across versions and families, as A12 already accepts across suites.
 >
 > ### What rotation then looks like
 >
@@ -223,9 +215,10 @@
 >
 > ### Open questions for review
 >
-> 1. **Authenticate the header and hash it into the nonce, or neither?** Both are believed safe; they are
->    compared above. This amendment proposes the first. It is the larger change to the part of the
->    project that most needs an independent review, and that review has not happened.
+> 1. ~~Authenticate the header and hash it into the nonce, or neither?~~ **Decided in review:
+>    neither** — see "Why the header is not authenticated". What stays open is whether an
+>    independent cryptographic review, when there is one, wants the authenticated form added as
+>    `0x11`.
 > 2. **Four keys per `UDF_INIT`** — the number, and error rather than eviction.
 > 3. **Four bytes of `key_version`.** Two would do for any real rotation history and save two bytes a
 >    row; four costs nothing to reason about.
@@ -243,11 +236,11 @@
 >
 > | Area | Change |
 > |---|---|
-> | `spec/envelope.md`, `spec/test-vectors.json` | v4: the `0x10` layout and its big-endian field (§2 says there is none), the `suite` values and the key-length rule of §2.5 restated for them, the reserved range of §2.6, the authenticated header, the second derivation in §3, §1's "nothing else distinguishes them", messages that may carry `key_version` (§4 rule 4); project vectors for every suite under the extended header, and the NIST KAT through it |
-> | `src/envelope.{h,cc}`, `src/gcm.{h,cc}`, `src/nonce.{h,cc}` | parsing and building the header; the header as associated data; the second label. **This is a core change**, unlike A13 and A14 |
+> | `spec/envelope.md`, `spec/test-vectors.json` | v4: the `0x10` layout and its big-endian field (§2 says there is none), the `suite` values and the key-length rule of §2.5 restated for them, the reserved range of §2.6, that the header is not authenticated, §1's "nothing else distinguishes them", messages that may carry `key_version` (§4 rule 4). §3 is unchanged. Project vectors for every suite under the extended header: each is an existing `0x02`–`0x07` vector's nonce, ciphertext and tag behind a six-byte header, so the cryptographic content is already pinned by the existing vectors and the NIST KAT |
+> | `src/envelope.{h,cc}`, `src/gcm.{h,cc}` | parsing and building the header, and the entry points that write and read an envelope carrying it. **No change to the cipher calls, the associated data, or `src/nonce.{h,cc}`** |
 > | `src/udf_*.cc`, `src/key_source` | the four functions; up to four held keys per instance |
-> | `tests/unit`, `tests/adapter`, `tests/integration`, `mysql-test` | vectors; header tampering; mixed-version statements; the fifth key; the unversioned fallback; a rotation end to end |
-> | `crypto-safety.md`, `architecture.md` | the label rule (two constants, and when each is used); "AAD is not an input to the nonce" restated (the caller's AAD still is not; the header is); "lengths and the version byte are as far as it goes" widened to the `suite` and `key_version` of a stored header; the widened key table; the blocked patterns |
+> | `tests/unit`, `tests/adapter`, `tests/integration`, `mysql-test` | vectors; a changed header (fails under a different key, opens under the same key bytes — both pinned); mixed-version statements; the fifth key; the unversioned fallback; a rotation end to end |
+> | `crypto-safety.md`, `architecture.md` | "lengths and the version byte are as far as it goes" widened to the `suite` and `key_version` of a stored header; the widened key table (up to four fetched keys per instance); the blocked patterns. The label rule and "AAD is not an input to the nonce" are unchanged |
 > | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the functions, the compatibility note, rotation guidance |
 
 > ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions

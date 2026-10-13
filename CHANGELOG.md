@@ -29,10 +29,10 @@ Notable changes per release. Envelope-format changes get their own entry with a 
 ### Documented
 - **Design amendment A15, proposed** (#34, the part A13 deferred): a key version in the envelope,
   under a new version byte `0x10`, so that the key-id functions can read a half-rotated column and
-  re-seal it without a second column. It changes what is authenticated and how the deterministic
-  nonce is derived. **Nothing is implemented, and nothing may be until it has been reviewed**: the
-  first draft was blocked for a nonce reuse, and the corrected design has had no independent
-  cryptographic review.
+  re-seal it without a second column. What is authenticated and how the deterministic nonce is
+  derived do not change: the header is as unauthenticated as today's version byte. **Nothing is
+  implemented, and nothing may be until it has been reviewed** — it changes the envelope, and an
+  earlier draft that authenticated the header was blocked for a nonce reuse.
 - **Design amendment A14** (#35), the rationale for `gcm_key_usage` above: what a count is and is
   not, why there is no persistence and no threshold, and the rules for the component's first shared
   state (`src/usage`, bounded per account).

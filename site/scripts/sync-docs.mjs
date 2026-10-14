@@ -23,6 +23,7 @@ const PAGES = {
   "docs/design.md": { route: "/design/", out: "design.md" },
   "docs/design-KO.md": { route: "/ko/design/", out: "ko/design.md" },
   "docs/perf.md": { route: "/performance/", out: "performance.md" },
+  "docs/leakage-ngram.md": { route: "/leakage/", out: "leakage.md", title: "N-gram leakage" },
   "CHANGELOG.md": { route: "/changelog/", out: "changelog.md" },
 };
 const ASSETS = "docs/assets";

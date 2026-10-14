@@ -44,6 +44,7 @@ export default defineConfig({
           items: [
             { slug: "envelope", label: "Envelope specification", translations: { ko: "봉투 명세" } },
             { slug: "performance", label: "Performance", translations: { ko: "성능" } },
+            { slug: "leakage", label: "N-gram leakage", translations: { ko: "N-gram 누출" } },
           ],
         },
         {

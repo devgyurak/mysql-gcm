@@ -37,8 +37,7 @@
     "attacks": [
       1,
       2,
-      3,
-      4
+      3
     ],
     "languages": [
       "ko",
@@ -64,37 +63,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.0030591100337126345,
-          "std": 0.0005807456567020079
+          "mean": 0.002065152802010704,
+          "std": 0.0002579621811015264
         },
         "token_recovery_weighted": {
-          "mean": 0.2551446562357713,
-          "std": 0.026286537067727284
+          "mean": 0.20694742776513192,
+          "std": 0.042322852530883165
         },
         "reconstruction_top1": {
-          "mean": 0.1405,
-          "std": 0.022546618371720402
+          "mean": 0.1071,
+          "std": 0.04542014971353573
         },
         "reconstruction_top5": {
-          "mean": 0.2453,
-          "std": 0.031236357021906375
+          "mean": 0.2083,
+          "std": 0.05027633638203961
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -103,42 +102,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05311902187499999,
+          "std": 0.0019514761152551277
         },
         "mean_row_tokens": {
-          "mean": 5.987853666666667,
-          "std": 0.0004672768629696331
+          "mean": 6.006551333333333,
+          "std": 0.0004064868454888255
         },
         "distinct_tokens": {
-          "mean": 6407.1,
-          "std": 11.335342959081565
+          "mean": 10652.5,
+          "std": 19.428072472584613
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -160,37 +159,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.00426100908601483,
-          "std": 0.0008809629968648636
+          "mean": 0.0024032053321701103,
+          "std": 0.0003723744793020748
         },
         "token_recovery_weighted": {
-          "mean": 0.2741484189929881,
-          "std": 0.08436273972254207
+          "mean": 0.1725420527421791,
+          "std": 0.05106480411559023
         },
         "reconstruction_top1": {
-          "mean": 0.13540000000000002,
-          "std": 0.054498073360440914
+          "mean": 0.07089999999999999,
+          "std": 0.029701683453972772
         },
         "reconstruction_top5": {
-          "mean": 0.2612,
-          "std": 0.07811376319189851
+          "mean": 0.18009999999999998,
+          "std": 0.04445885738522753
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -199,42 +198,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05311902187499999,
+          "std": 0.0019514761152551277
         },
         "mean_row_tokens": {
-          "mean": 5.987853666666667,
-          "std": 0.0004672768629696331
+          "mean": 6.006551333333333,
+          "std": 0.0004064868454888255
         },
         "distinct_tokens": {
-          "mean": 6407.1,
-          "std": 11.335342959081565
+          "mean": 10652.5,
+          "std": 19.428072472584613
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -256,37 +255,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.008045688558867429,
-          "std": 0.0008202305913737478
+          "mean": 0.0052803589259074,
+          "std": 0.00045939754715059003
         },
         "token_recovery_weighted": {
-          "mean": 0.3877807259646441,
-          "std": 0.026535792705479348
+          "mean": 0.3166578813157301,
+          "std": 0.030199478575550987
         },
         "reconstruction_top1": {
-          "mean": 0.2408,
-          "std": 0.03592993181179169
+          "mean": 0.194,
+          "std": 0.036818473623983924
         },
         "reconstruction_top5": {
-          "mean": 0.3597,
-          "std": 0.03226313685927021
+          "mean": 0.30670000000000003,
+          "std": 0.030497704831675448
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -295,138 +294,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05311902187499999,
+          "std": 0.0019514761152551277
         },
         "mean_row_tokens": {
-          "mean": 5.987853666666667,
-          "std": 0.0004672768629696331
+          "mean": 6.006551333333333,
+          "std": 0.0004064868454888255
         },
         "distinct_tokens": {
-          "mean": 6407.1,
-          "std": 11.335342959081565
+          "mean": 10652.5,
+          "std": 19.428072472584613
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
-            "std": 0.0
-          },
-          "unique_surname_fraction": {
-            "mean": 0.0,
-            "std": 0.0
-          },
-          "unique_given_fraction": {
-            "mean": 0.0,
-            "std": 0.0
-          }
-        }
-      }
-    },
-    "ko:V0:4": {
-      "variant": {
-        "variant": "V0",
-        "orders": [
-          1,
-          2,
-          3
-        ],
-        "bits": 16,
-        "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
-        "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
-        }
-      },
-      "leakage": {
-        "token_recovery_unique": {
-          "mean": 0.0030591100337126345,
-          "std": 0.0005807456567020079
-        },
-        "token_recovery_weighted": {
-          "mean": 0.2551446562357713,
-          "std": 0.026286537067727284
-        },
-        "reconstruction_top1": {
-          "mean": 0.1405,
-          "std": 0.022546618371720402
-        },
-        "reconstruction_top5": {
-          "mean": 0.2453,
-          "std": 0.031236357021906375
-        },
-        "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
-        }
-      },
-      "utility": {
-        "answered_fraction": {
-          "mean": 1.0,
-          "std": 0.0
-        },
-        "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
-        },
-        "mean_row_tokens": {
-          "mean": 5.987853666666667,
-          "std": 0.0004672768629696331
-        },
-        "distinct_tokens": {
-          "mean": 6407.1,
-          "std": 11.335342959081565
-        }
-      },
-      "baselines": {
-        "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
-        },
-        "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
-        },
-        "b1_b1_prime": {
-          "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
-          },
-          "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
-          },
-          "distinct_surnames": {
-            "mean": 60.0,
-            "std": 0.0
-          },
-          "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -448,79 +351,79 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4717,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7354,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.014651836887897804,
-          "std": 0.0020763642322388478
+          "mean": 0.009480909664774472,
+          "std": 0.0011277972520862243
         },
         "token_recovery_weighted": {
-          "mean": 0.24979272006533115,
-          "std": 0.03227544968982671
+          "mean": 0.1822232478617019,
+          "std": 0.036191311722485575
         },
         "reconstruction_top1": {
-          "mean": 0.1265,
-          "std": 0.031246599815019874
+          "mean": 0.0805,
+          "std": 0.02573616132992642
         },
         "reconstruction_top5": {
-          "mean": 0.2481,
-          "std": 0.031638426003832744
+          "mean": 0.179,
+          "std": 0.03495425582100126
         },
         "unique_row_fraction": {
-          "mean": 0.0006249999999999999,
-          "std": 4.040764504122677e-05
+          "mean": 0.0024911666666666667,
+          "std": 6.942041806590071e-05
         }
       },
       "utility": {
         "answered_fraction": {
-          "mean": 0.5,
-          "std": 0.0
+          "mean": 0.5018125,
+          "std": 0.0013961442439805406
         },
         "mean_candidate_fraction": {
-          "mean": 0.019186394583333332,
-          "std": 0.0012028635564025351
+          "mean": 0.012077906733446496,
+          "std": 0.0006942183218052521
         },
         "mean_row_tokens": {
-          "mean": 1.9999913333333332,
-          "std": 2.7333333333343157e-05
+          "mean": 2.0059286666666667,
+          "std": 0.0001146366239713289
         },
         "distinct_tokens": {
-          "mean": 1914.4,
-          "std": 4.374928570845472
+          "mean": 3227.35,
+          "std": 5.47060325741138
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -542,35 +445,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00063,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.00232,
         "shared_set": {
-          "distinct_token_sets": 4559,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299811,
-          "rows_in_shared_set_fraction": 0.99937
+          "distinct_token_sets": 7019,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299304,
+          "rows_in_shared_set_fraction": 0.99768
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.004245203997459394,
-          "std": 0.0006557885507428063
+          "mean": 0.002779931773006506,
+          "std": 0.00032382308628503044
         },
         "token_recovery_weighted": {
-          "mean": 0.09016450000000001,
-          "std": 0.023145654938406424
+          "mean": 0.05462044318999548,
+          "std": 0.017403004213139922
         },
         "reconstruction_top1": {
-          "mean": 0.0989,
-          "std": 0.02884770354811627
+          "mean": 0.059899999999999995,
+          "std": 0.01912563724428548
         },
         "reconstruction_top5": {
-          "mean": 0.1268,
-          "std": 0.02015341162185698
+          "mean": 0.09290000000000001,
+          "std": 0.018766725873204413
         },
         "unique_row_fraction": {
-          "mean": 0.0005858333333333334,
-          "std": 4.259466581105614e-05
+          "mean": 0.0022998333333333334,
+          "std": 6.739168263880111e-05
         }
       },
       "utility": {
@@ -579,42 +482,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.0031366058333333335,
-          "std": 0.0002786859470141874
+          "mean": 0.0019616566666666667,
+          "std": 0.00019992981722761281
         },
         "mean_row_tokens": {
-          "mean": 1.0,
-          "std": 0.0
+          "mean": 1.0059336666666667,
+          "std": 0.00011650417255287342
         },
         "distinct_tokens": {
-          "mean": 4546.25,
-          "std": 8.129421873663588
+          "mean": 6852.45,
+          "std": 15.532144088953077
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -638,35 +541,35 @@
         ],
         "bits": 8,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7357,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.0990234375,
-          "std": 0.014888655349139785
+          "mean": 0.091796875,
+          "std": 0.02001357571476484
         },
         "token_recovery_weighted": {
-          "mean": 0.35738612310001094,
-          "std": 0.05003643792832991
+          "mean": 0.2670392169708544,
+          "std": 0.0646593743240104
         },
         "reconstruction_top1": {
-          "mean": 0.1557,
-          "std": 0.04742689110620683
+          "mean": 0.10800000000000001,
+          "std": 0.04198094805980446
         },
         "reconstruction_top5": {
-          "mean": 0.2873,
-          "std": 0.04851504921155909
+          "mean": 0.20459999999999998,
+          "std": 0.05056916056254049
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.0024936666666666666,
+          "std": 6.886298796241066e-05
         }
       },
       "utility": {
@@ -675,12 +578,12 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.08400065729166667,
-          "std": 0.004347087026280796
+          "mean": 0.06392998541666667,
+          "std": 0.004885970917980181
         },
         "mean_row_tokens": {
-          "mean": 5.9240441666666666,
-          "std": 0.029815529340615647
+          "mean": 5.938868,
+          "std": 0.03059186119796498
         },
         "distinct_tokens": {
           "mean": 256.0,
@@ -689,28 +592,28 @@
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -734,35 +637,35 @@
         ],
         "bits": 12,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.014122972354478675,
-          "std": 0.0017232296166482652
+          "mean": 0.012617122254308194,
+          "std": 0.00142079902725522
         },
         "token_recovery_weighted": {
-          "mean": 0.39456306644806494,
-          "std": 0.03767737187681205
+          "mean": 0.3086224357465822,
+          "std": 0.030955861832358073
         },
         "reconstruction_top1": {
-          "mean": 0.2424,
-          "std": 0.04253281086408468
+          "mean": 0.18209999999999998,
+          "std": 0.04267774595734878
         },
         "reconstruction_top5": {
-          "mean": 0.3627,
-          "std": 0.03426528855853982
+          "mean": 0.296,
+          "std": 0.031774203373176796
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -771,42 +674,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07419979125000001,
-          "std": 0.003447173232572004
+          "mean": 0.053856940416666665,
+          "std": 0.0019591610301245036
         },
         "mean_row_tokens": {
-          "mean": 5.9840665,
-          "std": 0.004221822996842375
+          "mean": 6.003910666666667,
+          "std": 0.002550336056287418
         },
         "distinct_tokens": {
-          "mean": 3317.25,
-          "std": 1.8674849396983098
+          "mean": 3796.35,
+          "std": 1.5898113095584645
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -830,35 +733,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.008045688558867429,
-          "std": 0.0008202305913737478
+          "mean": 0.005631735365882103,
+          "std": 0.00047093107835045536
         },
         "token_recovery_weighted": {
-          "mean": 0.3877807259646441,
-          "std": 0.026535792705479348
+          "mean": 0.3175574430153018,
+          "std": 0.03331862511562245
         },
         "reconstruction_top1": {
-          "mean": 0.2408,
-          "std": 0.03592993181179169
+          "mean": 0.1972,
+          "std": 0.04050382697968181
         },
         "reconstruction_top5": {
-          "mean": 0.3597,
-          "std": 0.03226313685927021
+          "mean": 0.3091,
+          "std": 0.03364803114596751
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -867,42 +770,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05313095645833334,
+          "std": 0.0019485411969267202
         },
         "mean_row_tokens": {
-          "mean": 5.987853666666667,
-          "std": 0.0004672768629696331
+          "mean": 6.0064185000000005,
+          "std": 0.0004741852368945996
         },
         "distinct_tokens": {
-          "mean": 6407.1,
-          "std": 11.335342959081565
+          "mean": 9854.4,
+          "std": 17.53111519556015
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -926,35 +829,35 @@
         ],
         "bits": 16,
         "homophonic": 4,
-        "padding": 0,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.88782,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 281982,
+          "largest_shared_set": 7,
+          "rows_in_shared_set": 33654,
+          "rows_in_shared_set_fraction": 0.11218
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.0019294583111077173,
-          "std": 0.0002139471937720944
+          "mean": 0.0007598708202182249,
+          "std": 0.00012257590907752437
         },
         "token_recovery_weighted": {
-          "mean": 0.30892708831515875,
-          "std": 0.040311436716100775
+          "mean": 0.05961062500094211,
+          "std": 0.015121627006994133
         },
         "reconstruction_top1": {
-          "mean": 0.18839999999999998,
-          "std": 0.038291513420077826
+          "mean": 0.034699999999999995,
+          "std": 0.01198791057691039
         },
         "reconstruction_top5": {
-          "mean": 0.301,
-          "std": 0.031978117518077886
+          "mean": 0.0839,
+          "std": 0.01558813651467038
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.8885868333333333,
+          "std": 0.0007453153508564197
         }
       },
       "utility": {
@@ -963,42 +866,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05313095645833334,
+          "std": 0.0019485411969267202
         },
         "mean_row_tokens": {
-          "mean": 5.999995666666667,
-          "std": 1.6093476939346113e-05
+          "mean": 6.014956833333334,
+          "std": 0.00041630981385401984
         },
         "distinct_tokens": {
-          "mean": 6613.3,
-          "std": 17.53881409902049
+          "mean": 33054.4,
+          "std": 59.17127681569834
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -1022,35 +925,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 8,
-        "unique_row_fraction": 0.00066,
+        "pad_to_max": true,
+        "unique_row_fraction": 0.0025033333333333335,
         "shared_set": {
-          "distinct_token_sets": 4720,
-          "largest_shared_set": 6488,
-          "rows_in_shared_set": 299802,
-          "rows_in_shared_set_fraction": 0.99934
+          "distinct_token_sets": 7358,
+          "largest_shared_set": 4641,
+          "rows_in_shared_set": 299249,
+          "rows_in_shared_set_fraction": 0.9974966666666667
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.008045688558867429,
-          "std": 0.0008202305913737478
+          "mean": 0.005631735365882103,
+          "std": 0.00047093107835045536
         },
         "token_recovery_weighted": {
-          "mean": 0.3877807259646441,
-          "std": 0.026535792705479348
+          "mean": 0.3175574430153018,
+          "std": 0.03331862511562245
         },
         "reconstruction_top1": {
-          "mean": 0.2408,
-          "std": 0.03592993181179169
+          "mean": 0.1972,
+          "std": 0.04050382697968181
         },
         "reconstruction_top5": {
-          "mean": 0.3597,
-          "std": 0.03226313685927021
+          "mean": 0.3091,
+          "std": 0.03364803114596751
         },
         "unique_row_fraction": {
-          "mean": 0.0006253333333333333,
-          "std": 4.048868154599918e-05
+          "mean": 0.002493833333333333,
+          "std": 6.929225545951484e-05
         }
       },
       "utility": {
@@ -1059,42 +962,42 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07356229104166667,
-          "std": 0.0031215835072229683
+          "mean": 0.05313095645833334,
+          "std": 0.0019485411969267202
         },
         "mean_row_tokens": {
-          "mean": 13.987853666666666,
-          "std": 0.00046727686296931794
+          "mean": 9.0,
+          "std": 0.0
         },
         "distinct_tokens": {
-          "mean": 6415.1,
-          "std": 11.335342959081565
+          "mean": 9858.4,
+          "std": 17.53111519556015
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -1114,7 +1017,7 @@
         "orders": [],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
+        "pad_to_max": false,
         "unique_row_fraction": 0.0,
         "shared_set": {
           "distinct_token_sets": 1,
@@ -1133,12 +1036,12 @@
           "std": 0.0
         },
         "reconstruction_top1": {
-          "mean": 0.0214,
-          "std": 0.006755738301621815
+          "mean": 0.0147,
+          "std": 0.005301886456724625
         },
         "reconstruction_top5": {
-          "mean": 0.0842,
-          "std": 0.010768472500777445
+          "mean": 0.0605,
+          "std": 0.011043097391583576
         },
         "unique_row_fraction": {
           "mean": 0.0,
@@ -1165,28 +1068,28 @@
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.21890416666666668,
-          "std": 0.0006927239910511095
+          "mean": 0.21170133333333335,
+          "std": 0.014862103761655756
         },
         "b0_full_name_top1": {
-          "mean": 0.021729500000000002,
-          "std": 0.00029218767751034466
+          "mean": 0.014658666666666667,
+          "std": 0.001088452724436543
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 4705.15,
-            "std": 8.917819240150587
+            "mean": 7343.25,
+            "std": 18.452303379253227
           },
           "unique_full_fraction": {
-            "mean": 0.0006253333333333333,
-            "std": 4.048868154599918e-05
+            "mean": 0.002493833333333333,
+            "std": 6.929225545951484e-05
           },
           "distinct_surnames": {
-            "mean": 60.0,
+            "mean": 79.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 80.0,
+            "mean": 100.0,
             "std": 0.0
           },
           "unique_surname_fraction": {
@@ -1208,37 +1111,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.004126602564102564,
-          "std": 0.0014395227742966092
+          "mean": 0.01744458027993316,
+          "std": 0.003198225659629929
         },
         "token_recovery_weighted": {
-          "mean": 0.014970644209682795,
-          "std": 0.0060914115518116265
+          "mean": 0.10237579982417588,
+          "std": 0.011152483221494256
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0076,
+          "std": 0.005314132102234569
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0387,
+          "std": 0.014060938802227965
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1247,51 +1150,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039431582708333336,
+          "std": 0.0006307742224552457
         },
         "mean_row_tokens": {
-          "mean": 34.59173616666667,
-          "std": 0.017970311543550263
+          "mean": 31.91716416666667,
+          "std": 0.008652973212524454
         },
         "distinct_tokens": {
-          "mean": 1248.0,
-          "std": 0.0
+          "mean": 1490.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1304,37 +1207,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.008854166666666666,
-          "std": 0.0017087234064211635
+          "mean": 0.030461025543902905,
+          "std": 0.0031539934618514086
         },
         "token_recovery_weighted": {
-          "mean": 0.09143480323964137,
-          "std": 0.008366630976944546
+          "mean": 0.2647891589708317,
+          "std": 0.02658832577374882
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.07089999999999999,
+          "std": 0.024653397331808043
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.1894,
+          "std": 0.04372687960511246
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1343,51 +1246,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039431582708333336,
+          "std": 0.0006307742224552457
         },
         "mean_row_tokens": {
-          "mean": 34.59173616666667,
-          "std": 0.017970311543550263
+          "mean": 31.91716416666667,
+          "std": 0.008652973212524454
         },
         "distinct_tokens": {
-          "mean": 1248.0,
-          "std": 0.0
+          "mean": 1490.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1400,37 +1303,37 @@
           2,
           3
         ],
-        "bits": 16,
+        "bits": null,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.027163461538461536,
-          "std": 0.004453427317817388
+          "mean": 0.07460833089216704,
+          "std": 0.006512555434745483
         },
         "token_recovery_weighted": {
-          "mean": 0.1459689319991077,
-          "std": 0.035330513144063526
+          "mean": 0.36243835508282723,
+          "std": 0.02575515474547131
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.176,
+          "std": 0.03169227035098622
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.28250000000000003,
+          "std": 0.03171040838589122
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1439,147 +1342,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039431582708333336,
+          "std": 0.0006307742224552457
         },
         "mean_row_tokens": {
-          "mean": 34.59173616666667,
-          "std": 0.017970311543550263
+          "mean": 31.91716416666667,
+          "std": 0.008652973212524454
         },
         "distinct_tokens": {
-          "mean": 1248.0,
-          "std": 0.0
+          "mean": 1490.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
-          }
-        }
-      }
-    },
-    "latin:V0:4": {
-      "variant": {
-        "variant": "V0",
-        "orders": [
-          1,
-          2,
-          3
-        ],
-        "bits": 16,
-        "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
-        "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
-        }
-      },
-      "leakage": {
-        "token_recovery_unique": {
-          "mean": 0.004126602564102564,
-          "std": 0.0014395227742966092
-        },
-        "token_recovery_weighted": {
-          "mean": 0.014970644209682795,
-          "std": 0.0060914115518116265
-        },
-        "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
-        },
-        "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
-        },
-        "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
-        }
-      },
-      "utility": {
-        "answered_fraction": {
-          "mean": 1.0,
-          "std": 0.0
-        },
-        "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
-        },
-        "mean_row_tokens": {
-          "mean": 34.59173616666667,
-          "std": 0.017970311543550263
-        },
-        "distinct_tokens": {
-          "mean": 1248.0,
-          "std": 0.0
-        }
-      },
-      "baselines": {
-        "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
-        },
-        "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
-        },
-        "b1_b1_prime": {
-          "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
-          },
-          "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
-          },
-          "distinct_surnames": {
-            "mean": 19.0,
-            "std": 0.0
-          },
-          "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
-          },
-          "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
-          },
-          "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
           }
         }
       }
@@ -1592,35 +1399,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.08026315789473684,
-          "std": 0.013296962454873511
+          "mean": 0.1987142857142857,
+          "std": 0.01976339638662074
         },
         "token_recovery_weighted": {
-          "mean": 0.1553840810801406,
-          "std": 0.0292827401976989
+          "mean": 0.4166923579340466,
+          "std": 0.04142261275097941
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.1676,
+          "std": 0.03420877080516048
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.2595,
+          "std": 0.03126579600777821
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1629,51 +1436,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.012676456666666665,
-          "std": 0.00028891818215051894
+          "mean": 0.01859534638888889,
+          "std": 0.0004355863438178495
         },
         "mean_row_tokens": {
-          "mean": 12.338713833333333,
-          "std": 0.004067772155069196
+          "mean": 11.278722,
+          "std": 0.0033967095842890272
         },
         "distinct_tokens": {
-          "mean": 304.0,
+          "mean": 350.0,
           "std": 0.0
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1686,88 +1493,88 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.01838888888888889,
-          "std": 0.0035044063973133687
+          "mean": 0.04826516301057389,
+          "std": 0.008352205717195882
         },
         "token_recovery_weighted": {
-          "mean": 0.06138098906470947,
-          "std": 0.008347396089579472
+          "mean": 0.14052246265245089,
+          "std": 0.029778302611365406
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.057199999999999994,
+          "std": 0.024604064704840944
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.118,
+          "std": 0.03303331651530012
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
         "answered_fraction": {
-          "mean": 0.75,
-          "std": 0.0
+          "mean": 0.7395625,
+          "std": 0.003898617543437673
         },
         "mean_candidate_fraction": {
-          "mean": 0.012648472222222224,
-          "std": 0.0002857320432073239
+          "mean": 0.01818672799711463,
+          "std": 0.000494828664759013
         },
         "mean_row_tokens": {
-          "mean": 11.4776615,
-          "std": 0.003886123672047308
+          "mean": 10.469804166666666,
+          "std": 0.004569179463779081
         },
         "distinct_tokens": {
-          "mean": 900.0,
-          "std": 0.0
+          "mean": 1080.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1782,35 +1589,35 @@
         ],
         "bits": 8,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.039411764705882354,
-          "std": 0.014165224840123147
+          "mean": 0.04862745098039216,
+          "std": 0.014746349550559345
         },
         "token_recovery_weighted": {
-          "mean": 0.07916303535764055,
-          "std": 0.03636038807617013
+          "mean": 0.11944622707061796,
+          "std": 0.043454821513133346
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0215,
+          "std": 0.0100772019926168
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.06670000000000001,
+          "std": 0.01900815614413981
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1819,12 +1626,12 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.07284179979166666,
-          "std": 0.007832397184230538
+          "mean": 0.06673389604166666,
+          "std": 0.007742068184097363
         },
         "mean_row_tokens": {
-          "mean": 32.057882666666664,
-          "std": 0.3064864269762476
+          "mean": 29.779651833333332,
+          "std": 0.2872819473666071
         },
         "distinct_tokens": {
           "mean": 255.0,
@@ -1833,37 +1640,37 @@
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1878,35 +1685,35 @@
         ],
         "bits": 12,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.025530932594644506,
-          "std": 0.003942167714380223
+          "mean": 0.059292711343695494,
+          "std": 0.006033265117433247
         },
         "token_recovery_weighted": {
-          "mean": 0.129454500717189,
-          "std": 0.03203469966375076
+          "mean": 0.28056067525498174,
+          "std": 0.019799968508062114
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.1291,
+          "std": 0.02281644144032982
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.23970000000000002,
+          "std": 0.029252521258859042
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -1915,51 +1722,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.047752478541666664,
-          "std": 0.001801044718062904
+          "mean": 0.04094376979166667,
+          "std": 0.0012810882243368355
         },
         "mean_row_tokens": {
-          "mean": 34.4853095,
-          "std": 0.04851243641554431
+          "mean": 31.805748833333332,
+          "std": 0.029031788272608442
         },
         "distinct_tokens": {
-          "mean": 1083.0,
-          "std": 0.0
+          "mean": 1239.6,
+          "std": 0.4898979485566356
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -1974,35 +1781,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.027163461538461536,
-          "std": 0.004453427317817388
+          "mean": 0.07191055604884868,
+          "std": 0.0072155061152813765
         },
         "token_recovery_weighted": {
-          "mean": 0.1459689319991077,
-          "std": 0.035330513144063526
+          "mean": 0.34766302251868464,
+          "std": 0.02791759813743229
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.1645,
+          "std": 0.034175283466271356
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.2737,
+          "std": 0.03124915998871009
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -2011,51 +1818,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039502230625,
+          "std": 0.0006548545924163711
         },
         "mean_row_tokens": {
-          "mean": 34.59173616666667,
-          "std": 0.017970311543550263
+          "mean": 31.914095333333336,
+          "std": 0.008348270106900998
         },
         "distinct_tokens": {
-          "mean": 1248.0,
-          "std": 0.0
+          "mean": 1475.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -2070,35 +1877,35 @@
         ],
         "bits": 16,
         "homophonic": 4,
-        "padding": 0,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": false,
+        "unique_row_fraction": 1.0,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 300000,
+          "largest_shared_set": 1,
+          "rows_in_shared_set": 0,
+          "rows_in_shared_set_fraction": 0.0
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.002043269230769231,
-          "std": 0.0006095802906531626
+          "mean": 0.0029398171649425717,
+          "std": 0.0006590975879579718
         },
         "token_recovery_weighted": {
-          "mean": 0.02103514701193197,
-          "std": 0.01026873238690408
+          "mean": 0.026405423003590167,
+          "std": 0.009630979920101203
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.014000000000000002,
+          "std": 0.006957010852370434
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.034800000000000005,
+          "std": 0.011478675881825395
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 1.0,
+          "std": 0.0
         }
       },
       "utility": {
@@ -2107,51 +1914,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039502230625,
+          "std": 0.0006548545924163711
         },
         "mean_row_tokens": {
-          "mean": 36.743808333333334,
-          "std": 0.013226380100222604
+          "mean": 33.713705166666664,
+          "std": 0.010095387586803695
         },
         "distinct_tokens": {
-          "mean": 3969.55,
-          "std": 4.1288618286399466
+          "mean": 5882.5,
+          "std": 3.3391615714128
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -2166,35 +1973,35 @@
         ],
         "bits": 16,
         "homophonic": 1,
-        "padding": 8,
-        "unique_row_fraction": 0.0,
+        "pad_to_max": true,
+        "unique_row_fraction": 0.005706666666666666,
         "shared_set": {
-          "distinct_token_sets": 7139,
-          "largest_shared_set": 521,
-          "rows_in_shared_set": 300000,
-          "rows_in_shared_set_fraction": 1.0
+          "distinct_token_sets": 9633,
+          "largest_shared_set": 395,
+          "rows_in_shared_set": 298288,
+          "rows_in_shared_set_fraction": 0.9942933333333334
         }
       },
       "leakage": {
         "token_recovery_unique": {
-          "mean": 0.027163461538461536,
-          "std": 0.004453427317817388
+          "mean": 0.07191055604884868,
+          "std": 0.0072155061152813765
         },
         "token_recovery_weighted": {
-          "mean": 0.1459689319991077,
-          "std": 0.035330513144063526
+          "mean": 0.34766302251868464,
+          "std": 0.02791759813743229
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.1645,
+          "std": 0.034175283466271356
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.2737,
+          "std": 0.03124915998871009
         },
         "unique_row_fraction": {
-          "mean": 1e-06,
-          "std": 1.5275252316519466e-06
+          "mean": 0.005821499999999999,
+          "std": 9.363329773346903e-05
         }
       },
       "utility": {
@@ -2203,51 +2010,51 @@
           "std": 0.0
         },
         "mean_candidate_fraction": {
-          "mean": 0.04656587125,
-          "std": 0.0009466340808275394
+          "mean": 0.039502230625,
+          "std": 0.0006548545924163711
         },
         "mean_row_tokens": {
-          "mean": 42.59173616666667,
-          "std": 0.017970311543550263
+          "mean": 53.0,
+          "std": 0.0
         },
         "distinct_tokens": {
-          "mean": 1256.0,
-          "std": 0.0
+          "mean": 1513.45,
+          "std": 0.7399324293474371
         }
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }
@@ -2258,7 +2065,7 @@
         "orders": [],
         "bits": 16,
         "homophonic": 1,
-        "padding": 0,
+        "pad_to_max": false,
         "unique_row_fraction": 0.0,
         "shared_set": {
           "distinct_token_sets": 1,
@@ -2277,12 +2084,12 @@
           "std": 0.0
         },
         "reconstruction_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0009000000000000001,
+          "std": 0.0011789826122551596
         },
         "reconstruction_top5": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0064,
+          "std": 0.0028
         },
         "unique_row_fraction": {
           "mean": 0.0,
@@ -2309,37 +2116,37 @@
       },
       "baselines": {
         "b0_surname_accuracy": {
-          "mean": 0.047546500000000005,
-          "std": 0.0003105326517095706
+          "mean": 0.007599333333333333,
+          "std": 0.0006118320394066042
         },
         "b0_full_name_top1": {
-          "mean": 0.0,
-          "std": 0.0
+          "mean": 0.0011616666666666668,
+          "std": 6.751543033509696e-05
         },
         "b1_b1_prime": {
           "distinct_full_names": {
-            "mean": 7139.9,
-            "std": 0.3
+            "mean": 9639.35,
+            "std": 20.271346773216624
           },
           "unique_full_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.005821499999999999,
+            "std": 9.363329773346903e-05
           },
           "distinct_surnames": {
-            "mean": 19.0,
+            "mean": 80.0,
             "std": 0.0
           },
           "distinct_given_names": {
-            "mean": 7019.9,
-            "std": 0.3
+            "mean": 139.0,
+            "std": 0.0
           },
           "unique_surname_fraction": {
             "mean": 0.0,
             "std": 0.0
           },
           "unique_given_fraction": {
-            "mean": 1e-06,
-            "std": 1.5275252316519466e-06
+            "mean": 0.0,
+            "std": 0.0
           }
         }
       }

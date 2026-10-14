@@ -35,7 +35,8 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   are in `docs/leakage-ngram.md`. It has an allowance under amendment A4 for `tests/leakage`
   (synthetic data, no cryptographic operation, no key material, shipped nowhere). **The result:** the
   deterministic tokens leak n-gram frequency and co-occurrence, and on Korean the attack recovered
-  38.8% of n-grams occurrence-weighted (attack 3) and 25.5% under the pre-registered S2 attack, far
+  20.7% of n-grams occurrence-weighted under the S1 attack (17.3% for the second S1 attack and 31.7%
+  under the stronger S3 attack 3), far
   above the B1 + 10 pp ceiling; the motivating `'%김%'` is the index's worst case (~21% selectivity),
   and a binary token key misses rows the collation matches. An independent `crypto-reviewer` pass — a
   scoped AI design review, **not a human audit** — concurred: **decline (C0)**. **No `src/`, `spec/` or

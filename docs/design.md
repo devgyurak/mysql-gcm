@@ -172,9 +172,10 @@
 > **A component function is chosen only if the selected construction cannot be expressed in SQL or in
 > the application.** The default is to add no shipped surface.
 >
-> ### Adoption criteria (starting values — confirmed in the PR 1 review, then frozen)
+> ### Adoption criteria (registered values — frozen at the protocol commit, before the experiment)
 >
-> Judged on S2, incomplete side knowledge, N = 300k, over ≥ 20 seeds.
+> Judged on **S2** (the snapshot adversary with a conditional prior), incomplete side knowledge,
+> N = 300k, over ≥ 20 seeds. The experiment implemented **S1**, a lower bound of S2; see Outcome.
 >
 > **Leakage ceiling** against B1:
 >
@@ -227,19 +228,25 @@
 > **The experiment is reported in [`leakage-ngram.md`](leakage-ngram.md).** The author's analysis, put
 > before the independent review recorded in the table below:
 >
-> - **The leakage ceiling fails.** Against B1 (whole-value equality only, no n-gram recovered) the
->   ceiling is B1 + 10 pp. V0 recovers **38.8% ± 2.7 of Korean** n-grams occurrence-weighted and 14.6%
->   of Latin; the best homophonic variant (V4) is still 30.9% Korean. The margin is 3–4×, not a
->   rounding.
-> - **The variants that fall under the ceiling stop being an index.** V2 (trigrams) reaches 9.0%
->   Korean but answers only 25% of the query mix; V7 (no tokens) recovers nothing and is the B1′
->   baseline it exists to be compared against.
+> - **The harness implements S1, not the registered S2.** It uses one unconditional prior and does not
+>   condition on the birth-year and sex columns, so attacks 1 and 2 are S1 attacks and the measured
+>   leakage is a **lower bound of S2**. Recorded as a deviation, not a pass.
+> - **The leakage ceiling fails on Korean under the S1 attacks alone.** Against B1 (whole-value
+>   equality only) the ceiling is B1 + 10 pp. Korean V0 recovers **20.7% (attack 1) and 17.3% (attack
+>   2)** occurrence-weighted, and 31.7% under the stronger S3 attack 3; Latin V0 is 10.2%, 26.5% and
+>   36.2%. That is 1.7–2.1× the ceiling on the S1 attacks, not a rounding. The decision is on Korean,
+>   the language the issue is filed for.
+> - **The variants that fall under the ceiling stop being an index.** V2 (trigrams) reaches 5.5% Korean
+>   but answers only 25% of the query mix; V7 (no tokens) recovers nothing and is the B1′ baseline it
+>   exists to be compared against.
 > - **The motivating query is the worst case.** `'%김%'` selects ~21% of the column, which is no
 >   selectivity worth an index.
-> - **Homophonic tokens are a mitigation, not a fix** (V4: 30.9% Korean, 2.1% Latin, at the same
->   candidate fraction).
-> - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds the
->   invariant; N1 has 6 counterexamples on every major measured.
+> - **Homophonic tokens (V4) redistribute leakage rather than reduce it.** One random homophone per
+>   occurrence drops Korean recovery from 31.8% to 6.0% at the same candidate fraction, but the
+>   unique-row fraction rises from 0.002 to 0.889 — the rows become individually distinguishable, a
+>   different leak, not a smaller one.
+> - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds both the
+>   whole-string and the n-gram containment checks; N1 has 6 counterexamples on every major measured.
 >
 > **Recommendation: decline (C0).** No construction in C1–C4 makes the index narrow the motivating
 > query enough to be worth a deterministic n-gram side table that leaks this much, and the project
@@ -252,12 +259,14 @@
 >
 > **The reviewer's verdict, in its own words:** "decline (C0) — concur with the author. The Korean
 > occurrence-weighted token recovery exceeds the frozen ceiling under every variant that answers the
-> query mix (38.8% at V0 vs a 10 pp ceiling), and it still fails under the strict S2-only attacks
-> (attack 1 = 25.5%, attack 2 = 27.4%); the motivating query `'%김%'` is the index's own worst case;
-> the utility floor is not demonstrated; and no construction C1–C4 changes the structural leakage that
-> fails." The review is a scoped design review of the amendment, the results document and the harness;
-> it measured no PRF and is not a human cryptographic audit. Its findings were applied to
-> `leakage-ngram.md` before this row was filled.
+> query mix (31.7% at V0 under the S3 attack, and 20.7% / 17.3% under the strictly-S1 attacks 1 and 2,
+> against a 10 pp ceiling); the motivating query `'%김%'` is the index's own worst case; the utility
+> floor is not demonstrated; and no construction C1–C4 changes the structural leakage that fails. A
+> later review round found the tail distribution, the Latin name format and V0's truncation, and those
+> were corrected before this row was filled; the corrected result still fails." The review is a scoped
+> design review of the amendment, the results document and the harness; it measured no PRF and is not
+> a human cryptographic audit. Its findings were applied to `leakage-ngram.md` before this row was
+> filled.
 >
 > **No code, spec or vector change follows from A17**, and issue #38 closes with no implementation PR.
 > Constraint 5 points at [`leakage-ngram.md`](leakage-ngram.md). Revisiting the index would be a new
@@ -2534,7 +2543,8 @@ default and it raises an error.
   filters)
 - (Amendment A17) A keyed n-gram token side table to give `LIKE` an index **was researched and
   declined**: the deterministic tokens leak n-gram frequencies and co-occurrence, and on Korean the
-  experiment recovered 38.8% of n-grams (attack 3) and 25.5% under the pre-registered S2 attack, far
+  experiment recovered 20.7% of Korean n-grams under the S1 attack (17.3% for the second S1 attack and
+  31.7% under the stronger S3 attack 3), far
   above the ceiling. See [`leakage-ngram.md`](leakage-ngram.md). The motivating `LIKE '%김%'` is the
   index's worst case (~21% selectivity), and a binary token key does not respect the collation.
 - (Amendment A2) `gcm_encrypt_det`'s nonce is a function of the plaintext alone. **Encrypting the same
@@ -2599,7 +2609,7 @@ forward compatibility.
 
 | Item | Evidence |
 |---|---|
-| **A keyed n-gram token index for `LIKE` was researched and declined** — it leaks n-gram frequency and co-occurrence; on Korean, 38.8% occurrence-weighted token recovery (attack 3) and 25.5% under the pre-registered S2 attack, against a B1 + 10 pp ceiling | amendment A17 — `docs/leakage-ngram.md`; experiment PRs #59–#66 |
+| **A keyed n-gram token index for `LIKE` was researched and declined** — it leaks n-gram frequency and co-occurrence; on Korean, 20.7% / 17.3% occurrence-weighted token recovery under the S1 attacks and 31.7% under the stronger S3 attack, against a B1 + 10 pp ceiling | amendment A17 — `docs/leakage-ngram.md`; experiment PRs #59–#66 |
 | **N2 (`WEIGHT_STRING`) holds the collation invariant an n-gram index needs; a binary key (N1) does not** — 6 counterexamples (case, accent, full width) on 8.0.43, 8.4.11 and 9.4.0 | amendment A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
 | MySQL 8.4.11 and 9.4.0 reject GCM/GCM-SIV/SIV/CTR/XTS | measured in a container |
 | The mode list is unchanged across the 8.0 → 9.7 documentation | the dev.mysql.com reference |

@@ -107,9 +107,9 @@ class Dist:
         return Dist(kept, self.tail + moved, self._tail_pool)
 
     def noised(self, rng: random.Random, alpha: float) -> Dist:
-        """Dirichlet noise over the observed weights, keeping the tail mass."""
+        """Dirichlet noise on the observed weights, keeping their shape and the tail."""
         observed_mass = 1.0 - self.tail
-        draws = [rng.gammavariate(alpha, 1.0) for _ in self._items]
+        draws = [weight * rng.gammavariate(alpha, 1.0) for _, weight in self._items]
         total = sum(draws)
         items = [
             (name, observed_mass * draw / total)

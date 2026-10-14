@@ -1,0 +1,37 @@
+{
+  "source": "US Social Security Administration baby names, 1880-2008 (annual, by sex)",
+  "url": "https://www.ssa.gov/oact/babynames/limits.html",
+  "licence": "public domain (US federal government work)",
+  "retrieved": "2026-10-14",
+  "cohort": 1990,
+  "top_share": {"male": 0.5353, "female": 0.3965},
+  "note": "Top 60 names per sex for the 1990 birth cohort; the tail is the remainder",
+  "male": [
+    ["Michael", 0.030358], ["Christopher", 0.024387], ["Matthew", 0.020832], ["Joshua", 0.020095], ["Daniel", 0.015717],
+    ["David", 0.015684], ["Andrew", 0.015644], ["James", 0.015042], ["Justin", 0.014248], ["Joseph", 0.014001],
+    ["Ryan", 0.013598], ["John", 0.013518], ["Robert", 0.013421], ["Nicholas", 0.01298], ["Anthony", 0.011662],
+    ["William", 0.011569], ["Jonathan", 0.01119], ["Kyle", 0.010557], ["Brandon", 0.010305], ["Jacob", 0.010228],
+    ["Tyler", 0.009596], ["Zachary", 0.0095], ["Kevin", 0.009486], ["Eric", 0.009028], ["Steven", 0.008723],
+    ["Thomas", 0.00847], ["Brian", 0.00787], ["Alexander", 0.007528], ["Jordan", 0.0075], ["Timothy", 0.007298],
+    ["Cody", 0.007157], ["Adam", 0.006841], ["Benjamin", 0.006796], ["Aaron", 0.006765], ["Richard", 0.006313],
+    ["Patrick", 0.005754], ["Sean", 0.005588], ["Charles", 0.005577], ["Stephen", 0.005554], ["Jeremy", 0.005434],
+    ["Jose", 0.005346], ["Travis", 0.005325], ["Jeffrey", 0.005106], ["Nathan", 0.005084], ["Samuel", 0.005056],
+    ["Mark", 0.004967], ["Jason", 0.004965], ["Jesse", 0.00417], ["Paul", 0.003989], ["Dustin", 0.003932],
+    ["Gregory", 0.003896], ["Kenneth", 0.003841], ["Scott", 0.00376], ["Derek", 0.003754], ["Austin", 0.003678],
+    ["Corey", 0.003576], ["Bryan", 0.00346], ["Ethan", 0.00325], ["Alex", 0.003229], ["Christian", 0.00315]
+  ],
+  "female": [
+    ["Jessica", 0.022634], ["Ashley", 0.02219], ["Brittany", 0.017795], ["Amanda", 0.016751], ["Samantha", 0.012599],
+    ["Sarah", 0.01257], ["Stephanie", 0.012108], ["Jennifer", 0.010822], ["Elizabeth", 0.010102], ["Lauren", 0.009986],
+    ["Megan", 0.009864], ["Emily", 0.009424], ["Nicole", 0.008744], ["Kayla", 0.008541], ["Amber", 0.007726],
+    ["Rachel", 0.007642], ["Courtney", 0.00749], ["Danielle", 0.006983], ["Heather", 0.006924], ["Melissa", 0.006816],
+    ["Rebecca", 0.006657], ["Michelle", 0.006531], ["Tiffany", 0.00641], ["Chelsea", 0.006225], ["Christina", 0.005808],
+    ["Katherine", 0.005657], ["Alyssa", 0.005487], ["Jasmine", 0.005373], ["Laura", 0.005311], ["Hannah", 0.005005],
+    ["Kimberly", 0.004965], ["Kelsey", 0.004625], ["Victoria", 0.004433], ["Sara", 0.004367], ["Mary", 0.00421],
+    ["Erica", 0.00419], ["Alexandra", 0.00414], ["Amy", 0.004119], ["Crystal", 0.004003], ["Andrea", 0.003998],
+    ["Kelly", 0.003962], ["Kristen", 0.003932], ["Erin", 0.003889], ["Brittney", 0.003619], ["Anna", 0.003544],
+    ["Taylor", 0.003532], ["Maria", 0.003492], ["Allison", 0.003474], ["Cassandra", 0.003434], ["Caitlin", 0.003422],
+    ["Lindsey", 0.003303], ["Angela", 0.003245], ["Alicia", 0.003169], ["Jamie", 0.003168], ["Katie", 0.003164],
+    ["Vanessa", 0.00312], ["Kathryn", 0.003092], ["Morgan", 0.002944], ["Jordan", 0.0029], ["Whitney", 0.002875]
+  ]
+}

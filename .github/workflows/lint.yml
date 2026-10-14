@@ -38,6 +38,8 @@ jobs:
       # The README chart must match its committed data; the redraw is byte-identical across
       # platforms because the font is matplotlib's bundled DejaVu Sans, drawn as outlines.
       - run: pip install -r scripts/requirements-docs.txt && python scripts/plot-perf.py --check
+      # The leakage charts must match their committed data; drawn the same deterministic way.
+      - run: python scripts/plot-leakage.py --check
       - run: python -m unittest discover -s tests/bench -p 'test_*.py'
       - run: python3 scripts/check-architecture.py
   agents-sync:

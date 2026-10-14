@@ -77,10 +77,6 @@ constraints (§6) is reflected in the README
 - Over 400 net lines, ask for a split. Not counted: `.result` files, vector JSON, and a `-KO.md`
   translation that mirrors a document changed in the same PR (`README-KO.md`, `docs/design-KO.md` —
   `docs.md` requires them there, so counting them would make every documented change look twice its
-  size). Also not counted: **generated assets checked byte for byte by a `--check` tool**
-  (`docs/assets/**`: the chart SVGs and the committed measurement JSON they are redrawn from, e.g.
-  `scripts/plot-perf.py --check` and `scripts/plot-leakage.py --check`). They are output, not authored
-  lines, and a reviewer reads the chart and its source data rather than the diff. The original is
-  counted, and the translation is still reviewed against it; a translation
+  size). The original is counted, and the translation is still reviewed against it; a translation
   changed on its own, or beyond its original, is counted. Do not mix a refactor and a behaviour
   change in one PR.

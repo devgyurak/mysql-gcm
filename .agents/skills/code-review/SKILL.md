@@ -9,10 +9,8 @@ The rule source is `.agents/rules/code-review.md`. Do not reorder the checklist:
 server stability → architecture → tests → compatibility → documentation → style.
 
 ## Procedure
-1. Fix the scope: `git diff --stat <base>...HEAD`, with `.result` files, vector JSON and generated
-   assets (`docs/assets/**`, redrawn by a `--check` tool) excluded
-   (`-- . ':(exclude)*.result' ':(exclude)spec/test-vectors.json' ':(exclude)docs/assets/**'`) and a
-   `-KO.md` translation left
+1. Fix the scope: `git diff --stat <base>...HEAD`, with `.result` files and vector JSON excluded
+   (`-- . ':(exclude)*.result' ':(exclude)spec/test-vectors.json'`) and a `-KO.md` translation left
    out when it mirrors a document changed in the same PR. Over 400 net lines, ask for a split as the
    first comment (P2) and carry on reviewing.
 2. If a changed file touches a crypto path (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `key_source.cc`, `udf_kr.cc`,

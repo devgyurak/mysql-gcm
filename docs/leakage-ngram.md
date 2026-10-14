@@ -109,11 +109,12 @@ answer.
 **V4 (homophonic) and V5 (padding) are in `results.json` but are not reported above: neither was
 validly evaluated.** V5's rows are padded to a fixed length with shared dummies that the attack table
 strips, so it is V3-16 (the untruncated V0 vs the 16-bit map differ only by collisions) by construction
-and its row records storage cost only. V4's model chose a **random homophone per occurrence**, which
-makes the token non-deterministic for a value — an index cannot be built on it at all — and its 6.0%
-is what an attack that assumes one token per n-gram gets; a scheme that is deterministic per value
-does not flatten frequency, and a bucketed one collides distinct values. A defensible homophonic
-design and an attack adapted to it are out of scope here, so no V4 claim is made.
+and its row records storage cost only. V4's utility is fine — the harness answers a V4 query by asking
+for all h homophones, and its candidate fraction matches V0's — but the **attack was not adapted to
+homophones**: a one-to-one assignment can recover only one of the h tokens of an n-gram, and the
+committed 6.0% is what that gets. An adapted spot check in review (one n-gram to h tokens) measured
+about 20.9% on Korean, above the ceiling; it is a review measurement, not a pre-registered one. On that
+basis no V4 claim is made, and the decision rests on V0.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leakage/leakage-utility-dark.svg">

@@ -80,11 +80,9 @@ SELECT h, q, source, NULL,
 FROM derived;
 
 -- The index's actual invariant: if the final filter matches q in h, then EVERY n-gram of q
--- (orders 1 to 3) must be found in h under the token normalisation — a whole-string
--- WEIGHT_STRING containment is not the same test. N2 must have no violations here.
--- This checks weight-string containment of each gram's weights within h's, which is a
--- conservative approximation of "h contains the gram": it may miss a hit (weights interleaved
--- with other text) but does not invent one, so 0 violations is a lower bound on the true count.
+-- (orders 1 to 3) must be found in h under the token normalisation. The test is an EQUALITY of
+-- weight strings at some position in h — a substring/`LOCATE` of one weight string inside another
+-- could both miss a real hit and invent one across weight boundaries, so it is not the invariant.
 CREATE TABLE gram_results AS
 SELECT r.h AS h, r.q AS q, SUBSTRING(r.q, a.n, b.n) AS gram
 FROM repertoire r
@@ -100,7 +98,11 @@ UNION ALL
 SELECT 'summary', 'N2 n-gram violations', COUNT(*)
 FROM gram_results g
 WHERE (g.h LIKE CONCAT('%', g.q, '%'))
-  AND LOCATE(WEIGHT_STRING(g.gram), WEIGHT_STRING(g.h)) = 0;
+  AND NOT EXISTS (
+      SELECT 1 FROM numbers c
+      WHERE c.n + CHAR_LENGTH(g.gram) - 1 <= CHAR_LENGTH(g.h)
+        AND WEIGHT_STRING(SUBSTRING(g.h, c.n, CHAR_LENGTH(g.gram))) = WEIGHT_STRING(g.gram)
+  );
 
 SELECT 'counterexample' AS section, h, q, source, note
 FROM results

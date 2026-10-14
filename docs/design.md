@@ -241,10 +241,11 @@
 >   exists to be compared against.
 > - **The motivating query is the worst case.** `'%김%'` selects ~21% of the column, which is no
 >   selectivity worth an index.
-> - **V4 (homophonic) and V5 (padding) were not validly evaluated** and carry no claim. V4 chose a
->   random homophone per occurrence, which makes the token non-deterministic for a value — no index can
->   be built on it — and V5's shared dummies are stripped by the attack table. Both are recorded in
->   `results.json` and explained, not reported, in the results document.
+> - **V4 (homophonic) and V5 (padding) were not validly evaluated** and carry no claim. V5's shared
+>   dummies are stripped by the attack table. V4's utility is fine, but **the attack was not adapted to
+>   homophones** (a one-to-one assignment recovers only one of the h tokens of an n-gram); an adapted
+>   spot check in review measured about 20.9% on Korean, above the ceiling, so no V4 claim is made. Both
+>   are recorded in `results.json` and explained, not reported, in the results document.
 > - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds both the
 >   whole-string and the n-gram containment checks; N1 has 6 counterexamples on every major measured.
 >

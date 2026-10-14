@@ -54,8 +54,9 @@ class GivenAPriorTest(unittest.TestCase):
         self.assertEqual(set(freq), {"김", "가"})
 
     def test_given_repeated_names_when_equality_stats_then_unique_fraction(self) -> None:
-        stats = equality_stats(["김가", "김가", "이나"])
+        stats = equality_stats(["김", "김", "이"], ["가", "가", "나"])
         self.assertEqual(stats["distinct_full_names"], 2)
+        self.assertEqual(stats["distinct_surnames"], 2)
         self.assertAlmostEqual(float(stats["unique_full_fraction"]), 1 / 3, places=9)
 
 

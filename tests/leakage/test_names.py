@@ -55,6 +55,16 @@ class GivenASurnameDistTest(unittest.TestCase):
         counts = _surname_counts(NameGenerator(KO_LANGUAGE, 1990, 3), 20_000)
         self.assertEqual(max(counts, key=lambda s: counts[s]), "김")
 
+    def test_given_latin_when_sampling_many_then_tail_is_drawn(self) -> None:
+        # Latin's committed top-60 covers only 13% of the census, so most draws must be
+        # the tail — the bug this test exists to catch drew the tail 0 times.
+        dist = NameGenerator(LATIN_LANGUAGE, 1990, 5).surname_dist()
+        rng = random.Random(7)  # noqa: S311 - synthetic names, not key material
+        observed = {name for name, _ in dist.observed()}
+        draws = [dist.sample(rng) for _ in range(20_000)]
+        tail_fraction = sum(1 for name in draws if name not in observed) / len(draws)
+        self.assertAlmostEqual(tail_fraction, dist.tail, delta=0.02)
+
     def test_given_ko_and_latin_when_total_mass_then_one(self) -> None:
         ko = NameGenerator(KO_LANGUAGE, 1990, 0).surname_dist()
         latin = NameGenerator(LATIN_LANGUAGE, 1990, 0).surname_dist()

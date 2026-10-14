@@ -26,7 +26,7 @@ from typing import TypeVar
 
 import numpy as np
 from metrics import Table, token_frequency
-from names import Dist
+from names import KO_LANGUAGE, Dist
 from scipy.optimize import linear_sum_assignment
 from tokens import ngrams
 
@@ -71,13 +71,15 @@ def prior_surname_guess(dist: Dist) -> str:
 
 
 def sample_names(
-    surnames: Dist, male: Dist, female: Dist, count: int, rng: random.Random
+    surnames: Dist, male: Dist, female: Dist, count: int, rng: random.Random, language: str
 ) -> list[str]:
-    """Draw whole names from the perturbed public statistics."""
+    """Draw whole names from the perturbed public statistics, in the language's order."""
     names: list[str] = []
     for _ in range(count):
         given = male if rng.random() < 0.5 else female
-        names.append(surnames.sample(rng) + given.sample(rng))
+        surname = surnames.sample(rng)
+        name = given.sample(rng)
+        names.append(f"{name} {surname}" if language != KO_LANGUAGE else f"{surname}{name}")
     return names
 
 
@@ -107,19 +109,28 @@ def top1_accuracy(predicted: str, truth: Sequence[str]) -> float:
     return correct / len(truth) if truth else 0.0
 
 
-def equality_stats(full_names: Sequence[str]) -> dict[str, float | int]:
-    """B1 and B1': what whole-name and split deterministic equality expose."""
-    full = Counter(full_names)
-    surnames = Counter(name[0] for name in full_names)
-    givens = Counter(name[1:] for name in full_names)
-    n = len(full_names)
+def equality_stats(surnames: Sequence[str], givens: Sequence[str]) -> dict[str, float | int]:
+    """B1 and B1': what whole-name and split deterministic equality expose.
+
+    Takes the surname and given-name columns separately: splitting a full name by its
+    first character is wrong for a language whose surname is not first (Latin), and it
+    silently reported the first letter as the surname.
+    """
+    full = Counter(f"{s}{g}" for s, g in zip(surnames, givens, strict=True))
+    surname_counts = Counter(surnames)
+    given_counts = Counter(givens)
+    n = len(surnames)
     return {
         "distinct_full_names": len(full),
-        "unique_full_fraction": sum(1 for c in full.values() if c == 1) / n,
-        "distinct_surnames": len(surnames),
-        "distinct_given_names": len(givens),
-        "unique_surname_fraction": sum(1 for c in surnames.values() if c == 1) / n,
-        "unique_given_fraction": sum(1 for c in givens.values() if c == 1) / n,
+        "unique_full_fraction": sum(1 for c in full.values() if c == 1) / n if n else 0.0,
+        "distinct_surnames": len(surname_counts),
+        "distinct_given_names": len(given_counts),
+        "unique_surname_fraction": (
+            sum(1 for c in surname_counts.values() if c == 1) / n if n else 0.0
+        ),
+        "unique_given_fraction": (
+            sum(1 for c in given_counts.values() if c == 1) / n if n else 0.0
+        ),
     }
 
 

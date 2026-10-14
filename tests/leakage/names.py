@@ -100,8 +100,10 @@ class Dist:
         return 0.0
 
     def sample(self, rng: random.Random) -> str:
-        total = self._cumulative[-1] if self._cumulative else 0.0
-        index = bisect.bisect_right(self._cumulative, rng.random() * total)
+        # The cumulative sum ends at (1 - tail); a draw above it is the tail, which is
+        # what makes the committed top-K's uncovered mass reachable. rng.random() is in
+        # [0, 1), so P(tail) = tail (bug: scaling by the observed mass dropped it).
+        index = bisect.bisect_right(self._cumulative, rng.random())
         if index < len(self._items):
             return self._items[index][0]
         return rng.choice(self._tail_pool)

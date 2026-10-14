@@ -1,0 +1,2348 @@
+{
+  "config": {
+    "rows": 300000,
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "variants": [
+      "V0",
+      "V1",
+      "V2",
+      "V3-8",
+      "V3-12",
+      "V3-16",
+      "V4",
+      "V5",
+      "V7"
+    ],
+    "attacks": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "languages": [
+      "ko",
+      "latin"
+    ],
+    "base_args": [
+      "--rows",
+      "300000",
+      "--prior-samples",
+      "50000",
+      "--recon-rows",
+      "500",
+      "--recon-candidates",
+      "300"
+    ]
+  },
+  "results": {
+    "ko:V0:1": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0030591100337126345,
+          "std": 0.0005807456567020079
+        },
+        "token_recovery_weighted": {
+          "mean": 0.2551446562357713,
+          "std": 0.026286537067727284
+        },
+        "reconstruction_top1": {
+          "mean": 0.1405,
+          "std": 0.022546618371720402
+        },
+        "reconstruction_top5": {
+          "mean": 0.2453,
+          "std": 0.031236357021906375
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.987853666666667,
+          "std": 0.0004672768629696331
+        },
+        "distinct_tokens": {
+          "mean": 6407.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V0:2": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.00426100908601483,
+          "std": 0.0008809629968648636
+        },
+        "token_recovery_weighted": {
+          "mean": 0.2741484189929881,
+          "std": 0.08436273972254207
+        },
+        "reconstruction_top1": {
+          "mean": 0.13540000000000002,
+          "std": 0.054498073360440914
+        },
+        "reconstruction_top5": {
+          "mean": 0.2612,
+          "std": 0.07811376319189851
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.987853666666667,
+          "std": 0.0004672768629696331
+        },
+        "distinct_tokens": {
+          "mean": 6407.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V0:3": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.008045688558867429,
+          "std": 0.0008202305913737478
+        },
+        "token_recovery_weighted": {
+          "mean": 0.3877807259646441,
+          "std": 0.026535792705479348
+        },
+        "reconstruction_top1": {
+          "mean": 0.2408,
+          "std": 0.03592993181179169
+        },
+        "reconstruction_top5": {
+          "mean": 0.3597,
+          "std": 0.03226313685927021
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.987853666666667,
+          "std": 0.0004672768629696331
+        },
+        "distinct_tokens": {
+          "mean": 6407.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V0:4": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0030591100337126345,
+          "std": 0.0005807456567020079
+        },
+        "token_recovery_weighted": {
+          "mean": 0.2551446562357713,
+          "std": 0.026286537067727284
+        },
+        "reconstruction_top1": {
+          "mean": 0.1405,
+          "std": 0.022546618371720402
+        },
+        "reconstruction_top5": {
+          "mean": 0.2453,
+          "std": 0.031236357021906375
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.987853666666667,
+          "std": 0.0004672768629696331
+        },
+        "distinct_tokens": {
+          "mean": 6407.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V1:3": {
+      "variant": {
+        "variant": "V1",
+        "orders": [
+          2
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4717,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.014651836887897804,
+          "std": 0.0020763642322388478
+        },
+        "token_recovery_weighted": {
+          "mean": 0.24979272006533115,
+          "std": 0.03227544968982671
+        },
+        "reconstruction_top1": {
+          "mean": 0.1265,
+          "std": 0.031246599815019874
+        },
+        "reconstruction_top5": {
+          "mean": 0.2481,
+          "std": 0.031638426003832744
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006249999999999999,
+          "std": 4.040764504122677e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.5,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.019186394583333332,
+          "std": 0.0012028635564025351
+        },
+        "mean_row_tokens": {
+          "mean": 1.9999913333333332,
+          "std": 2.7333333333343157e-05
+        },
+        "distinct_tokens": {
+          "mean": 1914.4,
+          "std": 4.374928570845472
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V2:3": {
+      "variant": {
+        "variant": "V2",
+        "orders": [
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00063,
+        "shared_set": {
+          "distinct_token_sets": 4559,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299811,
+          "rows_in_shared_set_fraction": 0.99937
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.004245203997459394,
+          "std": 0.0006557885507428063
+        },
+        "token_recovery_weighted": {
+          "mean": 0.09016450000000001,
+          "std": 0.023145654938406424
+        },
+        "reconstruction_top1": {
+          "mean": 0.0989,
+          "std": 0.02884770354811627
+        },
+        "reconstruction_top5": {
+          "mean": 0.1268,
+          "std": 0.02015341162185698
+        },
+        "unique_row_fraction": {
+          "mean": 0.0005858333333333334,
+          "std": 4.259466581105614e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.25,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.0031366058333333335,
+          "std": 0.0002786859470141874
+        },
+        "mean_row_tokens": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "distinct_tokens": {
+          "mean": 4546.25,
+          "std": 8.129421873663588
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V3-8:3": {
+      "variant": {
+        "variant": "V3-8",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 8,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0990234375,
+          "std": 0.014888655349139785
+        },
+        "token_recovery_weighted": {
+          "mean": 0.35738612310001094,
+          "std": 0.05003643792832991
+        },
+        "reconstruction_top1": {
+          "mean": 0.1557,
+          "std": 0.04742689110620683
+        },
+        "reconstruction_top5": {
+          "mean": 0.2873,
+          "std": 0.04851504921155909
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.08400065729166667,
+          "std": 0.004347087026280796
+        },
+        "mean_row_tokens": {
+          "mean": 5.9240441666666666,
+          "std": 0.029815529340615647
+        },
+        "distinct_tokens": {
+          "mean": 256.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V3-12:3": {
+      "variant": {
+        "variant": "V3-12",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 12,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.014122972354478675,
+          "std": 0.0017232296166482652
+        },
+        "token_recovery_weighted": {
+          "mean": 0.39456306644806494,
+          "std": 0.03767737187681205
+        },
+        "reconstruction_top1": {
+          "mean": 0.2424,
+          "std": 0.04253281086408468
+        },
+        "reconstruction_top5": {
+          "mean": 0.3627,
+          "std": 0.03426528855853982
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07419979125000001,
+          "std": 0.003447173232572004
+        },
+        "mean_row_tokens": {
+          "mean": 5.9840665,
+          "std": 0.004221822996842375
+        },
+        "distinct_tokens": {
+          "mean": 3317.25,
+          "std": 1.8674849396983098
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V3-16:3": {
+      "variant": {
+        "variant": "V3-16",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.008045688558867429,
+          "std": 0.0008202305913737478
+        },
+        "token_recovery_weighted": {
+          "mean": 0.3877807259646441,
+          "std": 0.026535792705479348
+        },
+        "reconstruction_top1": {
+          "mean": 0.2408,
+          "std": 0.03592993181179169
+        },
+        "reconstruction_top5": {
+          "mean": 0.3597,
+          "std": 0.03226313685927021
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.987853666666667,
+          "std": 0.0004672768629696331
+        },
+        "distinct_tokens": {
+          "mean": 6407.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V4:3": {
+      "variant": {
+        "variant": "V4",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 4,
+        "padding": 0,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0019294583111077173,
+          "std": 0.0002139471937720944
+        },
+        "token_recovery_weighted": {
+          "mean": 0.30892708831515875,
+          "std": 0.040311436716100775
+        },
+        "reconstruction_top1": {
+          "mean": 0.18839999999999998,
+          "std": 0.038291513420077826
+        },
+        "reconstruction_top5": {
+          "mean": 0.301,
+          "std": 0.031978117518077886
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 5.999995666666667,
+          "std": 1.6093476939346113e-05
+        },
+        "distinct_tokens": {
+          "mean": 6613.3,
+          "std": 17.53881409902049
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V5:3": {
+      "variant": {
+        "variant": "V5",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 8,
+        "unique_row_fraction": 0.00066,
+        "shared_set": {
+          "distinct_token_sets": 4720,
+          "largest_shared_set": 6488,
+          "rows_in_shared_set": 299802,
+          "rows_in_shared_set_fraction": 0.99934
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.008045688558867429,
+          "std": 0.0008202305913737478
+        },
+        "token_recovery_weighted": {
+          "mean": 0.3877807259646441,
+          "std": 0.026535792705479348
+        },
+        "reconstruction_top1": {
+          "mean": 0.2408,
+          "std": 0.03592993181179169
+        },
+        "reconstruction_top5": {
+          "mean": 0.3597,
+          "std": 0.03226313685927021
+        },
+        "unique_row_fraction": {
+          "mean": 0.0006253333333333333,
+          "std": 4.048868154599918e-05
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07356229104166667,
+          "std": 0.0031215835072229683
+        },
+        "mean_row_tokens": {
+          "mean": 13.987853666666666,
+          "std": 0.00046727686296931794
+        },
+        "distinct_tokens": {
+          "mean": 6415.1,
+          "std": 11.335342959081565
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "ko:V7:3": {
+      "variant": {
+        "variant": "V7",
+        "orders": [],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 1,
+          "largest_shared_set": 300000,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "token_recovery_weighted": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top1": {
+          "mean": 0.0214,
+          "std": 0.006755738301621815
+        },
+        "reconstruction_top5": {
+          "mean": 0.0842,
+          "std": 0.010768472500777445
+        },
+        "unique_row_fraction": {
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_row_tokens": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "distinct_tokens": {
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.21890416666666668,
+          "std": 0.0006927239910511095
+        },
+        "b0_full_name_top1": {
+          "mean": 0.021729500000000002,
+          "std": 0.00029218767751034466
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 4705.15,
+            "std": 8.917819240150587
+          },
+          "unique_full_fraction": {
+            "mean": 0.0006253333333333333,
+            "std": 4.048868154599918e-05
+          },
+          "distinct_surnames": {
+            "mean": 60.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 80.0,
+            "std": 0.0
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "latin:V0:1": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.004126602564102564,
+          "std": 0.0014395227742966092
+        },
+        "token_recovery_weighted": {
+          "mean": 0.014970644209682795,
+          "std": 0.0060914115518116265
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 34.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1248.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V0:2": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.008854166666666666,
+          "std": 0.0017087234064211635
+        },
+        "token_recovery_weighted": {
+          "mean": 0.09143480323964137,
+          "std": 0.008366630976944546
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 34.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1248.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V0:3": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.027163461538461536,
+          "std": 0.004453427317817388
+        },
+        "token_recovery_weighted": {
+          "mean": 0.1459689319991077,
+          "std": 0.035330513144063526
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 34.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1248.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V0:4": {
+      "variant": {
+        "variant": "V0",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.004126602564102564,
+          "std": 0.0014395227742966092
+        },
+        "token_recovery_weighted": {
+          "mean": 0.014970644209682795,
+          "std": 0.0060914115518116265
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 34.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1248.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V1:3": {
+      "variant": {
+        "variant": "V1",
+        "orders": [
+          2
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.08026315789473684,
+          "std": 0.013296962454873511
+        },
+        "token_recovery_weighted": {
+          "mean": 0.1553840810801406,
+          "std": 0.0292827401976989
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.75,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.012676456666666665,
+          "std": 0.00028891818215051894
+        },
+        "mean_row_tokens": {
+          "mean": 12.338713833333333,
+          "std": 0.004067772155069196
+        },
+        "distinct_tokens": {
+          "mean": 304.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V2:3": {
+      "variant": {
+        "variant": "V2",
+        "orders": [
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.01838888888888889,
+          "std": 0.0035044063973133687
+        },
+        "token_recovery_weighted": {
+          "mean": 0.06138098906470947,
+          "std": 0.008347396089579472
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.75,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.012648472222222224,
+          "std": 0.0002857320432073239
+        },
+        "mean_row_tokens": {
+          "mean": 11.4776615,
+          "std": 0.003886123672047308
+        },
+        "distinct_tokens": {
+          "mean": 900.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V3-8:3": {
+      "variant": {
+        "variant": "V3-8",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 8,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.039411764705882354,
+          "std": 0.014165224840123147
+        },
+        "token_recovery_weighted": {
+          "mean": 0.07916303535764055,
+          "std": 0.03636038807617013
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.07284179979166666,
+          "std": 0.007832397184230538
+        },
+        "mean_row_tokens": {
+          "mean": 32.057882666666664,
+          "std": 0.3064864269762476
+        },
+        "distinct_tokens": {
+          "mean": 255.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V3-12:3": {
+      "variant": {
+        "variant": "V3-12",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 12,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.025530932594644506,
+          "std": 0.003942167714380223
+        },
+        "token_recovery_weighted": {
+          "mean": 0.129454500717189,
+          "std": 0.03203469966375076
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.047752478541666664,
+          "std": 0.001801044718062904
+        },
+        "mean_row_tokens": {
+          "mean": 34.4853095,
+          "std": 0.04851243641554431
+        },
+        "distinct_tokens": {
+          "mean": 1083.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V3-16:3": {
+      "variant": {
+        "variant": "V3-16",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.027163461538461536,
+          "std": 0.004453427317817388
+        },
+        "token_recovery_weighted": {
+          "mean": 0.1459689319991077,
+          "std": 0.035330513144063526
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 34.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1248.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V4:3": {
+      "variant": {
+        "variant": "V4",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 4,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.002043269230769231,
+          "std": 0.0006095802906531626
+        },
+        "token_recovery_weighted": {
+          "mean": 0.02103514701193197,
+          "std": 0.01026873238690408
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 36.743808333333334,
+          "std": 0.013226380100222604
+        },
+        "distinct_tokens": {
+          "mean": 3969.55,
+          "std": 4.1288618286399466
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V5:3": {
+      "variant": {
+        "variant": "V5",
+        "orders": [
+          1,
+          2,
+          3
+        ],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 8,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 7139,
+          "largest_shared_set": 521,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.027163461538461536,
+          "std": 0.004453427317817388
+        },
+        "token_recovery_weighted": {
+          "mean": 0.1459689319991077,
+          "std": 0.035330513144063526
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 1e-06,
+          "std": 1.5275252316519466e-06
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 0.04656587125,
+          "std": 0.0009466340808275394
+        },
+        "mean_row_tokens": {
+          "mean": 42.59173616666667,
+          "std": 0.017970311543550263
+        },
+        "distinct_tokens": {
+          "mean": 1256.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    },
+    "latin:V7:3": {
+      "variant": {
+        "variant": "V7",
+        "orders": [],
+        "bits": 16,
+        "homophonic": 1,
+        "padding": 0,
+        "unique_row_fraction": 0.0,
+        "shared_set": {
+          "distinct_token_sets": 1,
+          "largest_shared_set": 300000,
+          "rows_in_shared_set": 300000,
+          "rows_in_shared_set_fraction": 1.0
+        }
+      },
+      "leakage": {
+        "token_recovery_unique": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "token_recovery_weighted": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "reconstruction_top5": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "unique_row_fraction": {
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "utility": {
+        "answered_fraction": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "mean_candidate_fraction": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "mean_row_tokens": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "distinct_tokens": {
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "baselines": {
+        "b0_surname_accuracy": {
+          "mean": 0.047546500000000005,
+          "std": 0.0003105326517095706
+        },
+        "b0_full_name_top1": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "b1_b1_prime": {
+          "distinct_full_names": {
+            "mean": 7139.9,
+            "std": 0.3
+          },
+          "unique_full_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          },
+          "distinct_surnames": {
+            "mean": 19.0,
+            "std": 0.0
+          },
+          "distinct_given_names": {
+            "mean": 7019.9,
+            "std": 0.3
+          },
+          "unique_surname_fraction": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "unique_given_fraction": {
+            "mean": 1e-06,
+            "std": 1.5275252316519466e-06
+          }
+        }
+      }
+    }
+  }
+}

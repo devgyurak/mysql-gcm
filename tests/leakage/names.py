@@ -15,6 +15,7 @@ claim about any real frequency.
 
 from __future__ import annotations
 
+import bisect
 import json
 import random
 from collections.abc import Sequence
@@ -79,6 +80,12 @@ class Dist:
         self._items: tuple[tuple[str, float], ...] = tuple(items)
         self.tail = tail
         self._tail_pool: tuple[str, ...] = tuple(tail_pool)
+        cumulative: list[float] = []
+        running = 0.0
+        for _, weight in self._items:
+            running += weight
+            cumulative.append(running)
+        self._cumulative: tuple[float, ...] = tuple(cumulative)
 
     def observed(self) -> tuple[tuple[str, float], ...]:
         return self._items
@@ -93,12 +100,10 @@ class Dist:
         return 0.0
 
     def sample(self, rng: random.Random) -> str:
-        draw = rng.random()
-        cumulative = 0.0
-        for name, weight in self._items:
-            cumulative += weight
-            if draw < cumulative:
-                return name
+        total = self._cumulative[-1] if self._cumulative else 0.0
+        index = bisect.bisect_right(self._cumulative, rng.random() * total)
+        if index < len(self._items):
+            return self._items[index][0]
         return rng.choice(self._tail_pool)
 
     def truncate(self, k: int) -> Dist:

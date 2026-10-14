@@ -107,9 +107,12 @@ def utility(
         if not option_sets or not all(options & universe for options in option_sets):
             continue
         answered += 1
-        candidate_rows = set(range(len(table)))
-        for options in option_sets:
-            candidate_rows &= _candidate_rows(index, options & universe)
+        rows_per_gram = [_candidate_rows(index, options & universe) for options in option_sets]
+        # Intersect from the rarest token's rows, so the full 300k row set is never
+        # materialised per query.
+        candidate_rows = min(rows_per_gram, key=len)
+        for rows in rows_per_gram:
+            candidate_rows = candidate_rows & rows
         fractions.append(len(candidate_rows) / len(table))
     total = len(queries)
     return {

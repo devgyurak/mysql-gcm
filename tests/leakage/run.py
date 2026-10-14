@@ -39,7 +39,16 @@ from metrics import (
     unique_row_fraction,
 )
 from names import NameGenerator
-from tokens import DEFAULT_BITS, DEFAULT_ORDERS, TokenModel, token_table
+from variants import (
+    DUMMY_BASE,
+    VARIANTS,
+    query_model,
+    utility,
+    variant_summary,
+)
+from variants import (
+    build_table as build_variant_table,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cohort", type=int, default=1990)
     parser.add_argument("--rows", type=int, default=5000)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--orders", type=int, nargs="+", default=list(DEFAULT_ORDERS))
-    parser.add_argument("--bits", type=int, default=DEFAULT_BITS)
+    parser.add_argument("--variant", choices=tuple(VARIANTS), default="V0")
+    parser.add_argument("--query-samples", type=int, default=200)
     parser.add_argument("--token-seed", type=int, default=7)
     parser.add_argument("--top-k", type=int, default=200)
     parser.add_argument("--attack", type=int, choices=(1, 2, 3, 4), default=1)
@@ -69,13 +78,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
-    orders: Sequence[int] = args.orders
     generator = NameGenerator(args.language, args.cohort, args.seed)
     people = generator.generate(args.rows)
     full_names = [person.full_name() for person in people]
 
-    model = TokenModel(args.bits, args.token_seed)
-    table = token_table(model, full_names, orders)
+    variant = VARIANTS[args.variant]
+    model, table = build_variant_table(people, variant, args.token_seed)
+    orders: Sequence[int] = variant.orders
+    # Padding tokens are a reserved namespace the attacker can recognise; they count
+    # towards storage but not towards the token recovery or structure.
+    attack_table = tuple(tuple(t for t in row if t < DUMMY_BASE) for row in table)
+    truth_pairs: list[tuple[int, str]] = []
+    for base, gram in model.items():
+        if variant.homophonic > 1:
+            truth_pairs.extend(
+                (base * variant.homophonic + k, gram) for k in range(variant.homophonic)
+            )
+        else:
+            truth_pairs.append((base, gram))
+    truth = reverse_injection(truth_pairs)
 
     rng = random.Random(args.prior_seed)  # noqa: S311 - synthetic names, not key material
     prior_cohort = args.cohort if args.prior_cohort is None else args.prior_cohort
@@ -85,16 +106,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     female = prior.given_dist("female").truncate(args.prior_top_k).noised(rng, args.prior_alpha)
     prior_names = sample_names(surnames, male, female, args.prior_samples, rng)
 
-    observed = token_frequency(table)
+    observed = token_frequency(attack_table)
     ngram_prior = ngram_frequency(prior_names, orders)
     if args.attack == 2:
-        predicted = cooccurrence_attack(table, prior_names, ngram_prior, orders)
+        predicted = cooccurrence_attack(attack_table, prior_names, ngram_prior, orders)
     elif args.attack == 3:
-        known = [(table[i], full_names[i]) for i in range(args.seed_rows)]
+        known = [(attack_table[i], full_names[i]) for i in range(args.seed_rows)]
         predicted = seeding_attack(observed, known, ngram_prior, orders)
     else:
         predicted = frequency_attack(observed, ngram_prior, args.top_k)
-    recovery = token_recovery(predicted, reverse_injection(model.items()), observed)
+    recovery = token_recovery(predicted, truth, observed)
 
     full_name_freq = prior_full_name_frequency(prior_names)
     b0_surname = [prior_surname_guess(surnames)] * args.rows
@@ -103,10 +124,13 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     ]
     recon_rows = min(args.recon_rows, args.rows)
     top1, top5 = reconstruction_attack(
-        table[:recon_rows], predicted, candidate_names, full_names[:recon_rows], orders
+        attack_table[:recon_rows], predicted, candidate_names, full_names[:recon_rows], orders
     )
+    queries = query_model(people, args.query_samples)
     return {
         "config": vars(args),
+        "variant": variant_summary(variant, model, attack_table),
+        "utility": utility(variant, model, table, queries),
         "leakage": {
             "attack": args.attack,
             "token_recovery_unique": recovery.unique,
@@ -115,8 +139,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "tokens_recovered": recovery.correct_unique,
             "reconstruction_top1": top1,
             "reconstruction_top5": top5,
-            "unique_row_fraction": unique_row_fraction(table),
-            "shared_set": shared_set_stats(table),
+            "unique_row_fraction": unique_row_fraction(attack_table),
+            "shared_set": shared_set_stats(attack_table),
         },
         "baselines": {
             "b0_surname_accuracy": surname_accuracy(b0_surname, [p.surname for p in people]),
@@ -136,7 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     leakage = result["leakage"]
     assert isinstance(leakage, dict)  # noqa: S101 - our own shape
     print(
-        f"{args.language} N={args.rows} orders={args.orders} bits={args.bits}: "
+        f"{args.language} {args.variant} N={args.rows}: "
         f"token recovery weighted={leakage['token_recovery_weighted']:.3f}",
         file=sys.stderr,
     )

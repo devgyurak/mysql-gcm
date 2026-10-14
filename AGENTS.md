@@ -102,6 +102,10 @@ tests/e2e/                     compose: mysql (ROW) + replica + a Python SQL run
 tests/load/                    Load: decrypt + LIKE over 10k/100k/300k rows, with a regression gate against AES_DECRYPT
 tests/bench/                   Core micro-benchmarks (Google Benchmark) — ratios against bare EVP. No server
 tests/adapter/                 The component install and uninstall paths — failure injected through stub services, inside the build image
+tests/leakage/                 The leakage experiment of amendment A17 — synthetic Korean and Latin names from
+                               committed public aggregates, with NO cryptographic operation and no key material:
+                               data/ *.json, names.py, tokens.py, attacks.py, metrics.py, variants.py, run.py.
+                               Not shipped; CI runs a smoke only, the full run's JSON is committed
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
   verify-bare.sh               The same kind of check on a throwaway server with no keyring (amendment A13)
   build-probe.sh               Builds the test-only probe component (tests/probe) inside the build image

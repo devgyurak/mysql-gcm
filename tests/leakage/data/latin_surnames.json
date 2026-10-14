@@ -1,0 +1,23 @@
+{
+  "source": "US Census Bureau, Frequently Occurring Surnames from the 2010 Census",
+  "url": "https://www.census.gov/topics/population/genealogy/data/2010_surnames.html",
+  "licence": "public domain (US federal government work)",
+  "retrieved": "2026-10-14",
+  "population": 308745538,
+  "top_share": 0.1316,
+  "note": "Top 60 surnames by count; the long tail is the remainder",
+  "surnames": [
+    ["Smith", 2442977], ["Johnson", 1932812], ["Williams", 1625252], ["Brown", 1437026], ["Jones", 1425470],
+    ["Garcia", 1166120], ["Miller", 1161437], ["Davis", 1116357], ["Rodriguez", 1094924], ["Martinez", 1060159],
+    ["Hernandez", 1043281], ["Lopez", 874523], ["Gonzalez", 841025], ["Wilson", 801882], ["Anderson", 784404],
+    ["Thomas", 756142], ["Taylor", 751209], ["Moore", 724374], ["Jackson", 708099], ["Martin", 702625], ["Lee", 693023],
+    ["Perez", 681645], ["Thompson", 664644], ["White", 660491], ["Harris", 624252], ["Sanchez", 612752],
+    ["Clark", 562679], ["Ramirez", 557423], ["Lewis", 531781], ["Robinson", 529821], ["Walker", 523129],
+    ["Young", 484447], ["Allen", 482607], ["King", 465422], ["Wright", 458980], ["Scott", 439530], ["Torres", 437813],
+    ["Nguyen", 437645], ["Hill", 434827], ["Flores", 433969], ["Green", 430182], ["Adams", 427865], ["Nelson", 424958],
+    ["Baker", 419586], ["Hall", 407076], ["Rivera", 391114], ["Campbell", 386157], ["Mitchell", 384486],
+    ["Carter", 376966], ["Roberts", 376774], ["Gomez", 365655], ["Phillips", 360802], ["Evans", 355593],
+    ["Turner", 348627], ["Diaz", 347636], ["Parker", 336221], ["Cruz", 334201], ["Edwards", 332423], ["Collins", 329770],
+    ["Reyes", 327904]
+  ]
+}

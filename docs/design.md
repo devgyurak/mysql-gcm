@@ -6,6 +6,235 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A17 (2026-10-14) — a keyed n-gram token index for partial match: a pre-registered leakage experiment
+>
+> **Status: proposed — protocol only (issue #38). Nothing here is implemented, and no file under
+> `src/`, `spec/` or the vectors may change until the Outcome block at the end says "adopted".**
+> This amendment decides nothing. It **pre-registers** the threat model, the data, the attacks, the
+> metrics, the baselines, the variants and the adoption criteria for the leakage experiment issue #38
+> asks for, so that the criteria cannot be moved once the result is seen. The experiment (PRs 2–7)
+> reports into **Outcome**; that block and its Decision table are filled only after the result and
+> after the independent review the issue requires, and that review is a **scoped design review, not a
+> human cryptographic audit** (constraint 13). It also extends amendment A4 to allow the experiment's
+> Python (below, "Python scope").
+>
+> ### Why this is registered before it is run
+>
+> The project rule is that the design is amended before the code (`docs/design.md` §0,
+> `.agents/rules/architecture.md` §2). For an experiment the same rule means the *criteria* come
+> before the *result*, or the result decides them. The numbers in "Adoption criteria" are therefore
+> starting values, confirmed in the PR 1 review and **frozen once PR 1 merges**: after that they change
+> only by an amendment that says why, never because a result was inconvenient. A result that fails
+> them is a "declined" outcome, and declining is a successful outcome for the issue.
+>
+> ### The problem, and why the motivating query is the worst case
+>
+> Constraint 5: the functions are opaque to the optimizer, so `WHERE gcm_decrypt(col, @k) LIKE '%김%'`
+> scans and decrypts every candidate row. Measured on 300k rows: a serial p95 of 235–255 ms, ~1 s at 8
+> sessions and ~4 s at 32 (`docs/perf.md`). Issue #38 proposes a two-stage search — keyed n-gram
+> tokens in a side table with an ordinary index narrow the candidates, and the real decryption stays
+> the final filter, so a token collision costs time and never returns a wrong row.
+>
+> **The motivating query is the index's worst case.** `'%김%'` matches about a fifth of a real Korean
+> name column (김 alone is ~21% of the population). A unigram index over such a column leaks the most
+> and helps the least: the token `김` selects ~21% of rows, which is no selectivity worth an index. Any
+> adopted variant is judged on the whole query mix, not on the one query that motivated the issue.
+>
+> ### Threat model — who sees what
+>
+> A deterministic keyed n-gram token is the same token for the same n-gram, so an attacker who reads
+> the table sees a labelled graph of (row, token) edges. Four adversaries are in scope:
+>
+> - **S1 — snapshot.** A stolen backup, dump or replica: the token table, the ciphertext column (whose
+>   length the GCM envelope already exposes), the plaintext columns that are not encrypted, and public
+>   name statistics. The base case.
+> - **S2 — S1 plus a conditional prior.** S1 plus other plaintext columns (birth year, sex) that make
+>   the name prior conditional. The adoption criteria are judged on this adversary, because a real
+>   table has these columns.
+> - **S3 — S1 plus m known or injected rows.** S1 plus m rows whose plaintext the adversary knows or
+>   chose (a patient who registers under a name the adversary picked, or a leaked sample), for
+>   m ∈ {1, 10, 100, 1% of N}.
+> - **S4 — the log reader.** The search key and the search pattern reach the server logs
+>   (constraint 2), and the Korean bigram space is ~1.2×10⁸, so a holder of the search key can
+>   enumerate every token. **Not simulated — argued**, because the outcome is total by construction.
+>   S4 is why question 6 (component or recipe?) matters: a construction that never puts the search key
+>   on the server removes the log exposure.
+>
+> **Leakage outside the token multiset, listed so it is not forgotten:** physical and insertion order
+> (and therefore a row's first token, which for a name is the surname), the `ROW` binlog and the undo
+> log (change history), `mysql.innodb_index_stats` and index page fill (which tokens are hot), a buffer
+> pool dump, and any join back to `patient_id`.
+>
+> **Out of scope, deliberately:** active tampering, memory scraping, and volume/access-pattern query
+> recovery. They are real, and they are not what this experiment measures.
+>
+> ### What is modelled, and what is not
+>
+> Whatever the PRF is, the adversary sees the same (row, token) graph, so the simulation models the
+> token function as a **random injection** — an injective relabelling of the n-gram space — truncated
+> to `b` bits, which behaves as a random function for `b` below the space's entropy. **No
+> cryptographic operation is performed and the harness holds no key material.** This keeps the
+> extension to A4's Python scope as small as it can be and stops `tests/leakage/` from becoming a
+> second reference tokeniser the shipped component would then have to agree with.
+>
+> **The limit of that model:** it assumes an ideal token function. It does not measure the security of
+> any concrete PRF, and cannot — that is a separate argument, made where a construction is chosen. The
+> experiment measures **leakage from the token structure given an ideal tokeniser**, which is the view
+> the adoption decision needs.
+>
+> ### Data
+>
+> Only aggregates are committed, each with its source, licence and retrieval date; the licences are
+> checked before the data is committed.
+>
+> - Korean surnames: Statistics Korea, 2015 Population and Housing Census (KOSIS).
+> - Korean given names by birth year and sex: the Supreme Court's birth registration statistics.
+> - Latin surnames: the US Census 2010 surname list (public domain).
+> - Latin given names: US Social Security Administration baby names (public domain).
+>
+> N ∈ {5k, 50k, 300k, 1M}, seeds ≥ 20, and the adversary's knowledge is deliberately incomplete:
+> regional skew, cohort mismatch, top-K truncation and Dirichlet noise. Every recovery rate is
+> reported against the total-variation distance between the generator and the adversary's prior, so a
+> rate under a *perfect* prior is not mistaken for a rate under a realistic one.
+>
+> ### Attacks (a citation is checked against its source before it is written into A17)
+>
+> 1. **Frequency rank / maximum-likelihood matching** as an assignment problem.
+> 2. **Co-occurrence graph matching** under the n-gram uniqueness constraints (a bigram always
+>    co-occurs with its own unigrams; the most frequent token in a row is the surname).
+> 3. **Known-row seeding** for m ∈ {1, 10, 100, 1%}.
+> 4. **Row reconstruction:** token multiset → name, ordering the bigrams into a path.
+>
+> **Not attempted:** simulated annealing, query-recovery attacks, and learning-based attacks. Each
+> attack implementation is itself validated by a **known-answer test** on small data where the ground
+> truth is planted: the attack must recover 100% there and fall to the B0 level on a control with no
+> tokens.
+>
+> ### Metrics and baselines
+>
+> - **Leakage:** token recovery (unique and occurrence-weighted), per-row surname accuracy, full-name
+>   top-1 and top-5, and attack-independent structural metrics (the distribution of rows sharing an
+>   identical token set, and the unique-row fraction).
+> - **B0 — length and prior only.** The surname floor (~21%).
+> - **B1 — whole-name `gcm_encrypt_det`** (equality of the whole value only).
+> - **B1′ — split surname/given-name `gcm_encrypt_det`.**
+>
+> Every result is reported as an increment over B0 and B1, never in isolation. "The attack failed" is
+> not evidence of safety: the attack-independent metrics and the full-knowledge ceiling are reported
+> together with the attack results.
+>
+> ### Variants — every leakage number stands beside a utility number
+>
+> Utility is reported **with** leakage: the candidate-set blow-up a token query produces, the fraction
+> of queries the index can answer without a scan, and the storage cost. Leakage without utility is not
+> a result.
+>
+> - **V0** unigrams + bigrams + trigrams.
+> - **V1** bigrams only (strings shorter than 2 characters fall back to a scan).
+> - **V2** trigrams only.
+> - **V3** truncation at b ∈ {8, 12, 16} bits.
+> - **V4** homophonic (per-value multiple) tokens.
+> - **V5** dummy padding.
+> - **V6** per-row salt / Bloom (structurally impossible for this index — recorded, not simulated).
+> - **V7** no tokens (B1′ + scan) — the "decline" comparator.
+>
+> There is no real workload, so the query model is stated explicitly as three mixes: whole name, given
+> name alone, surname alone, and a single syllable.
+>
+> ### Normalisation — the invariant the index must not break
+>
+> **The designated final filter must never miss a row the index should have offered.** If a token is
+> computed on a normalised form the final `LIKE` does not use, the index silently drops rows the
+> decryption would have matched — the failure is missing results, not a slow query. Three candidate
+> answers:
+>
+> - **N1 — binary fixed:** `COLLATE utf8mb4_0900_bin LIKE`, giving up case- and accent-insensitivity.
+> - **N2 — let MySQL normalise** via `WEIGHT_STRING` (a hypothesis; to be verified).
+> - **N3 — a coarser key** (case-folded, accent-stripped) with a documented narrowing.
+>
+> PR 6 verifies this on real 8.0/8.4/9.x servers with **plain SQL only** — no component function and no
+> C++ — over a declared repertoire (Korean syllables and jamo variants, Latin-1 and extended, full
+> width) plus random multi-character pairs: there must be **zero** rows where `h LIKE '%q%'` holds while
+> `tokens(q) ⊄ tokens(h)`. A non-zero count is recorded as it stands, not blamed on the environment.
+> The measured comparison collation is `utf8mb4_0900_ai_ci` (`tests/integration/20_korean_like.expected`),
+> which is **not** the `utf8mb4_general_ci` that §5.3 names as the worked example; PR 6 corrects that
+> wording to the version-dependent truth instead of a label.
+>
+> ### Candidate constructions (question 6: the component, or a recipe?)
+>
+> - **C0 — decline** (V7 documented). The baseline outcome.
+> - **C1 — application recipe.** The search key never reaches the server; the cost is per-language
+>   segmentation and normalisation drift, and it sits in tension with A4.
+> - **C2 — no new function.** `SUBSTRING(gcm_encrypt_det(@g, @search_key), 2, 12)`: the deterministic
+>   nonce is a 96-bit PRF, but this freezes the envelope layout as API and reuses the deterministic
+>   label, so its separation rests on key independence alone.
+> - **C3 — a scalar function** `gcm_search_token(bytes, key)` over 16 bytes, with its own label and a
+>   `_kr` form to keep the key out of the logs.
+> - **C4 — the issue's JSON function** (highest cost).
+>
+> **A component function is chosen only if the selected construction cannot be expressed in SQL or in
+> the application.** The default is to add no shipped surface.
+>
+> ### Adoption criteria (starting values — confirmed in the PR 1 review, then frozen)
+>
+> Judged on S2, incomplete side knowledge, N = 300k, over ≥ 20 seeds.
+>
+> **Leakage ceiling** against B1:
+>
+> - occurrence-weighted **token** recovery ≤ B1 token recovery + 10 pp;
+> - **surname** accuracy ≤ B1 surname accuracy + 10 pp;
+> - **full-name top-1** ≤ B1 top-1 + 5 pp, and **top-5** ≤ B1 top-5 + 5 pp;
+> - unique-row fraction ≤ 1.5 × B1′'s.
+>
+> **Utility floor** under the three-mix query model, with recall 100%:
+>
+> - p95 ≤ 0.5 × the scan's p95 at **1 session and at 32 sessions** (≥ 2×);
+> - the fraction of queries the index can answer without a scan is reported, not thresholded.
+>
+> A reviewer may change these numbers before PR 1 merges; no one changes them after.
+>
+> ### Python scope — the A4 extension
+>
+> A4 limits Python to vector generation and verification, the SQL E2E and load runners, and drawing
+> documentation charts from committed measurements. A17 **adds one narrow allowance:**
+>
+> > leakage simulation over synthetic data, performing no cryptographic operation and shipped nowhere.
+>
+> `tests/leakage/` is therefore a fourth Python site, and the last one. It builds no
+> encrypt/decrypt/parse API, holds no key bytes (it needs none — the token function is modelled
+> directly), and is imported by nothing that ships. `AGENTS.md` §5 and `.agents/rules/stack-python.md`
+> carry the same wording, so the rule and this amendment do not drift. The earlier chart allowance was
+> added to the rule alone and left A4's body stale; this amendment corrects that for its own case by
+> naming the extension inside A4 rather than only in the rule.
+>
+> ### Experiment harness conventions
+>
+> - Location `tests/leakage/` — not shipped, the same shape as `tests/load` and `tests/bench`.
+>   `scripts/check-architecture.py` reads only `src/` and `docker/`, so it is untouched.
+> - `ruff` (all rules) and `mypy --strict` — added to the explicit file list in `lint.yml`, which is
+>   what makes mypy check them — plus one `unittest discover` line. Test names are GWT, and case bodies
+>   contain no `if`/`for`/`while`.
+> - Randomness is seeded and marked: `random.Random(seed)  # noqa: S311 - synthetic names, not key
+>   material` (the precedent is `tests/load/run.py:104`). There are no key bytes to leak.
+> - `run.py` takes `argparse`, writes results as JSON on stdout and a summary on stderr. The full run
+>   is not in CI (it is slow); the result JSON is committed with its seed and command, and CI runs a
+>   small smoke only.
+> - The assignment problem is beyond pure Python at this N, so `numpy`/`scipy` are pinned exactly in
+>   `tests/leakage/requirements.txt` and applied to the top-K tokens only; the rest is greedy matching.
+> - Charts follow `scripts/plot-perf.py`'s deterministic SVG settings (`hashsalt`, path fonts,
+>   `Date: None`) in `scripts/plot-leakage.py --check`, emitted under `docs/assets/leakage/`, the only
+>   asset path the site copies.
+>
+> ### Outcome — filled after PRs 2–7 and the independent review
+>
+> | | Decision | Conditions | Reviewer | Date |
+> |---|---|---|---|---|
+> | A17 | *(to be filled)* | | | |
+>
+> **Until that table is filled and this amendment is restated as adopted (or declined), no code, spec
+> or vector change may follow from A17.** A "declined" outcome records the reason and the numbers, and
+> issue #38 closes with no implementation PR.
+
 > ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
 >
 > **Status: implemented and merged (issue #43; PRs #53 and #54, 2026-10-13, merged by the repository

@@ -2306,7 +2306,7 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 | 항목 | 근거 |
 |---|---|
 | **`LIKE` 용 키드 n-gram 토큰 인덱스는 연구 후 기각** — n-gram 빈도·동시출현을 누출한다; 한국어에서 S1 공격으로 출현 가중 토큰 복구 20.7% / 17.3%, 더 강한 S3 공격 3 은 31.7%, 상한은 B1 + 10 pp | 개정 A17 — `docs/leakage-ngram.md`; 실험 PR #59–#66 |
-| **N2(`WEIGHT_STRING`)는 n-gram 인덱스에 필요한 콜레이션 불변식을 지킨다; 바이너리 키(N1)는 못 지킨다** — 8.0.43, 8.4.11, 9.4.0 에서 반례 6건(대소문자·악센트·전각) | 개정 A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
+| **N2(`WEIGHT_STRING`)는 n-gram 인덱스에 필요한 콜레이션 불변식을 지킨다; 바이너리 키(N1)는 못 지킨다** — 8.0.43, 8.4.11, 9.4.0 에서 반례 6건(대소문자·악센트·전각), 15개 문자열 레퍼토리 기준 | 개정 A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
 | MySQL 8.4.11 · 9.4.0 이 GCM/GCM-SIV/SIV/CTR/XTS 거부 | 컨테이너 실측 |
 | 8.0 → 9.7 문서의 모드 목록 불변 | dev.mysql.com 레퍼런스 |
 | MariaDB 도 ECB/CBC/CTR 뿐 | MariaDB 문서 |

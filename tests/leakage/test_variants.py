@@ -28,12 +28,17 @@ class GivenAVariantTest(unittest.TestCase):
         _model, table = build_table(PEOPLE, VARIANTS["V3-8"], 0)
         self.assertTrue(all(token < 256 for row in table for token in row))
 
-    def test_given_v5_when_built_then_padding_is_present(self) -> None:
+    def test_given_v5_when_built_then_every_row_has_the_same_length(self) -> None:
         _model, table = build_table(PEOPLE, VARIANTS["V5"], 0)
-        self.assertGreaterEqual(min(_row_lengths(table)), VARIANTS["V5"].padding)
+        self.assertEqual(len(set(_row_lengths(table))), 1)
 
-    def test_given_v4_when_built_then_more_distinct_tokens_than_v0(self) -> None:
-        _model0, table0 = build_table(PEOPLE, VARIANTS["V0"], 0)
+    def test_given_v0_when_built_then_the_mapping_is_collision_free(self) -> None:
+        model, table = build_table(PEOPLE, VARIANTS["V0"], 0)
+        tokens = [t for row in table for t in row]
+        self.assertEqual(len(set(tokens)), len({gram for _token, gram in model.items()}))
+
+    def test_given_v4_when_built_then_more_distinct_tokens_than_v3_16(self) -> None:
+        _model0, table0 = build_table(PEOPLE, VARIANTS["V3-16"], 0)
         _model4, table4 = build_table(PEOPLE, VARIANTS["V4"], 0)
         self.assertGreater(
             len({t for row in table4 for t in row}), len({t for row in table0 for t in row})

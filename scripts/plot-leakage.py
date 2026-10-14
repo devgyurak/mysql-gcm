@@ -5,7 +5,7 @@ Reads docs/assets/leakage/results.json and writes light and dark SVGs beside it:
 
 - `leakage-utility-*.svg` — every variant as a point: leakage (token recovery) against
   utility (the candidate fraction a token query still returns). Down and left is better.
-- `naming-attacks-*.svg` — attacks 1-4 on V0, so the attack choices compare.
+- `naming-attacks-*.svg` — attacks 1-3 on V0, so the attack choices compare.
 
 Internal documentation tooling (stack-python, amendment A17): it encrypts nothing, reads no
 database, and its only input is the JSON file. `--check` redraws into a temporary directory
@@ -50,7 +50,7 @@ THEMES: dict[str, dict[str, Any]] = {
     },
 }
 MARKERS = {"ko": "o", "latin": "^"}
-VARIANT_ORDER = ("V0", "V1", "V2", "V3-8", "V3-12", "V3-16", "V4", "V5", "V7")
+VARIANT_ORDER = ("V0", "V1", "V2", "V3-8", "V3-12", "V3-16", "V7")
 
 
 def load() -> dict[str, Any]:
@@ -177,7 +177,7 @@ def draw_naming_attacks(data: dict[str, Any], theme_name: str, path: Path) -> No
         ax,
         theme,
         "Naming attacks on V0 (N = 300k)",
-        "Attacks 1-4, 20 seeds each. Attack 3 seeds from known rows.",
+        "Attacks 1-3, 20 seeds each. Attack 3 seeds from known rows.",
     )
     fig.subplots_adjust(left=0.10, right=0.98, top=0.76, bottom=0.12)
     meta = {"Date": None} if path.suffix == ".svg" else {}

@@ -109,14 +109,16 @@ def top1_accuracy(predicted: str, truth: Sequence[str]) -> float:
     return correct / len(truth) if truth else 0.0
 
 
-def equality_stats(surnames: Sequence[str], givens: Sequence[str]) -> dict[str, float | int]:
+def equality_stats(
+    full_names: Sequence[str], surnames: Sequence[str], givens: Sequence[str]
+) -> dict[str, float | int]:
     """B1 and B1': what whole-name and split deterministic equality expose.
 
-    Takes the surname and given-name columns separately: splitting a full name by its
-    first character is wrong for a language whose surname is not first (Latin), and it
-    silently reported the first letter as the surname.
+    The full-name column is passed in as the language renders it (`Person.full_name`); the split
+    columns are the surname and given-name columns, not a slice of the full name (for a language
+    whose surname is not first, that slice takes the first letter).
     """
-    full = Counter(f"{s}{g}" for s, g in zip(surnames, givens, strict=True))
+    full = Counter(full_names)
     surname_counts = Counter(surnames)
     given_counts = Counter(givens)
     n = len(surnames)

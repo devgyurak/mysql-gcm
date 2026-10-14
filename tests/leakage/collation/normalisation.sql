@@ -82,6 +82,9 @@ FROM derived;
 -- The index's actual invariant: if the final filter matches q in h, then EVERY n-gram of q
 -- (orders 1 to 3) must be found in h under the token normalisation — a whole-string
 -- WEIGHT_STRING containment is not the same test. N2 must have no violations here.
+-- This checks weight-string containment of each gram's weights within h's, which is a
+-- conservative approximation of "h contains the gram": it may miss a hit (weights interleaved
+-- with other text) but does not invent one, so 0 violations is a lower bound on the true count.
 CREATE TABLE gram_results AS
 SELECT r.h AS h, r.q AS q, SUBSTRING(r.q, a.n, b.n) AS gram
 FROM repertoire r

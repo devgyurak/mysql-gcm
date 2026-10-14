@@ -62,12 +62,15 @@ attacks still demonstrably work at scale (17–32% Korean), but the safety net i
 promised. Not attempted: simulated annealing, query-recovery attacks and learning-based attacks.
 
 **Baselines.** B0 (length and prior only: the surname floor, ~21%) and B1 / B1′ (whole-name and split
-`gcm_encrypt_det` equality). Every number below is read as an increment over them.
+`gcm_encrypt_det` equality). Every number below is read as an increment over them. **Token recovery
+is occurrence-weighted by row frequency** — a token's weight is the number of rows that contain it, the
+quantity the side table itself exposes — not by its raw count within a row (which is deduplicated).
 
 ## Results
 
 **In one line: on Korean — the language that decides it — the attack recovers 20.7% of n-grams under
-the pre-registered S1 attacks (17.3–31.7% across attacks), two to three times the registered ceiling.
+the S1 attacks (a lower bound of the registered S2) (17.3–31.7% across attacks), 1.7–3.2× the
+registered ceiling.
 The index is declined. The numbers are below.**
 
 ### Variants (attack 3, an S3 adversary) — leakage beside utility
@@ -83,14 +86,12 @@ answer.
 
 | Variant | Candidate fraction | Answered | Token recovery (weighted) | Full-name top-1 | Unique rows |
 |---|---|---|---|---|---|
-| V0 PRF, no truncation | 0.053 | 1.00 | 0.317 ± 0.030 | 0.194 | 0.002 |
-| V1 bigrams | 0.012 | 0.50 | 0.182 ± 0.036 | 0.081 | 0.002 |
-| V2 trigrams | 0.002 | 0.25 | 0.055 ± 0.017 | 0.060 | 0.002 |
-| V3 b=8 | 0.064 | 1.00 | 0.267 ± 0.065 | 0.108 | 0.002 |
-| V3 b=12 | 0.054 | 1.00 | 0.309 ± 0.031 | 0.182 | 0.002 |
-| V3 b=16 | 0.053 | 1.00 | 0.318 ± 0.033 | 0.197 | 0.002 |
-| V4 homophonic | 0.053 | 1.00 | 0.060 ± 0.015 | 0.035 | 0.889 |
-| V5 padding | 0.053 | 1.00 | 0.318 ± 0.033 | 0.197 | 0.002 |
+| V0 PRF, no truncation | 0.053 | 1.00 | 0.317 ± 0.030 | 0.194 | 0.0025 |
+| V1 bigrams | 0.012 | 0.50 | 0.182 ± 0.036 | 0.081 | 0.0025 |
+| V2 trigrams | 0.0025 | 0.25 | 0.055 ± 0.017 | 0.060 | 0.0025 |
+| V3 b=8 | 0.064 | 1.00 | 0.267 ± 0.065 | 0.108 | 0.0025 |
+| V3 b=12 | 0.054 | 1.00 | 0.309 ± 0.031 | 0.182 | 0.0025 |
+| V3 b=16 | 0.053 | 1.00 | 0.318 ± 0.033 | 0.197 | 0.0025 |
 | V7 no tokens | 1.000 | 0.00 | 0.000 ± 0.000 | 0.015 | 0.000 |
 
 **Latin**
@@ -103,14 +104,21 @@ answer.
 | V3 b=8 | 0.067 | 1.00 | 0.119 ± 0.043 | 0.021 | 0.006 |
 | V3 b=12 | 0.041 | 1.00 | 0.281 ± 0.020 | 0.129 | 0.006 |
 | V3 b=16 | 0.040 | 1.00 | 0.348 ± 0.028 | 0.165 | 0.006 |
-| V4 homophonic | 0.040 | 1.00 | 0.026 ± 0.010 | 0.014 | 1.000 |
-| V5 padding | 0.040 | 1.00 | 0.348 ± 0.028 | 0.165 | 0.006 |
 | V7 no tokens | 1.000 | 0.00 | 0.000 ± 0.000 | 0.001 | 0.000 |
+
+**V4 (homophonic) and V5 (padding) are in `results.json` but are not reported above: neither was
+validly evaluated.** V5's rows are padded to a fixed length with shared dummies that the attack table
+strips, so it is V3-16 (the untruncated V0 vs the 16-bit map differ only by collisions) by construction
+and its row records storage cost only. V4's model chose a **random homophone per occurrence**, which
+makes the token non-deterministic for a value — an index cannot be built on it at all — and its 6.0%
+is what an attack that assumes one token per n-gram gets; a scheme that is deterministic per value
+does not flatten frequency, and a bucketed one collides distinct values. A defensible homophonic
+design and an attack adapted to it are out of scope here, so no V4 claim is made.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leakage/leakage-utility-dark.svg">
   <img src="docs/assets/leakage/leakage-utility-light.svg" width="100%"
-       alt="Scatter of every variant, leakage (occurrence-weighted token recovery) against utility (mean candidate fraction a token query returns), for Korean and Latin; down and left is better. V0 and its truncations sit top-left; V4 sits at the bottom with the same utility.">
+       alt="Scatter of the reported variants, leakage (occurrence-weighted token recovery) against utility (mean candidate fraction a token query returns), for Korean and Latin; down and left is better. V0 and its truncations sit top-left. V4 and V5 are not plotted — they were not validly evaluated.">
 </picture>
 
 ### Attacks on V0
@@ -153,7 +161,7 @@ requirement, and the b = 8 variant that looks best on Latin saturates its 256-to
   ceiling fails under the registered adversary on Korean, not only under the stronger S3 attack. V2
   (trigrams) falls to 5.5% Korean but answers only 25% of the query mix, i.e. it is no longer an index
   for the motivating queries.
-- **Surname accuracy and unique-row fraction.** The token table's unique-row fraction is 0.002 against
+- **Surname accuracy and unique-row fraction.** The token table's unique-row fraction is 0.0025 against
   B1′'s 0.000 — a technical fail, but marginal next to the token failure, which decides on its own.
 - **Utility floor — p95 ≤ 0.5 × the scan at 1 and 32 sessions.** The harness measures candidate-set
   size, not query latency, so the floor is **not demonstrated**; the V0 candidate fraction (5.3% Korean,
@@ -172,20 +180,11 @@ plainly what was and was not run, so nothing is implied to have passed.
 | Utility p95 floor at 1 and 32 sessions | **not measured** (candidate-set size is reported instead) |
 | N ∈ {5k, 50k, 300k, 1M} | only **N = 300k** run |
 
-Three findings also stand on their own:
+One finding also stands on its own:
 
 - **The motivating query is the index's worst case.** `'%김%'` selects ~21% of a Korean column (김 is
   21.5% of the census), which is no selectivity worth an index — the very query the issue is filed
   for is the one the index helps the least with.
-- **Homophonic tokens (V4) trade frequency leakage for row uniqueness.** With one random homophone per
-  occurrence, Korean recovery falls from 31.8% to 6.0% and Latin from 34.8% to 2.6% at the same
-  candidate fraction — below the ceiling — **but the unique-row fraction rises from 0.002 to 0.889
-  (Korean) and 0.006 to 1.000 (Latin)**: the rows become individually distinguishable by their token
-  sets, which is a different leak, not a smaller one. It is a redistribution, not a fix.
-- **V5 (padding) is a null here, not a test of the variant.** Every row is padded to the same length
-  with shared dummies, and the attack table strips the reserved dummy namespace, so V5 ≡ V0 by
-  construction and its row only records the storage cost of hiding row length. The padding variant is
-  not actually evaluated.
 
 ## Normalisation — the invariant the index must not break
 

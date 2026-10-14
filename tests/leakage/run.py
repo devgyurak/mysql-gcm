@@ -149,7 +149,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "b0_full_name_top1": top1_accuracy(
                 max(full_name_freq, key=lambda k: full_name_freq[k]), full_names
             ),
-            "b1_b1_prime": equality_stats(surnames_true, givens_true),
+            "b1_b1_prime": equality_stats(full_names, surnames_true, givens_true),
         },
     }
 

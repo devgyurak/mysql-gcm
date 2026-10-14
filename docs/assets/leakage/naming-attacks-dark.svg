@@ -1249,7 +1249,7 @@ z
    </g>
   </g>
   <g id="text_16">
-   <!-- Attacks 1-4, 20 seeds each. Attack 3 seeds from known rows. -->
+   <!-- Attacks 1-3, 20 seeds each. Attack 3 seeds from known rows. -->
    <g style="fill: #c3c2b7" transform="translate(12.672 44.030438) scale(0.1 -0.1)">
     <defs>
      <path id="DejaVuSans-41" d="M 2188 4044 
@@ -1297,25 +1297,6 @@ Q 372 3047 722 3315
 Q 1072 3584 1716 3584 
 Q 2034 3584 2315 3537 
 Q 2597 3491 2834 3397 
-z
-" transform="scale(0.015625)"/>
-     <path id="DejaVuSans-34" d="M 2419 4116 
-L 825 1625 
-L 2419 1625 
-L 2419 4116 
-z
-M 2253 4666 
-L 3047 4666 
-L 3047 1625 
-L 3713 1625 
-L 3713 1100 
-L 3047 1100 
-L 3047 0 
-L 2419 0 
-L 2419 1100 
-L 313 1100 
-L 313 1709 
-L 2253 4666 
 z
 " transform="scale(0.015625)"/>
      <path id="DejaVuSans-2c" d="M 750 794 
@@ -1389,7 +1370,7 @@ z
     <use xlink:href="#DejaVuSans-20" transform="translate(371.345703 0)"/>
     <use xlink:href="#DejaVuSans-31" transform="translate(403.132812 0)"/>
     <use xlink:href="#DejaVuSans-2d" transform="translate(466.755859 0)"/>
-    <use xlink:href="#DejaVuSans-34" transform="translate(502.839844 0)"/>
+    <use xlink:href="#DejaVuSans-33" transform="translate(502.839844 0)"/>
     <use xlink:href="#DejaVuSans-2c" transform="translate(566.462891 0)"/>
     <use xlink:href="#DejaVuSans-20" transform="translate(598.25 0)"/>
     <use xlink:href="#DejaVuSans-32" transform="translate(630.037109 0)"/>

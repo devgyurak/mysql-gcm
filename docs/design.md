@@ -241,10 +241,10 @@
 >   exists to be compared against.
 > - **The motivating query is the worst case.** `'%김%'` selects ~21% of the column, which is no
 >   selectivity worth an index.
-> - **Homophonic tokens (V4) redistribute leakage rather than reduce it.** One random homophone per
->   occurrence drops Korean recovery from 31.8% to 6.0% at the same candidate fraction, but the
->   unique-row fraction rises from 0.002 to 0.889 — the rows become individually distinguishable, a
->   different leak, not a smaller one.
+> - **V4 (homophonic) and V5 (padding) were not validly evaluated** and carry no claim. V4 chose a
+>   random homophone per occurrence, which makes the token non-deterministic for a value — no index can
+>   be built on it — and V5's shared dummies are stripped by the attack table. Both are recorded in
+>   `results.json` and explained, not reported, in the results document.
 > - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds both the
 >   whole-string and the n-gram containment checks; N1 has 6 counterexamples on every major measured.
 >
@@ -253,20 +253,25 @@
 > does not reimplement collation for an unproven index (§5.3). Record the reason, close issue #38 with
 > no implementation PR, and point constraint 5 at the study.
 >
+> **The first reviewer's verdict, in its own words (2026-10-14, on the first harness):** "decline
+> (C0) — concur with the author. The Korean occurrence-weighted token recovery exceeds the frozen
+> ceiling under every variant that answers the query mix (38.8% at V0 vs a 10 pp ceiling), and it still
+> fails under the strict S2-only attacks (attack 1 = 25.5%, attack 2 = 27.4%); the motivating query
+> `'%김%'` is the index's own worst case; the utility floor is not demonstrated; and no construction
+> C1–C4 changes the structural leakage that fails."
+>
+> That verdict was on the **first harness**, whose tail-draw, Latin-name-format and V0-truncation
+> defects a later code review found; the fixes and the re-run are recorded in `leakage-ngram.md`, and
+> the corrected Korean figures are 20.7% / 17.3% (S1) and 31.7% (S3). The quote is left as it was
+> given; the reviewer did not see the corrected numbers.
+>
 > | | Decision | Conditions | Reviewer | Date |
 > |---|---|---|---|---|
-> | A17 | **decline (C0)** — adopt none of C1–C4 | Apply the review's P1/P2 corrections to `leakage-ngram.md` (the noise parameter, the S2/S3 caption, the Latin coverage, the attack-4 wording, and which criteria went unmeasured) | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
+> | A17 (first) | **decline (C0)** — adopt none of C1–C4, on the first harness | Apply the review's P1/P2 corrections to `leakage-ngram.md` (the noise parameter, the S2/S3 caption, the Latin coverage, the attack-4 wording, and which criteria went unmeasured) | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
+> | A17 (second) | **decline (C0) upheld** on the corrected harness and result; declaring V4/V5 not-validly-evaluated instead of re-measuring is honest and sufficient | Sync the rewritten English Outcome into `design-KO.md`, remove or mark V4/V5 in the chart and its caption, and fix the chart subtitle to "Attacks 1-3" | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
 >
-> **The reviewer's verdict, in its own words:** "decline (C0) — concur with the author. The Korean
-> occurrence-weighted token recovery exceeds the frozen ceiling under every variant that answers the
-> query mix (31.7% at V0 under the S3 attack, and 20.7% / 17.3% under the strictly-S1 attacks 1 and 2,
-> against a 10 pp ceiling); the motivating query `'%김%'` is the index's own worst case; the utility
-> floor is not demonstrated; and no construction C1–C4 changes the structural leakage that fails. A
-> later review round found the tail distribution, the Latin name format and V0's truncation, and those
-> were corrected before this row was filled; the corrected result still fails." The review is a scoped
-> design review of the amendment, the results document and the harness; it measured no PRF and is not
-> a human cryptographic audit. Its findings were applied to `leakage-ngram.md` before this row was
-> filled.
+> Each review is a scoped design review of the amendment, the results document and the harness at the
+> revision it was given; none measured a PRF, and none is a human cryptographic audit.
 >
 > **No code, spec or vector change follows from A17**, and issue #38 closes with no implementation PR.
 > Constraint 5 points at [`leakage-ngram.md`](leakage-ngram.md). Revisiting the index would be a new

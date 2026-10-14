@@ -110,6 +110,8 @@ scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.
   verify-bare.sh               The same kind of check on a throwaway server with no keyring (amendment A13)
   build-probe.sh               Builds the test-only probe component (tests/probe) inside the build image
   verify-nested.sh             Runs tests/integration/nested on a throwaway server (issue #43)
+  leakage-collation.sh         Runs the collation differential of tests/leakage/collation on a throwaway server
+                               per major (amendment A17, question 4) — plain SQL, no component
   bench.sh                     Builds and runs the core micro-benchmarks and the ratio gate
   adapter-tests.sh             Verifies the install and uninstall paths against stub services (reusing the build image)
   unit-in-docker.sh            Runs the unit tests on the same GCC and ubuntu as CI (catching what the host clang lets through)

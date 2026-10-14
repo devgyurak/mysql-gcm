@@ -40,6 +40,10 @@ jobs:
       # a re-run init.
       - run: scripts/build-probe.sh "${{ matrix.mysql }}"
       - run: scripts/verify-nested.sh "${{ matrix.mysql }}"
+      # The collation differential of amendment A17 needs no component: plain SQL on the
+      # same major, so a normalisation that would make an n-gram index miss rows is caught
+      # here rather than in production.
+      - run: scripts/leakage-collation.sh "${{ matrix.mysql }}"
       - name: Collect diagnostics
         if: failure()
         run: |

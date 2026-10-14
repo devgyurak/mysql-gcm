@@ -65,4 +65,18 @@ until mysql -N -e 'SELECT 1' </dev/null >/dev/null 2>&1; do
 done
 
 echo "== ${name}: collation differential (A17) ==" >&2
-mysql -t < "${root}/tests/leakage/collation/normalisation.sql"
+output="$(mysql -t < "${root}/tests/leakage/collation/normalisation.sql")"
+echo "${output}"
+
+# The recorded result is a gate, not a printout: N1 (binary) must keep its counterexamples
+# and N2 (WEIGHT_STRING) must have none. A change here is a finding to investigate, not a
+# number to update silently.
+n1="$(echo "${output}" | awk -F'|' '/\| summary \| N1 binary/ {gsub(/ /, "", $4); print $4}')"
+n2="$(echo "${output}" | awk -F'|' '/\| summary \| N2 weight/ {gsub(/ /, "", $4); print $4}')"
+n2gram="$(echo "${output}" | awk -F'|' '/\| summary \| N2 n-gram violations/ {gsub(/ /, "", $4); print $4}')"
+echo "N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
+if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ]; then
+  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0," \
+    "got N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
+  exit 1
+fi

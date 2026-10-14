@@ -79,11 +79,30 @@ SELECT h, q, source, NULL,
        (LOCATE(WEIGHT_STRING(q), WEIGHT_STRING(h)) > 0)
 FROM derived;
 
+-- The index's actual invariant: if the final filter matches q in h, then EVERY n-gram of q
+-- (orders 1 to 3) must be found in h under the token normalisation. The test is an EQUALITY of
+-- weight strings at some position in h — a substring/`LOCATE` of one weight string inside another
+-- could both miss a real hit and invent one across weight boundaries, so it is not the invariant.
+CREATE TABLE gram_results AS
+SELECT r.h AS h, r.q AS q, SUBSTRING(r.q, a.n, b.n) AS gram
+FROM repertoire r
+JOIN numbers a ON a.n <= CHAR_LENGTH(r.q)
+JOIN numbers b ON b.n <= 3 AND a.n + b.n - 1 <= CHAR_LENGTH(r.q);
+
 SELECT 'summary' AS section, 'N1 binary' AS normalisation, COUNT(*) AS counterexamples
 FROM results WHERE final_filter = 1 AND n1_binary = 0
 UNION ALL
 SELECT 'summary', 'N2 weight', COUNT(*)
-FROM results WHERE final_filter = 1 AND n2_weight = 0;
+FROM results WHERE final_filter = 1 AND n2_weight = 0
+UNION ALL
+SELECT 'summary', 'N2 n-gram violations', COUNT(*)
+FROM gram_results g
+WHERE (g.h LIKE CONCAT('%', g.q, '%'))
+  AND NOT EXISTS (
+      SELECT 1 FROM numbers c
+      WHERE c.n + CHAR_LENGTH(g.gram) - 1 <= CHAR_LENGTH(g.h)
+        AND WEIGHT_STRING(SUBSTRING(g.h, c.n, CHAR_LENGTH(g.gram))) = WEIGHT_STRING(g.gram)
+  );
 
 SELECT 'counterexample' AS section, h, q, source, note
 FROM results

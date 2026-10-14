@@ -54,8 +54,9 @@ class GivenAPriorTest(unittest.TestCase):
         self.assertEqual(set(freq), {"김", "가"})
 
     def test_given_repeated_names_when_equality_stats_then_unique_fraction(self) -> None:
-        stats = equality_stats(["김가", "김가", "이나"])
+        stats = equality_stats(["김가", "김가", "이나"], ["김", "김", "이"], ["가", "가", "나"])
         self.assertEqual(stats["distinct_full_names"], 2)
+        self.assertEqual(stats["distinct_surnames"], 2)
         self.assertAlmostEqual(float(stats["unique_full_fraction"]), 1 / 3, places=9)
 
 
@@ -65,6 +66,12 @@ class GivenTheCooccurrenceAttackTest(unittest.TestCase):
         prior = ngram_frequency(NAMES * 5, DEFAULT_ORDERS)
         predicted = cooccurrence_attack(table, NAMES * 5, prior, DEFAULT_ORDERS)
         self.assertEqual(set(predicted), set(token_frequency(table)))
+
+    def test_given_no_tokens_when_cooccurrence_then_control_recovers_nothing(self) -> None:
+        self.assertEqual(
+            cooccurrence_attack((), NAMES, ngram_frequency(NAMES, DEFAULT_ORDERS), DEFAULT_ORDERS),
+            {},
+        )
 
 
 class GivenTheSeedingAttackTest(unittest.TestCase):
@@ -76,6 +83,9 @@ class GivenTheSeedingAttackTest(unittest.TestCase):
         truth = reverse_injection([(100, "가"), (200, "나"), (300, "다")])
         recovered = token_recovery(predicted, truth, observed)
         self.assertAlmostEqual(recovered.weighted, 1.0, places=6)
+
+    def test_given_no_tokens_when_seeding_then_control_recovers_nothing(self) -> None:
+        self.assertEqual(seeding_attack({}, [], {"가": 1.0}, (1,)), {})
 
 
 class GivenTheReconstructionTest(unittest.TestCase):

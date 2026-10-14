@@ -8,15 +8,12 @@
 
 > ## Amendment A17 (2026-10-14) — a keyed n-gram token index for partial match: a pre-registered leakage experiment
 >
-> **Status: proposed — protocol only (issue #38). Nothing here is implemented, and no file under
-> `src/`, `spec/` or the vectors may change until the Outcome block at the end says "adopted".**
-> This amendment decides nothing. It **pre-registers** the threat model, the data, the attacks, the
-> metrics, the baselines, the variants and the adoption criteria for the leakage experiment issue #38
-> asks for, so that the criteria cannot be moved once the result is seen. The experiment (PRs 2–7)
-> reports into **Outcome**; that block and its Decision table are filled only after the result and
-> after the independent review the issue requires, and that review is a **scoped design review, not a
-> human cryptographic audit** (constraint 13). It also extends amendment A4 to allow the experiment's
-> Python (below, "Python scope").
+> **Status: declined (2026-10-14) — the experiment was run and the index is not adopted; no file under
+> `src/`, `spec/` or the vectors changed, and issue #38 closes with no implementation PR.** The
+> protocol below was **pre-registered** before the experiment ran, so the criteria could not be moved
+> once the result was seen; the result and the review are in the **Outcome** block at the end. That
+> review is a **scoped design review, not a human cryptographic audit** (constraint 13). The experiment
+> used Python only, under the A4 extension this amendment records ("Python scope").
 >
 > ### Why this is registered before it is run
 >
@@ -157,8 +154,8 @@
 > width) plus random multi-character pairs: there must be **zero** rows where `h LIKE '%q%'` holds while
 > `tokens(q) ⊄ tokens(h)`. A non-zero count is recorded as it stands, not blamed on the environment.
 > The measured comparison collation is `utf8mb4_0900_ai_ci` (`tests/integration/20_korean_like.expected`),
-> which is **not** the `utf8mb4_general_ci` that §5.3 names as the worked example; PR 6 corrects that
-> wording to the version-dependent truth instead of a label.
+> which is **not** the `utf8mb4_general_ci` that §5.3 names as the worked example; this amendment's
+> Outcome PR corrects that wording to the version-dependent truth instead of a label.
 >
 > ### Candidate constructions (question 6: the component, or a recipe?)
 >
@@ -175,9 +172,10 @@
 > **A component function is chosen only if the selected construction cannot be expressed in SQL or in
 > the application.** The default is to add no shipped surface.
 >
-> ### Adoption criteria (starting values — confirmed in the PR 1 review, then frozen)
+> ### Adoption criteria (registered values — frozen at the protocol commit, before the experiment)
 >
-> Judged on S2, incomplete side knowledge, N = 300k, over ≥ 20 seeds.
+> Judged on **S2** (the snapshot adversary with a conditional prior), incomplete side knowledge,
+> N = 300k, over ≥ 20 seeds. The experiment implemented **S1**, a lower bound of S2; see Outcome.
 >
 > **Leakage ceiling** against B1:
 >
@@ -225,15 +223,61 @@
 >   `Date: None`) in `scripts/plot-leakage.py --check`, emitted under `docs/assets/leakage/`, the only
 >   asset path the site copies.
 >
-> ### Outcome — filled after PRs 2–7 and the independent review
+> ### Outcome — the result, and the recommendation
+>
+> **The experiment is reported in [`leakage-ngram.md`](leakage-ngram.md).** The author's analysis, put
+> before the independent review recorded in the table below:
+>
+> - **The harness implements S1, not the registered S2.** It uses one unconditional prior and does not
+>   condition on the birth-year and sex columns, so attacks 1 and 2 are S1 attacks and the measured
+>   leakage is a **lower bound of S2**. Recorded as a deviation, not a pass.
+> - **The leakage ceiling fails on Korean under the S1 attacks alone.** Against B1 (whole-value
+>   equality only) the ceiling is B1 + 10 pp. Korean V0 recovers **20.7% (attack 1) and 17.3% (attack
+>   2)** occurrence-weighted, and 31.7% under the stronger S3 attack 3; Latin V0 is 10.2%, 26.5% and
+>   36.2%. That is 1.7–2.1× the ceiling on the S1 attacks, not a rounding. The decision is on Korean,
+>   the language the issue is filed for.
+> - **The variants that fall under the ceiling stop being an index.** V2 (trigrams) reaches 5.5% Korean
+>   but answers only 25% of the query mix; V7 (no tokens) recovers nothing and is the B1′ baseline it
+>   exists to be compared against.
+> - **The motivating query is the worst case.** `'%김%'` selects ~21% of the column, which is no
+>   selectivity worth an index.
+> - **V4 (homophonic) and V5 (padding) were not validly evaluated** and carry no claim. V5's shared
+>   dummies are stripped by the attack table. V4's utility is fine, but **the attack was not adapted to
+>   homophones** (a one-to-one assignment recovers only one of the h tokens of an n-gram); an adapted
+>   spot check in review measured about 20.9% on Korean, above the ceiling, so no V4 claim is made. Both
+>   are recorded in `results.json` and explained, not reported, in the results document.
+> - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds both the
+>   whole-string and the n-gram containment checks; N1 has 6 counterexamples on every major measured.
+>
+> **Recommendation: decline (C0).** No construction in C1–C4 makes the index narrow the motivating
+> query enough to be worth a deterministic n-gram side table that leaks this much, and the project
+> does not reimplement collation for an unproven index (§5.3). Record the reason, close issue #38 with
+> no implementation PR, and point constraint 5 at the study.
+>
+> **The first reviewer's verdict, in its own words (2026-10-14, on the first harness):** "decline
+> (C0) — concur with the author. The Korean occurrence-weighted token recovery exceeds the frozen
+> ceiling under every variant that answers the query mix (38.8% at V0 vs a 10 pp ceiling), and it still
+> fails under the strict S2-only attacks (attack 1 = 25.5%, attack 2 = 27.4%); the motivating query
+> `'%김%'` is the index's own worst case; the utility floor is not demonstrated; and no construction
+> C1–C4 changes the structural leakage that fails."
+>
+> That verdict was on the **first harness**, whose tail-draw, Latin-name-format and V0-truncation
+> defects a later code review found; the fixes and the re-run are recorded in `leakage-ngram.md`, and
+> the corrected Korean figures are 20.7% / 17.3% (S1) and 31.7% (S3). The quote is left as it was
+> given; the reviewer did not see the corrected numbers.
 >
 > | | Decision | Conditions | Reviewer | Date |
 > |---|---|---|---|---|
-> | A17 | *(to be filled)* | | | |
+> | A17 (first) | **decline (C0)** — adopt none of C1–C4, on the first harness | Apply the review's P1/P2 corrections to `leakage-ngram.md` (the noise parameter, the S2/S3 caption, the Latin coverage, the attack-4 wording, and which criteria went unmeasured) | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
+> | A17 (second) | **decline (C0) upheld** on the corrected harness and result; declaring V4/V5 not-validly-evaluated instead of re-measuring is honest and sufficient | Sync the rewritten English Outcome into `design-KO.md`, remove or mark V4/V5 in the chart and its caption, and fix the chart subtitle to "Attacks 1-3" | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
 >
-> **Until that table is filled and this amendment is restated as adopted (or declined), no code, spec
-> or vector change may follow from A17.** A "declined" outcome records the reason and the numbers, and
-> issue #38 closes with no implementation PR.
+> Each review is a scoped design review of the amendment, the results document and the harness at the
+> revision it was given; none measured a PRF, and none is a human cryptographic audit.
+>
+> **No code, spec or vector change follows from A17**, and issue #38 closes with no implementation PR.
+> Constraint 5 points at [`leakage-ngram.md`](leakage-ngram.md). Revisiting the index would be a new
+> amendment: a construction that answers the collation invariant (N2), a stated and bounded leakage,
+> and its own pre-registered experiment.
 
 > ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
 >
@@ -2459,12 +2503,17 @@ From MySQL 8.0.19, the `mysql_udf_metadata` service can set the charset and coll
 value. That makes MySQL's native `LIKE` usable as-is.
 
 ```sql
-WHERE gcm_decrypt(encrypted_name) LIKE '%김%'   -- works through utf8mb4_general_ci
+WHERE gcm_decrypt(encrypted_name) LIKE '%김%'   -- under the column's collation
 ```
 
-Writing decrypt_like instead would mean reproducing utf8mb4_general_ci's case-insensitivity and
-Unicode normalisation semantics in C, all the way through CJK. Removing OPE was where we were burned
+Writing decrypt_like instead would mean reproducing the column collation's case-insensitivity and
+accent/width behaviour in C, all the way through CJK. Removing OPE was where we were burned
 once by Python's code-point order differing from MySQL's collation. Do not reproduce it; use MySQL's.
+The collation is the column's, and on 8.0+ the default utf8mb4 collation is `utf8mb4_0900_ai_ci`
+(measured — `tests/integration/20_korean_like.expected`), not the older `utf8mb4_general_ci` this
+section once named as the worked example. Amendment A17 measured what that means for an index built on
+top of the comparison: a binary normalisation misses rows the collation matches
+(`docs/leakage-ngram.md`).
 
 > There is one legitimate reason to want decrypt_like, and it is security rather than performance. If
 > `gcm_decrypt(col)` goes through a temporary table or a filesort, plaintext reaches a disk-based temp.
@@ -2498,6 +2547,12 @@ default and it raises an error.
   `loose_` prefix, the first startup can fail
 - A UDF is opaque to the optimizer. Selectivity depends on the other predicates (scope and status
   filters)
+- (Amendment A17) A keyed n-gram token side table to give `LIKE` an index **was researched and
+  declined**: the deterministic tokens leak n-gram frequencies and co-occurrence, and on Korean the
+  experiment recovered 20.7% of Korean n-grams under the S1 attack (17.3% for the second S1 attack and
+  31.7% under the stronger S3 attack 3), far
+  above the ceiling. See [`leakage-ngram.md`](leakage-ngram.md). The motivating `LIKE '%김%'` is the
+  index's worst case (~21% selectivity), and a binary token key does not respect the collation.
 - (Amendment A2) `gcm_encrypt_det`'s nonce is a function of the plaintext alone. **Encrypting the same
   plaintext under one key with two different AADs reuses the (key, nonce) pair**, and an attacker who
   sees both values can recover the GHASH subkey and forge tags for that nonce. Confidentiality is
@@ -2560,6 +2615,8 @@ forward compatibility.
 
 | Item | Evidence |
 |---|---|
+| **A keyed n-gram token index for `LIKE` was researched and declined** — it leaks n-gram frequency and co-occurrence; on Korean, 20.7% / 17.3% occurrence-weighted token recovery under the S1 attacks and 31.7% under the stronger S3 attack, against a B1 + 10 pp ceiling | amendment A17 — `docs/leakage-ngram.md`; experiment PRs #59–#66 |
+| **N2 (`WEIGHT_STRING`) holds the collation invariant an n-gram index needs; a binary key (N1) does not** — 6 counterexamples (case, accent, full width) on 8.0.43, 8.4.11 and 9.4.0, over a 15-string repertoire | amendment A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
 | MySQL 8.4.11 and 9.4.0 reject GCM/GCM-SIV/SIV/CTR/XTS | measured in a container |
 | The mode list is unchanged across the 8.0 → 9.7 documentation | the dev.mysql.com reference |
 | MariaDB has only ECB/CBC/CTR | the MariaDB documentation |

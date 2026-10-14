@@ -23,6 +23,13 @@ def _mass(dist: Dist) -> float:
     return sum(weight for _, weight in dist.observed()) + dist.tail
 
 
+def _tail_fraction(dist: Dist, count: int) -> float:
+    rng = random.Random(11)  # noqa: S311 - synthetic names, not key material
+    observed = {name for name, _ in dist.observed()}
+    draws = [dist.sample(rng) for _ in range(count)]
+    return sum(1 for name in draws if name not in observed) / count
+
+
 class GivenAKoreanGeneratorTest(unittest.TestCase):
     def test_given_korean_when_generating_then_surnames_are_hangul(self) -> None:
         people = NameGenerator(KO_LANGUAGE, 1990, 7).generate(200)
@@ -54,6 +61,28 @@ class GivenASurnameDistTest(unittest.TestCase):
     def test_given_korean_when_sampling_many_then_kim_is_the_most_common(self) -> None:
         counts = _surname_counts(NameGenerator(KO_LANGUAGE, 1990, 3), 20_000)
         self.assertEqual(max(counts, key=lambda s: counts[s]), "김")
+
+    def test_given_latin_when_sampling_many_then_tail_is_drawn(self) -> None:
+        # Latin's committed top-60 covers only 13% of the census, so most draws must be
+        # the tail — the bug this test exists to catch drew the tail 0 times.
+        dist = NameGenerator(LATIN_LANGUAGE, 1990, 5).surname_dist()
+        rng = random.Random(7)  # noqa: S311 - synthetic names, not key material
+        observed = {name for name, _ in dist.observed()}
+        draws = [dist.sample(rng) for _ in range(20_000)]
+        tail_fraction = sum(1 for name in draws if name not in observed) / len(draws)
+        self.assertAlmostEqual(tail_fraction, dist.tail, delta=0.02)
+
+    def test_given_korean_surname_when_sampling_many_then_tail_is_drawn(self) -> None:
+        dist = NameGenerator(KO_LANGUAGE, 1990, 6).surname_dist()
+        self.assertAlmostEqual(_tail_fraction(dist, 20_000), dist.tail, delta=0.02)
+
+    def test_given_korean_given_name_when_sampling_many_then_tail_is_drawn(self) -> None:
+        dist = NameGenerator(KO_LANGUAGE, 1990, 6).given_dist("male")
+        self.assertAlmostEqual(_tail_fraction(dist, 20_000), dist.tail, delta=0.02)
+
+    def test_given_latin_given_name_when_sampling_many_then_tail_is_drawn(self) -> None:
+        dist = NameGenerator(LATIN_LANGUAGE, 1990, 6).given_dist("male")
+        self.assertAlmostEqual(_tail_fraction(dist, 20_000), dist.tail, delta=0.02)
 
     def test_given_ko_and_latin_when_total_mass_then_one(self) -> None:
         ko = NameGenerator(KO_LANGUAGE, 1990, 0).surname_dist()

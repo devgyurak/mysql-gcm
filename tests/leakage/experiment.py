@@ -25,7 +25,7 @@ import run
 LANGUAGES: tuple[str, ...] = ("ko", "latin")
 SEEDS: tuple[int, ...] = tuple(range(1, 21))
 VARIANTS: tuple[str, ...] = ("V0", "V1", "V2", "V3-8", "V3-12", "V3-16", "V4", "V5", "V7")
-ATTACKS: tuple[int, ...] = (1, 2, 3, 4)
+ATTACKS: tuple[int, ...] = (1, 2, 3)
 ROWS = 300_000
 BASE: tuple[str, ...] = (
     "--rows",
@@ -140,6 +140,10 @@ def main() -> int:
                             str(attack),
                             "--seed",
                             str(seed),
+                            # A different prior per seed, so the reported std is the
+                            # spread over priors, not over data with one fixed prior.
+                            "--prior-seed",
+                            str(seed * 7919 + 11),
                         ]
                     )
                     for seed in SEEDS

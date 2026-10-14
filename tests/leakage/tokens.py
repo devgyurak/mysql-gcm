@@ -24,9 +24,14 @@ def ngrams(text: str, order: int) -> list[str]:
 
 
 class TokenModel:
-    """A seeded random injection n-gram -> b-bit token."""
+    """A seeded random injection n-gram -> token.
 
-    def __init__(self, bits: int, seed: int) -> None:
+    ``bits=None`` is the untruncated PRF of A17's V0: a counter is injective and so
+    collision-free, which is what "not truncated" means; ``bits`` is a b-bit random
+    function, which collides.
+    """
+
+    def __init__(self, bits: int | None, seed: int) -> None:
         self.bits = bits
         self._rng = random.Random(seed)  # noqa: S311 - token labels, not key material
         self._map: dict[str, int] = {}
@@ -34,7 +39,7 @@ class TokenModel:
     def token(self, ngram: str) -> int:
         token = self._map.get(ngram)
         if token is None:
-            token = self._rng.getrandbits(self.bits)
+            token = len(self._map) if self.bits is None else self._rng.getrandbits(self.bits)
             self._map[ngram] = token
         return token
 

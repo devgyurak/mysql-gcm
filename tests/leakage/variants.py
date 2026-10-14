@@ -13,6 +13,7 @@ searched by token, so it is recorded and not built.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -25,21 +26,22 @@ from tokens import TokenModel, ngrams
 class Variant:
     name: str
     orders: tuple[int, ...]
-    bits: int = 16
+    bits: int | None = 16
     homophonic: int = 1
-    padding: int = 0
+    pad_to_max: bool = False
     documented_only: bool = False
 
 
 VARIANTS: dict[str, Variant] = {
-    "V0": Variant("V0", (1, 2, 3)),
+    # V0 is the untruncated PRF (A17): bits=None is the injective, collision-free mapping.
+    "V0": Variant("V0", (1, 2, 3), bits=None),
     "V1": Variant("V1", (2,)),
     "V2": Variant("V2", (3,)),
     "V3-8": Variant("V3-8", (1, 2, 3), bits=8),
     "V3-12": Variant("V3-12", (1, 2, 3), bits=12),
     "V3-16": Variant("V3-16", (1, 2, 3), bits=16),
     "V4": Variant("V4", (1, 2, 3), homophonic=4),
-    "V5": Variant("V5", (1, 2, 3), padding=8),
+    "V5": Variant("V5", (1, 2, 3), pad_to_max=True),
     "V6": Variant("V6", (1, 2, 3), documented_only=True),
     "V7": Variant("V7", ()),
 }
@@ -52,22 +54,27 @@ def build_table(people: Sequence[Person], variant: Variant, seed: int) -> tuple[
     if variant.documented_only:
         raise ValueError(f"{variant.name} is documented only and cannot be built")
     model = TokenModel(variant.bits, seed)
-    rows: list[tuple[int, ...]] = []
+    rng = random.Random(seed)  # noqa: S311 - homophone labels, not key material
+    rows: list[set[int]] = []
     for person in people:
-        text = person.full_name()
         tokens: set[int] = set()
-        occurrence = 0
         for order in variant.orders:
-            for gram in ngrams(text, order):
+            for gram in ngrams(person.full_name(), order):
                 base = model.token(gram)
                 if variant.homophonic > 1:
-                    base = base * variant.homophonic + (occurrence % variant.homophonic)
+                    # A per-occurrence homophone flattens the n-gram's frequency; a
+                    # position-derived number would only expose the position (A17, V4).
+                    base = base * variant.homophonic + rng.randrange(variant.homophonic)
                 tokens.add(base)
-                occurrence += 1
-        for index in range(variant.padding):
-            tokens.add(DUMMY_BASE + index)
-        rows.append(tuple(sorted(tokens)))
-    return model, tuple(rows)
+        rows.append(tokens)
+    if variant.pad_to_max:
+        # Pad every row to the same length with shared dummies: the point is to hide the
+        # row's length (which the GCM envelope already exposes per row), at storage cost.
+        width = max((len(row) for row in rows), default=0)
+        for row in rows:
+            for index in range(width - len(row)):
+                row.add(DUMMY_BASE + index)
+    return model, tuple(tuple(sorted(row)) for row in rows)
 
 
 def _row_index(table: Table) -> dict[int, list[int]]:
@@ -137,7 +144,7 @@ def variant_summary(variant: Variant, model: TokenModel, table: Table) -> Mappin
         "orders": list(variant.orders),
         "bits": variant.bits,
         "homophonic": variant.homophonic,
-        "padding": variant.padding,
+        "pad_to_max": variant.pad_to_max,
         "unique_row_fraction": unique_row_fraction(table),
         "shared_set": shared_set_stats(table),
     }

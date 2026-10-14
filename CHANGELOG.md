@@ -27,16 +27,20 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
-- **Design amendment A17, proposed — protocol only** (#38): a keyed n-gram token index for `LIKE`
-  partial match, and the leakage it would leak. The amendment **pre-registers** the threat model, the
-  data, the attacks, the metrics, the baselines (B0/B1/B1′), the variants, the normalisation invariant
-  and the adoption criteria, so the criteria cannot be fitted to the result; the experiment's method
-  and results belong in `docs/leakage-ngram.md` (PRs 2–7). It extends amendment A4's Python allowance
-  to `tests/leakage` (synthetic data, no cryptographic operation, no key material, shipped nowhere)
-  and corrects §5.3's collation label to the version-dependent truth. **Nothing is implemented, and
-  nothing under `src/`, `spec/` or the vectors may change until the amendment's Outcome block is
-  filled.** A result that fails the criteria is a "declined" outcome, and that is a successful outcome
-  for the issue.
+- **Design amendment A17, declined — the keyed n-gram token index is not adopted** (#38): a
+  deterministic n-gram token side table to give `LIKE` an index was **researched and declined**. The
+  amendment pre-registered the threat model, the data, the attacks, the metrics, the baselines
+  (B0/B1/B1′), the variants, the normalisation invariant and the adoption criteria **before** the
+  experiment, so the criteria could not be fitted to the result; the experiment's method and results
+  are in `docs/leakage-ngram.md`. It has an allowance under amendment A4 for `tests/leakage`
+  (synthetic data, no cryptographic operation, no key material, shipped nowhere). **The result:** the
+  deterministic tokens leak n-gram frequency and co-occurrence, and on Korean the attack recovered
+  38.8% of n-grams occurrence-weighted (attack 3) and 25.5% under the pre-registered S2 attack, far
+  above the B1 + 10 pp ceiling; the motivating `'%김%'` is the index's worst case (~21% selectivity),
+  and a binary token key misses rows the collation matches. An independent `crypto-reviewer` pass — a
+  scoped AI design review, **not a human audit** — concurred: **decline (C0)**. **No `src/`, `spec/` or
+  vector change**; operational constraint 5 points at the study, §5.3's collation label is corrected
+  to `utf8mb4_0900_ai_ci`, and the Korean partial-match test is untouched.
 - **Design amendment A15, proposed** (#34, the part A13 deferred): a key version in the envelope,
   under a new version byte `0x10`, so that the key-id functions can read a half-rotated column and
   re-seal it without a second column. What is authenticated and how the deterministic nonce is

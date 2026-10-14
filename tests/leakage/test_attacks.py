@@ -66,6 +66,12 @@ class GivenTheCooccurrenceAttackTest(unittest.TestCase):
         predicted = cooccurrence_attack(table, NAMES * 5, prior, DEFAULT_ORDERS)
         self.assertEqual(set(predicted), set(token_frequency(table)))
 
+    def test_given_no_tokens_when_cooccurrence_then_control_recovers_nothing(self) -> None:
+        self.assertEqual(
+            cooccurrence_attack((), NAMES, ngram_frequency(NAMES, DEFAULT_ORDERS), DEFAULT_ORDERS),
+            {},
+        )
+
 
 class GivenTheSeedingAttackTest(unittest.TestCase):
     def test_given_distinct_frequencies_when_seeding_then_full_recovery(self) -> None:
@@ -76,6 +82,9 @@ class GivenTheSeedingAttackTest(unittest.TestCase):
         truth = reverse_injection([(100, "가"), (200, "나"), (300, "다")])
         recovered = token_recovery(predicted, truth, observed)
         self.assertAlmostEqual(recovered.weighted, 1.0, places=6)
+
+    def test_given_no_tokens_when_seeding_then_control_recovers_nothing(self) -> None:
+        self.assertEqual(seeding_attack({}, [], {"가": 1.0}, (1,)), {})
 
 
 class GivenTheReconstructionTest(unittest.TestCase):

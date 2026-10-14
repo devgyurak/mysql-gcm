@@ -81,6 +81,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     generator = NameGenerator(args.language, args.cohort, args.seed)
     people = generator.generate(args.rows)
     full_names = [person.full_name() for person in people]
+    surnames_true = [person.surname for person in people]
+    givens_true = [person.given for person in people]
 
     variant = VARIANTS[args.variant]
     model, table = build_variant_table(people, variant, args.token_seed)
@@ -104,7 +106,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     surnames = prior.surname_dist().truncate(args.prior_top_k).noised(rng, args.prior_alpha)
     male = prior.given_dist("male").truncate(args.prior_top_k).noised(rng, args.prior_alpha)
     female = prior.given_dist("female").truncate(args.prior_top_k).noised(rng, args.prior_alpha)
-    prior_names = sample_names(surnames, male, female, args.prior_samples, rng)
+    prior_names = sample_names(surnames, male, female, args.prior_samples, rng, args.language)
 
     observed = token_frequency(attack_table)
     ngram_prior = ngram_frequency(prior_names, orders)
@@ -143,11 +145,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "shared_set": shared_set_stats(attack_table),
         },
         "baselines": {
-            "b0_surname_accuracy": surname_accuracy(b0_surname, [p.surname for p in people]),
+            "b0_surname_accuracy": surname_accuracy(b0_surname, surnames_true),
             "b0_full_name_top1": top1_accuracy(
                 max(full_name_freq, key=lambda k: full_name_freq[k]), full_names
             ),
-            "b1_b1_prime": equality_stats(full_names),
+            "b1_b1_prime": equality_stats(surnames_true, givens_true),
         },
     }
 

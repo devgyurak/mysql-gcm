@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""GWT tests for attack 1 and the baselines (amendment A17).
+"""GWT tests for attacks 1-4 and the baselines (amendment A17).
 
-The known-answer case plants a mapping whose success is known in advance, so a
+The known-answer cases plant a mapping whose success is known in advance, so a
 broken attack fails the test instead of silently reporting "no leakage".
 """
 
@@ -10,13 +10,25 @@ from __future__ import annotations
 import unittest
 
 from attacks import (
+    cooccurrence_attack,
     equality_stats,
     frequency_attack,
     ngram_frequency,
     prior_surname_guess,
+    reconstruct,
+    reconstruction_attack,
+    seeding_attack,
 )
-from metrics import reverse_injection, token_recovery
+from metrics import reverse_injection, token_frequency, token_recovery
 from names import KO_LANGUAGE, NameGenerator
+from tokens import DEFAULT_ORDERS, TokenModel, token_table
+
+NAMES = ["홍길동", "김철수", "이영희", "박민준", "최서연", "정도윤", "강하은", "조지훈"]
+
+
+def _model_and_table(names: list[str]) -> tuple[TokenModel, tuple[tuple[int, ...], ...]]:
+    model = TokenModel(16, 0)
+    return model, token_table(model, names, DEFAULT_ORDERS)
 
 
 class GivenPlantedMappingTest(unittest.TestCase):
@@ -45,6 +57,40 @@ class GivenAPriorTest(unittest.TestCase):
         stats = equality_stats(["김가", "김가", "이나"])
         self.assertEqual(stats["distinct_full_names"], 2)
         self.assertAlmostEqual(float(stats["unique_full_fraction"]), 1 / 3, places=9)
+
+
+class GivenTheCooccurrenceAttackTest(unittest.TestCase):
+    def test_given_a_table_when_cooccurrence_then_every_token_is_matched(self) -> None:
+        _model, table = _model_and_table(NAMES * 5)
+        prior = ngram_frequency(NAMES * 5, DEFAULT_ORDERS)
+        predicted = cooccurrence_attack(table, NAMES * 5, prior, DEFAULT_ORDERS)
+        self.assertEqual(set(predicted), set(token_frequency(table)))
+
+
+class GivenTheSeedingAttackTest(unittest.TestCase):
+    def test_given_distinct_frequencies_when_seeding_then_full_recovery(self) -> None:
+        observed = {100: 1000, 200: 500, 300: 100}
+        prior = {"가": 0.5, "나": 0.3, "다": 0.2}
+        known = [((100, 200, 300), "가나다")]
+        predicted = seeding_attack(observed, known, prior, (1,))
+        truth = reverse_injection([(100, "가"), (200, "나"), (300, "다")])
+        recovered = token_recovery(predicted, truth, observed)
+        self.assertAlmostEqual(recovered.weighted, 1.0, places=6)
+
+
+class GivenTheReconstructionTest(unittest.TestCase):
+    def test_given_bigram_tokens_when_reconstruct_then_name_in_order(self) -> None:
+        model, table = _model_and_table(["홍길동"])
+        predicted = {token: gram for token, gram in model.items()}
+        self.assertEqual(reconstruct(table[0], predicted), "홍길동")
+
+    def test_given_true_mapping_when_reconstruction_attack_then_top1(self) -> None:
+        model, table = _model_and_table(NAMES)
+        predicted = {token: gram for token, gram in model.items()}
+        candidates = [*NAMES, "김민준", "이서연"]
+        top1, top5 = reconstruction_attack(table, predicted, candidates, NAMES, DEFAULT_ORDERS)
+        self.assertAlmostEqual(top1, 1.0, places=9)
+        self.assertAlmostEqual(top5, 1.0, places=9)
 
 
 if __name__ == "__main__":

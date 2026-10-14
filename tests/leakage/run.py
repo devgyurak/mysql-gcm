@@ -19,12 +19,15 @@ import sys
 from collections.abc import Sequence
 
 from attacks import (
+    cooccurrence_attack,
     equality_stats,
     frequency_attack,
     ngram_frequency,
     prior_full_name_frequency,
     prior_surname_guess,
+    reconstruction_attack,
     sample_names,
+    seeding_attack,
     top1_accuracy,
 )
 from metrics import (
@@ -49,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bits", type=int, default=DEFAULT_BITS)
     parser.add_argument("--token-seed", type=int, default=7)
     parser.add_argument("--top-k", type=int, default=200)
+    parser.add_argument("--attack", type=int, choices=(1, 2, 3, 4), default=1)
+    parser.add_argument("--seed-rows", type=int, default=10, help="known rows for attack 3")
+    parser.add_argument("--recon-rows", type=int, default=2000, help="rows for attack 4")
+    parser.add_argument("--recon-candidates", type=int, default=1000, help="names for attack 4")
     parser.add_argument(
         "--prior-cohort", type=int, default=None, help="cohort mismatch (default: same)"
     )
@@ -79,18 +86,35 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     prior_names = sample_names(surnames, male, female, args.prior_samples, rng)
 
     observed = token_frequency(table)
-    predicted = frequency_attack(observed, ngram_frequency(prior_names, orders), args.top_k)
+    ngram_prior = ngram_frequency(prior_names, orders)
+    if args.attack == 2:
+        predicted = cooccurrence_attack(table, prior_names, ngram_prior, orders)
+    elif args.attack == 3:
+        known = [(table[i], full_names[i]) for i in range(args.seed_rows)]
+        predicted = seeding_attack(observed, known, ngram_prior, orders)
+    else:
+        predicted = frequency_attack(observed, ngram_prior, args.top_k)
     recovery = token_recovery(predicted, reverse_injection(model.items()), observed)
 
     full_name_freq = prior_full_name_frequency(prior_names)
     b0_surname = [prior_surname_guess(surnames)] * args.rows
+    candidate_names = sorted(full_name_freq, key=lambda name: -full_name_freq[name])[
+        : args.recon_candidates
+    ]
+    recon_rows = min(args.recon_rows, args.rows)
+    top1, top5 = reconstruction_attack(
+        table[:recon_rows], predicted, candidate_names, full_names[:recon_rows], orders
+    )
     return {
         "config": vars(args),
         "leakage": {
+            "attack": args.attack,
             "token_recovery_unique": recovery.unique,
             "token_recovery_weighted": recovery.weighted,
             "distinct_tokens": recovery.predicted,
             "tokens_recovered": recovery.correct_unique,
+            "reconstruction_top1": top1,
+            "reconstruction_top5": top5,
             "unique_row_fraction": unique_row_fraction(table),
             "shared_set": shared_set_stats(table),
         },

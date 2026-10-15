@@ -13,7 +13,7 @@ on:
         options: [aes256, aes192, aes128]
         default: aes256
       # The recipe study is dispatch-only and never part of the nightly gate: it measures
-      # rows decrypted and plans, not a ratio, and its numbers land in docs/perf.md.
+      # rows into the filter and plans, not a ratio, and its numbers land in docs/perf.md.
       recipes:
         description: "Recipe study: comma list of recipes (e.g. scope_page), or empty to skip"
         default: ""

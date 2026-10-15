@@ -16,6 +16,6 @@
 6
 5
 4
-# Then: the same three matches, newest first — the index satisfies ORDER BY id DESC
+# Then: the same three matches, newest first (the plan is pinned in the MTR case)
 --- errors, in statement order ---
 ERROR 3200 (HY000) at line 41: gcm_decrypt UDF failed; authentication tag verification failed

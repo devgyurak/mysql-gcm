@@ -55,6 +55,6 @@ SELECT '# When: the newest page is forced through it';
 SELECT id FROM pushdown_names FORCE INDEX (ix_dept_id_name)
  WHERE dept_id = 2 AND gcm_decrypt(name_enc, @k) LIKE '%길%'
  ORDER BY id DESC LIMIT 50;
-SELECT '# Then: the same three matches, newest first — the index satisfies ORDER BY id DESC';
+SELECT '# Then: the same three matches, newest first (the plan is pinned in the MTR case)';
 
 DROP TABLE pushdown_names;

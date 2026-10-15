@@ -111,8 +111,9 @@ UNION ALL
 SELECT 'summary', 'N2 weight', COUNT(*)
 FROM results WHERE final_filter = 1 AND n2_weight = 0
 UNION ALL
--- The IME intermediates the repertoire carries: they must NOT be matched, or the guard
--- of recipe 4 would accept a refinement between two states that are not extensions.
+-- The IME composition states the repertoire carries must not match a finished name:
+-- '김길동' contains neither 김ㄱ nor 김기. (The guard of recipe 4 is the application's
+-- byte-substring test; this pins the data the recipe warns about, not the guard.)
 SELECT 'summary', 'IME intermediate hits', COUNT(*)
 FROM results WHERE note LIKE 'ime intermediate%' AND final_filter = 1
 UNION ALL

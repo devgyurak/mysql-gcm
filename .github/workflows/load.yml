@@ -12,6 +12,16 @@ on:
         type: choice
         options: [aes256, aes192, aes128]
         default: aes256
+      # The recipe study is dispatch-only and never part of the nightly gate: it measures
+      # rows decrypted and plans, not a ratio, and its numbers land in docs/perf.md.
+      recipes:
+        description: "Recipe study: comma list of recipes (e.g. scope_page), or empty to skip"
+        default: ""
+      index:
+        description: "Index shape for the recipe study"
+        type: choice
+        options: [none, scope_enc, covering, both]
+        default: both
 permissions: { contents: read }
 jobs:
   load:
@@ -34,3 +44,18 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with: { name: "load-result-${{ inputs.suite || 'aes256' }}", path: load-result.json }
+      # After the gate: the recipe study leaves its own 300k-row table behind, and the gate's
+      # 1.0 s absolute check should not be measured over it. always() so a failed gate still
+      # uploads the study.
+      - name: Recipe study (dispatch only)
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.recipes != '' }}
+        run: |
+          set -euo pipefail
+          pip install PyMySQL
+          python tests/load/recipes.py --rows "${{ inputs.rows || '300000' }}" \
+            --index "${{ inputs.index }}" --recipes "${{ inputs.recipes }}" \
+            --out recipes-result.json
+        env: { MYSQL_HOST: "127.0.0.1" }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.recipes != '' }}
+        with: { name: "recipes-result", path: recipes-result.json }

@@ -8,10 +8,14 @@
 # Then: a tag error — the row inside the scope is decrypted and rejected (errors section)
 # Scenario 3 — When: a different scope is searched the same way
 4	other-scope-a
-# Then: only the healthy other-scope row — the tampered row is never decrypted (above)
+5	other-scope-b
+6	other-scope-c
+# Then: the three healthy other-scope rows — the tampered row is never decrypted (above)
 # Scenario 4 — Given: a covering (dept_id, id, name_enc) index
 # When: the newest page is forced through it
+6
+5
 4
-# Then: the same match through the covering index (the plan is pinned in the MTR case)
+# Then: the same three matches, newest first — the index satisfies ORDER BY id DESC
 --- errors, in statement order ---
-ERROR 3200 (HY000) at line 39: gcm_decrypt UDF failed; authentication tag verification failed
+ERROR 3200 (HY000) at line 41: gcm_decrypt UDF failed; authentication tag verification failed

@@ -12,6 +12,12 @@
 --   N2 WEIGHT_STRING(...) (let MySQL normalise, per the collation)
 -- A pair where the final filter matches but the tokenisation does not is a counterexample.
 -- Nothing is blamed on the environment: the count and the pairs are printed as they are.
+--
+-- A second invariant is checked for the SQL side of the decision rather than the index:
+-- the final filter's monotonicity under prefix extension. If q is a byte-substring of
+-- q′ and `h LIKE '%q′%'`, then `h LIKE '%q%'` must hold — the guard the "refine inside
+-- the previous result" recipe relies on (docs/like-recipes.md, recipe 4). A violation is
+-- a case where refining a needle inside a previous result would silently drop a row.
 
 DROP DATABASE IF EXISTS gcm_leakage;
 CREATE DATABASE gcm_leakage CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -41,7 +47,17 @@ INSERT INTO repertoire (h, q, note) VALUES
     ('가나다',   '나',     'korean syllable'),
     ('가나다',   '나',     'decomposed jamo'),
     ('Seoul',   'SEOUL',  'ascii case'),
-    ('Seoul',   'Seoul',  'exact');
+    ('Seoul',   'Seoul',  'exact'),
+    -- Hangul IME composition states. A Korean input method moves through needles that are
+    -- not extensions of one another (김 → 김ㄱ → 김기 → 김길), so the "refine inside the
+    -- previous result" recipe (docs/like-recipes.md, recipe 4) must fall back to a fresh
+    -- search between them. 김 is a byte-substring of 김ㄱ and 김기, but 김길동 contains
+    -- neither, so these two rows record that the final filter returns 0 for the
+    -- intermediate states; the extension the guard accepts is covered by 김 ⊂ 김길 above.
+    ('김길동',   '김',     'ime prefix extension'),
+    ('김길동',   '김길',   'ime extension'),
+    ('김길동',   '김ㄱ',   'ime intermediate, 김길동 does not contain it'),
+    ('김길동',   '김기',   'ime intermediate, 김길동 does not contain it');
 
 CREATE TABLE numbers AS
 WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM seq WHERE n < 20)
@@ -118,3 +134,31 @@ SELECT 'check',
        CASE WHEN COUNT(*) = 0 THEN 'N2 weight: no counterexample'
             ELSE CONCAT('N2 weight: ', COUNT(*), ' counterexample(s)') END
 FROM results WHERE final_filter = 1 AND n2_weight = 0;
+
+-- Monotonicity under prefix extension. q is a byte-substring (utf8mb4_0900_bin) of q′,
+-- and shorter: the guard the "refine inside the previous result" recipe uses to decide
+-- that a new needle still contains the old one. The relation is byte-level so a
+-- collation's case/accent/width folding cannot invent an extension the application
+-- never typed; the implication itself is the final filter, in the table's own collation.
+CREATE TABLE needle AS
+SELECT q FROM repertoire UNION SELECT q FROM derived;
+
+CREATE TABLE extensions AS
+SELECT DISTINCT a.q AS q, b.q AS q_prime
+FROM needle a JOIN needle b
+  ON LOCATE(a.q COLLATE utf8mb4_0900_bin, b.q COLLATE utf8mb4_0900_bin) > 0
+ AND CHAR_LENGTH(a.q) < CHAR_LENGTH(b.q);
+
+CREATE TABLE computed_mono AS
+SELECT hy.h AS h, x.q AS q, x.q_prime AS q_prime
+FROM extensions x JOIN (SELECT DISTINCT h FROM repertoire) hy
+WHERE (hy.h LIKE CONCAT('%', x.q_prime, '%'))
+  AND NOT (hy.h LIKE CONCAT('%', x.q, '%'));
+
+SELECT 'summary' AS section, 'Mono prefix-extension violations' AS normalisation,
+       COUNT(*) AS counterexamples
+FROM computed_mono;
+
+-- The pairs themselves, so a non-zero count is diagnosable rather than a bare number.
+SELECT 'mono counterexample' AS section, h, q, q_prime
+FROM computed_mono ORDER BY h, q, q_prime;

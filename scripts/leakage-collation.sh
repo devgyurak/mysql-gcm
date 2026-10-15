@@ -10,6 +10,11 @@
 # are never blamed on the environment. A counterexample count is a finding for
 # docs/leakage-ngram.md, not a failure of this script.
 #
+# The same file also checks the final filter's monotonicity under prefix extension, which
+# the "refine inside the previous result" SQL recipe depends on (docs/like-recipes.md):
+# with q a byte-substring of q′, `h LIKE '%q′%'` must imply `h LIKE '%q%'`, or refining a
+# needle inside a previous result would silently drop a row. That count is gated at 0 too.
+#
 #   scripts/leakage-collation.sh 8.0
 #   scripts/leakage-collation.sh 8.4
 #   scripts/leakage-collation.sh 9
@@ -69,14 +74,15 @@ output="$(mysql -t < "${root}/tests/leakage/collation/normalisation.sql")"
 echo "${output}"
 
 # The recorded result is a gate, not a printout: N1 (binary) must keep its counterexamples
-# and N2 (WEIGHT_STRING) must have none. A change here is a finding to investigate, not a
-# number to update silently.
+# and N2 (WEIGHT_STRING) must have none, and the prefix-extension monotonicity count must
+# be zero. A change here is a finding to investigate, not a number to update silently.
 n1="$(echo "${output}" | awk -F'|' '/\| summary \| N1 binary/ {gsub(/ /, "", $4); print $4}')"
 n2="$(echo "${output}" | awk -F'|' '/\| summary \| N2 weight/ {gsub(/ /, "", $4); print $4}')"
 n2gram="$(echo "${output}" | awk -F'|' '/\| summary \| N2 n-gram violations/ {gsub(/ /, "", $4); print $4}')"
-echo "N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
-if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ]; then
-  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0," \
-    "got N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
+mono="$(echo "${output}" | awk -F'|' '/\| summary \| Mono prefix-extension violations/ {gsub(/ /, "", $4); print $4}')"
+echo "N1=${n1} N2=${n2} N2_ngram=${n2gram} Mono=${mono}" >&2
+if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ] || [ "${mono}" != "0" ]; then
+  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0 Mono=0," \
+    "got N1=${n1} N2=${n2} N2_ngram=${n2gram} Mono=${mono}" >&2
   exit 1
 fi

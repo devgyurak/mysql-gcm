@@ -13,7 +13,8 @@
 # The same file also checks the final filter's monotonicity under prefix extension, which
 # the "refine inside the previous result" SQL recipe depends on (docs/like-recipes.md):
 # with q a byte-substring of q′, `h LIKE '%q′%'` must imply `h LIKE '%q%'`, or refining a
-# needle inside a previous result would silently drop a row. That count is gated at 0 too.
+# needle inside a previous result would silently drop a row. The Hangul IME composition
+# states the repertoire carries must match nothing at all. Both counts are gated at 0 too.
 #
 #   scripts/leakage-collation.sh 8.0
 #   scripts/leakage-collation.sh 8.4
@@ -79,10 +80,12 @@ echo "${output}"
 n1="$(echo "${output}" | awk -F'|' '/\| summary \| N1 binary/ {gsub(/ /, "", $4); print $4}')"
 n2="$(echo "${output}" | awk -F'|' '/\| summary \| N2 weight/ {gsub(/ /, "", $4); print $4}')"
 n2gram="$(echo "${output}" | awk -F'|' '/\| summary \| N2 n-gram violations/ {gsub(/ /, "", $4); print $4}')"
+ime="$(echo "${output}" | awk -F'|' '/\| summary \| IME intermediate hits/ {gsub(/ /, "", $4); print $4}')"
 mono="$(echo "${output}" | awk -F'|' '/\| summary \| Mono prefix-extension violations/ {gsub(/ /, "", $4); print $4}')"
-echo "N1=${n1} N2=${n2} N2_ngram=${n2gram} Mono=${mono}" >&2
-if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ] || [ "${mono}" != "0" ]; then
-  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0 Mono=0," \
-    "got N1=${n1} N2=${n2} N2_ngram=${n2gram} Mono=${mono}" >&2
+echo "N1=${n1} N2=${n2} N2_ngram=${n2gram} Ime=${ime} Mono=${mono}" >&2
+if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ] || [ "${ime}" != "0" ] \
+  || [ "${mono}" != "0" ]; then
+  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0 Ime=0 Mono=0," \
+    "got N1=${n1} N2=${n2} N2_ngram=${n2gram} Ime=${ime} Mono=${mono}" >&2
   exit 1
 fi

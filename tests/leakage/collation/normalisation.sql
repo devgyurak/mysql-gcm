@@ -111,6 +111,11 @@ UNION ALL
 SELECT 'summary', 'N2 weight', COUNT(*)
 FROM results WHERE final_filter = 1 AND n2_weight = 0
 UNION ALL
+-- The IME intermediates the repertoire carries: they must NOT be matched, or the guard
+-- of recipe 4 would accept a refinement between two states that are not extensions.
+SELECT 'summary', 'IME intermediate hits', COUNT(*)
+FROM results WHERE note LIKE 'ime intermediate%' AND final_filter = 1
+UNION ALL
 SELECT 'summary', 'N2 n-gram violations', COUNT(*)
 FROM gram_results g
 WHERE (g.h LIKE CONCAT('%', g.q, '%'))

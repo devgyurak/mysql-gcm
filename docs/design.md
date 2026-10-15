@@ -2616,7 +2616,7 @@ forward compatibility.
 | Item | Evidence |
 |---|---|
 | **A keyed n-gram token index for `LIKE` was researched and declined** — it leaks n-gram frequency and co-occurrence; on Korean, 20.7% / 17.3% occurrence-weighted token recovery under the S1 attacks and 31.7% under the stronger S3 attack, against a B1 + 10 pp ceiling | amendment A17 — `docs/leakage-ngram.md`; experiment PRs #59–#66 |
-| **N2 (`WEIGHT_STRING`) holds the collation invariant an n-gram index needs; a binary key (N1) does not** — 6 counterexamples (case, accent, full width) on 8.0.43, 8.4.11 and 9.4.0 over the declared repertoire, none under prefix-extension monotonicity, and the repertoire now carries Hangul IME composition states | amendment A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
+| **N2 (`WEIGHT_STRING`) holds the collation invariant an n-gram index needs; a binary key (N1) does not** — 6 counterexamples (case, accent, full width) on 8.0.46, 8.4.11 and 9.4.0 over the declared repertoire, none under prefix-extension monotonicity, and the Hangul IME composition states in it match nothing | amendment A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
 | MySQL 8.4.11 and 9.4.0 reject GCM/GCM-SIV/SIV/CTR/XTS | measured in a container |
 | The mode list is unchanged across the 8.0 → 9.7 documentation | the dev.mysql.com reference |
 | MariaDB has only ECB/CBC/CTR | the MariaDB documentation |

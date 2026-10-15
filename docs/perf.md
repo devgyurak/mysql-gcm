@@ -469,7 +469,8 @@ The dispatch runs on the 8.4 CI server: it reproduces the 8.4 column of the seco
 the 8.0 and 9.x columns, which stay hand-measured.
 
 **The study's first run** (MySQL 8.4.11, component after A11, 300,000 rows unless noted, one session,
-p95). The full-scan column is the same query with no reduction.
+p95), from the **discarded study harness of #77** — it predates `tests/load/recipes.py` and had its
+own scope and window modes. The full-scan column is the same query with no reduction.
 
 | Recipe | Case | Recipe p95 | Full scan p95 | Rows decrypted |
 |---|---|---:|---:|---:|
@@ -480,9 +481,14 @@ p95). The full-scan column is the same query with no reduction.
 | Scope (`INDEX (dept_id)`) | 10 / 100 / 1,000 scopes | 21.6–26.0 / 4.8–5.5 / 1.7–2.7 ms | 63–101 ms | 29,913 / 2,998 / 323 |
 | Covering vs non-covering | ~1 KiB rows, ~30,000 in scope, pool > table | 8.9–9.0 ms vs 37–39 ms p50 | | 29,913 |
 
+Where that harness could read the count directly — a single-condition filter — the last column is the
+rows decrypted. The two-control decomposition in the section above is the same idea: a difference
+between two queries, not a component timing.
+
 **The index shape** (`scope_page`, the ordered page inside a scope at 30,000 rows, 10 scopes, 1 KiB
-padding, 10 measured runs) measured on all three majors. Each cell is the rows into the filter; the
-shape is an `ALTER TABLE` option of the harness.
+padding, 10 measured runs), from `tests/load/recipes.py` on all three majors. The cell is the rows
+**into** the `gcm_decrypt` filter — **not** the rows decrypted, which is the trap below; the shape is
+an `ALTER TABLE` option of the harness.
 
 | Index shape in place | 8.0.46 | 8.4.11 | 9.4.0 | Access path (8.4) |
 |---|---:|---:|---:|---|
@@ -490,12 +496,18 @@ shape is an `ALTER TABLE` option of the harness.
 | `(dept_id, id, name_enc)` | 553 | 553 | 553 | covering index lookup `rows=553` |
 | both | 5,530 | 5,530 | 5,530 | PRIMARY reverse scan `rows=5530` |
 
-The covering index is the only shape that gets the ordered early termination inside the scope: it
-returns the 50-row page having decrypted 553 rows, where the other shapes decrypt the whole scope's
-worth (5,530) — and with both in place the optimizer does not choose it. The 8.4 p50 followed
-(0.41 ms covering against 0.93–1.09 ms otherwise) but those are the numbers not to trust across
-sessions; the 10× in rows decrypted is the result. This is what makes `docs/like-recipes.md` say to
-keep one shape, not both.
+**The 5,530 is not 5,530 decryptions.** The filter is `((dept_id = 0) and (gcm_decrypt(...) like
+'%김%'))`: the scope predicate is evaluated first and short-circuits the UDF for every row outside it,
+so most of the 5,530 rows that reached the filter were never decrypted. The discriminating run: with
+the tag of **every** out-of-scope row flipped, the query returns its 50 rows with **no error** under
+`gcm.strict=ON`. What the covering index buys is therefore **wide-row reads and early termination**,
+not fewer decryptions: it serves the ordered page as a covering, ordered scan of 553 index entries,
+where the other shapes scan the primary in reverse (the wide row read 5,530 times) or, when the
+statistics prefer it, use the scope index and decrypt the whole scope with a sort. Which path is taken
+is a property of the statistics: on a fixture that differed only in the name distribution the
+optimizer chose `Covering index lookup on ix_scope_enc` plus a sort. What holds on all three majors is
+the shape's effect, not one exact plan, and the fixture's milliseconds are the developer machine's.
+This is what makes `docs/like-recipes.md` say to keep one shape, not both.
 
 Reading the plans these numbers come from:
 
@@ -506,7 +518,8 @@ Reading the plans these numbers come from:
   for that recipe.
 - `EXPLAIN ANALYZE`'s child iterator under the `gcm_decrypt` filter is the rows **into the filter**. It
   equals the rows decrypted only when the UDF is the filter's sole condition; with a preceding
-  conjunct (`id IN (...)`, on a table scan) MySQL short-circuits and decrypts fewer.
+  conjunct (the scope predicate above, or `id IN (...)` on a table scan) MySQL short-circuits and
+  decrypts fewer, which is why the filter node line is recorded beside the number.
 - The per-row residual `gcm_len − plain_len` measured 113–266 ns/row across sessions, against a
   kept-context `gcm/open_session` of 111–137 ns in the core benchmark. The two are different
   measurements and the agreement did not reproduce, so the residual is **not attributed** to any one

@@ -22,6 +22,12 @@ on:
         type: choice
         options: [none, scope_enc, covering, both]
         default: both
+      depts:
+        description: "Scope count for the recipe study (the index table uses 10)"
+        default: "10"
+      pad-bytes:
+        description: "Width of the non-indexed padding column for the recipe study"
+        default: "1024"
 permissions: { contents: read }
 jobs:
   load:
@@ -53,6 +59,7 @@ jobs:
           set -euo pipefail
           pip install PyMySQL
           python tests/load/recipes.py --rows "${{ inputs.rows || '300000' }}" \
+            --depts "${{ inputs.depts }}" --pad-bytes "${{ inputs.pad-bytes }}" \
             --index "${{ inputs.index }}" --recipes "${{ inputs.recipes }}" \
             --out recipes-result.json
         env: { MYSQL_HOST: "127.0.0.1" }

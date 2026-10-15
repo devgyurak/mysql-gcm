@@ -31,7 +31,16 @@ jobs:
       - run: pip install ruff mypy -r scripts/requirements.txt && ruff check . && ruff format --check .
       - run: mypy --strict scripts/gen-vectors.py scripts/import-nist.py scripts/check-architecture.py scripts/check-action-pins.py scripts/test_check_architecture.py
       - run: pip install -r tests/leakage/requirements.txt
-      - run: pip install PyMySQL types-PyMySQL && mypy --strict tests/load/ tests/leakage/ tests/e2e/runner.py tests/e2e/scenarios/ scripts/check-architecture.py
+      - run: pip install PyMySQL types-PyMySQL
+      # One invocation per entry point. tests/load/run.py and tests/leakage/run.py are
+      # both a top-level module named `run`, so a single `mypy tests/load/ tests/leakage/`
+      # fails with "Duplicate module named 'run'" before checking anything. Adding an
+      # `__init__.py` would change the import shape the tests rely on, so the entry
+      # points are checked separately instead.
+      - run: mypy --strict tests/load/
+      - run: mypy --strict tests/leakage/
+      - run: mypy --strict tests/e2e/runner.py tests/e2e/scenarios/
+      - run: mypy --strict scripts/check-architecture.py
       - run: python -m unittest discover -s tests/load -p 'test_*.py'
       - run: python -m unittest discover -s tests/leakage -p 'test_*.py'
       - run: python -m unittest discover -s scripts -p 'test_*.py'

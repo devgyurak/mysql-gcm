@@ -466,7 +466,9 @@ last is what makes a wide-row number trustworthy: with a pool smaller than the t
 wide-row case measured ~470 ms, which is I/O, not the bytes the UDF skips.
 
 The dispatch runs on the 8.4 CI server: it reproduces the 8.4 column of the second table below, not
-the 8.0 and 9.x columns, which stay hand-measured.
+the 8.0 and 9.x columns, which stay hand-measured. It shares the `rows` input with the gated load run,
+so reproducing the 30,000-row index table runs the gate at 30,000 rows too; pass `rows=300000` for the
+gate's own size.
 
 **The study's first run** (MySQL 8.4.11, component after A11, 300,000 rows unless noted, one session,
 p95), from the **discarded study harness of #77** — it predates `tests/load/recipes.py` and had its
@@ -496,17 +498,21 @@ an `ALTER TABLE` option of the harness.
 | `(dept_id, id, name_enc)` | 553 | 553 | 553 | covering index lookup `rows=553` |
 | both | 5,530 | 5,530 | 5,530 | PRIMARY reverse scan `rows=5530` |
 
-**The 5,530 is not 5,530 decryptions.** The filter is `((dept_id = 0) and (gcm_decrypt(...) like
-'%김%'))`: the scope predicate is evaluated first and short-circuits the UDF for every row outside it,
-so most of the 5,530 rows that reached the filter were never decrypted. The discriminating run: with
-the tag of **every** out-of-scope row flipped, the query returns its 50 rows with **no error** under
-`gcm.strict=ON`. What the covering index buys is therefore **wide-row reads and early termination**,
-not fewer decryptions: it serves the ordered page as a covering, ordered scan of 553 index entries,
-where the other shapes scan the primary in reverse (the wide row read 5,530 times) or, when the
-statistics prefer it, use the scope index and decrypt the whole scope with a sort. Which path is taken
-is a property of the statistics: on a fixture that differed only in the name distribution the
-optimizer chose `Covering index lookup on ix_scope_enc` plus a sort. What holds on all three majors is
-the shape's effect, not one exact plan, and the fixture's milliseconds are the developer machine's.
+**The 5,530 is rows into the filter, not 5,530 decryptions.** The filter is `((dept_id = 0) and
+(gcm_decrypt(...) like '%김%'))`: the scope predicate is evaluated first and short-circuits the UDF, so
+the discriminating run — with the tag of **every** out-of-scope row flipped — returns its 50 rows with
+**no error** under `gcm.strict=ON`. The covering index avoids the two worse paths the other shapes
+take, and which one is taken is a property of the statistics:
+
+- **primary reverse scan** (this fixture): the decrypting call runs only on the in-scope rows the scan
+  passes — about the same ~553 as the covering index — but the wide row is read **5,530** times.
+- **scope index + sort** (a fixture that differed only in the name distribution): no wide-row read, but
+  the scope is a `ref` access, so the UDF is the filter's only condition and the whole scope is
+  decrypted — 3,000 rows here against 553.
+
+The covering `(dept_id, id, name_enc)` index does neither: 553 ordered index entries, no wide-row read,
+no sort, and its early termination is a genuine reduction in decryptions. What holds on all three majors
+is the shape's effect, not one exact plan, and the fixture's milliseconds are the developer machine's.
 This is what makes `docs/like-recipes.md` say to keep one shape, not both.
 
 Reading the plans these numbers come from:

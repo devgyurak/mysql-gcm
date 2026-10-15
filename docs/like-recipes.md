@@ -35,12 +35,15 @@ ALTER TABLE patients ADD INDEX ix_scope_search (dept_id, id, name_enc);
 The index is **covering** — the decrypting UDF never reads the wide row, so the wide-row cost
 disappears — **and** ordered by `id` within the scope, so early termination (recipe 3) still works.
 
-Do **not** index `(dept_id, name_enc)`: it is ordered by envelope bytes, so `ORDER BY id DESC LIMIT k`
-inside a scope cannot use its order. Measured on 8.0.46, 8.4.11 and 9.4.0 (30,000 rows, 10 scopes,
-1 KiB padding), the ordered page decrypted **5,530** rows with that shape in place against **553**
-through the covering index — the whole scope and more, whichever access path the optimizer picked.
-Keep one shape, not both: an existing `(scope, envelope)` index should be dropped rather than left
-beside the new one.
+Do **not** index `(dept_id, name_enc)`: it cannot serve the `ORDER BY id` inside the scope. Measured on
+8.0.46, 8.4.11 and 9.4.0 (30,000 rows, 10 scopes, 1 KiB padding), the ordered page then scans the
+primary in reverse — reading the wide row 5,530 times — or uses the scope index and decrypts the whole
+scope with a sort; the covering index serves it as 553 ordered index entries, with no wide-row read and
+no sort. The saving is the wide-row read and the early termination, **not fewer decryptions**: a
+`dept_id` predicate before the UDF short-circuits, so the decrypting call runs only on in-scope rows
+either way. Which path is taken depends on the statistics — a different name distribution made the
+optimizer choose the scope index plus a sort — so keep one shape, not both: an existing
+`(scope, envelope)` index should be dropped rather than left beside the new one.
 
 Two limits. An envelope column above the **3,072-byte index-key limit** cannot be indexed at all, so
 this does not work for very wide values. And the covering scan is only covering while the buffer pool
@@ -61,9 +64,10 @@ SELECT id FROM patients
 
 A common pattern stops after about `k / p` rows — 453 rows for 50 matches at `p ≈ 10%`, ~1 ms against
 ~80 ms for the full scan — and a rare or absent needle costs at most one window per request. Under
-concurrency the gap widens: at 32 sessions on the developer machine an absent needle's full scan
-measured 0.36–0.42 s p95 against 40–83 ms for a windowed page (10k–50k rows). The window bounds the
-worst case; it does not make an absent needle cheap.
+concurrency the gap widens: 32-session runs on the developer machine (the study of #77, not the
+committed single-session `tests/load/recipes.py`) measured 0.36–0.42 s p95 for an absent needle's full
+scan against 40–83 ms for a windowed page (10k–50k rows). The window bounds the worst case; it does not
+make an absent needle cheap.
 
 **An exact `COUNT(*)` still needs a full scan** (recipe 5): the UI has to do without an exact total.
 
@@ -84,9 +88,11 @@ silently drops rows:
   the server emits `Warning 3170`, drops the range plan and reads the whole table: the margin over a
   rescan fell from ~4× at 35,000 ids to ~1.1–1.5× at 100,000 (1,000,000-row fixture). Detect 3170
   and fall back to recipe 3.
-- **the id list does not leak more than the pattern does.** The list is sent back in the statement
-  text, so it reaches the general log, the slow log and `performance_schema.events_statements_*`
-  beside the pattern — more than a plain `LIKE` leaves (`docs/ops-constraints.md` item 2).
+
+**The refinement also widens the log surface.** The id list is sent back in the statement text, so it
+reaches the general log, the slow log and `performance_schema.events_statements_*` beside the pattern —
+more than a plain `LIKE` leaves (`docs/ops-constraints.md` item 2). If that matters, do not refine; run
+recipe 3 again.
 
 ## 5. A complete result stays a full scan
 

@@ -54,9 +54,10 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
 4. **Use `loose_` in my.cnf** (`loose_gcm.strict=ON`), or the server refuses to start before the
    component is installed.
 5. **The functions are opaque to the optimizer.** `gcm_decrypt(col) LIKE` scans its candidates;
-   selectivity must come from other predicates. A keyed n-gram token side table to index `LIKE` was
-   researched and declined (A17) — it leaks n-gram frequency and co-occurrence; see
-   [`docs/leakage-ngram.md`](docs/leakage-ngram.md).
+   selectivity must come from other predicates, and four SQL recipes reduce the rows the server
+   decrypts without adding leakage: [`docs/like-recipes.md`](docs/like-recipes.md). A keyed n-gram
+   token side table to index `LIKE` was researched and declined (A17) — it leaks n-gram frequency and
+   co-occurrence; see [`docs/leakage-ngram.md`](docs/leakage-ngram.md).
 6. **`gcm_encrypt_det` reveals equality** of plaintexts. Join keys, `UNIQUE` and exact match only —
    never free text. It costs several times a plain seal to write.
 7. **One AAD convention per key** for deterministic calls, across every server, column and

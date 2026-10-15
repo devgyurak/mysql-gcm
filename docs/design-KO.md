@@ -2347,6 +2347,7 @@ exception 이 다루는 구성과 같다 — 우리는 서버가 이미 로드�
 | component 는 `mysql_com.h` 를 include 할 수 없다 | 그 뒤의 `my_io.h` 가 `#error This header shall not be included in components` 를 낸다. 9.4.0 빌드에서 실패로 드러났고 8.0·8.4 는 조용히 통과했다 — 세 버전 빌드를 모두 돌려야 잡힌다 |
 | `component_sys_variable_register::register_variable` 은 `*_CHECK_ARG` 의 `def_val` 을 **복사**한다 | `sql/server_component/component_sys_var_service.cc`: `sysvar_bool->def_val = bool_arg->def_val` (my_malloc 한 구조체로). 따라서 스택 지역 check-arg 전달이 안전하다 |
 | **작은 복호화의 대부분은 암호가 아니라 호출별 EVP 컨텍스트 준비**이고, 스캔과 `gcm_decrypt` 를 함께 부르는 스캔 사이의 p95 차이는 `gcm_decrypt(col) LIKE` 질의의 73~85% 다(질의 간 차이이지 구성 요소 시간이 아니다) | 개정 A11 — 개발자 장비 프로토타입: 컨텍스트를 재사용한 16바이트 `open` 353 → 170 ns; 9.4 에서 100k 행 p95 49.6 → 23.2 ms(세션 1), 126.4 → 27.2 ms(세션 8); `tests/load` 의 평문 컬럼 기준선. CI 수치는 `docs/perf.md` 에 뒤따른다 |
+| **loadable function 에도 ICP 가 적용된다** — `gcm_decrypt(col, @k) LIKE` 조건이 `(dept_id, name_enc)` 인덱스 읽기에 내려가고(`Using index condition`), 단일 단계 `SELECT` 는 일치하는 행에서만 넓은 행을 읽으며, 그 경로에서도 변조된 일치 행은 `gcm.strict=ON` 에서 `ER_UDF_ERROR` 를 낸다 | 동작은 8.0.46, 8.4.11, 9.4.0 — `tests/integration/21_like_pushdown.sql`; 계획 모양(선택된 키에 `type=ref`, 커버링 `(dept_id, id, name_enc)` 인덱스에서 filesort 없음)은 8.4 에서 기록 — `mysql-test/suite/gcm/t/gcm_pushdown.test` (#77) |
 
 ### 미확인 (Phase S 에서 답한다)
 

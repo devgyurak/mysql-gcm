@@ -43,6 +43,7 @@ export default defineConfig({
           translations: { ko: "참조" },
           items: [
             { slug: "envelope", label: "Envelope specification", translations: { ko: "봉투 명세" } },
+            { slug: "like-recipes", label: "SQL LIKE recipes", translations: { ko: "SQL LIKE 레시피" } },
             { slug: "performance", label: "Performance", translations: { ko: "성능" } },
             { slug: "leakage", label: "N-gram leakage", translations: { ko: "N-gram 누출" } },
           ],

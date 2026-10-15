@@ -54,9 +54,10 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
 4. **my.cnf 에는 `loose_` 를 붙이세요**(`loose_gcm.strict=ON`). 붙이지 않으면 component 설치 전에는
    서버가 시작하지 않습니다.
 5. **옵티마이저는 이 함수를 들여다보지 못합니다.** `gcm_decrypt(col) LIKE` 는 후보를 훑습니다.
-   선택도는 다른 조건에서 와야 합니다. `LIKE` 에 인덱스를 주려는 키드 n-gram 토큰 사이드
-   테이블은 연구 후 기각했습니다(A17) — n-gram 빈도와 동시출현을 누출합니다. 참고:
-   [`docs/leakage-ngram.md`](docs/leakage-ngram.md).
+   선택도는 다른 조건에서 와야 하며, 복호화하는 행 수를 줄이면서 누출은 늘리지 않는 SQL 레시피
+   네 가지가 있습니다: [`docs/like-recipes.md`](docs/like-recipes.md). `LIKE` 에 인덱스를 주려는
+   키드 n-gram 토큰 사이드 테이블은 연구 후 기각했습니다(A17) — n-gram 빈도와 동시출현을
+   누출합니다. 참고: [`docs/leakage-ngram.md`](docs/leakage-ngram.md).
 6. **`gcm_encrypt_det` 은 평문이 같은지를 드러냅니다.** 조인 키 · `UNIQUE` · 정확일치에만 쓰고 자유
    텍스트에는 쓰지 마세요. 쓰기 비용은 평범한 봉인의 몇 배입니다.
 7. **키 하나에 AAD 규칙은 하나**입니다. 결정적 호출이라면 모든 서버 · 컬럼 · 애플리케이션에서

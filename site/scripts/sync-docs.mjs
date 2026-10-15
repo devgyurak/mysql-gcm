@@ -19,6 +19,7 @@ const PAGES = {
   "README.md": { route: "/overview/", out: "overview.md", title: "Overview" },
   "README-KO.md": { route: "/ko/overview/", out: "ko/overview.md", title: "개요" },
   "docs/ops-constraints.md": { route: "/ops-constraints/", out: "ops-constraints.md" },
+  "docs/like-recipes.md": { route: "/like-recipes/", out: "like-recipes.md", title: "SQL LIKE recipes" },
   "spec/envelope.md": { route: "/envelope/", out: "envelope.md" },
   "docs/design.md": { route: "/design/", out: "design.md" },
   "docs/design-KO.md": { route: "/ko/design/", out: "ko/design.md" },

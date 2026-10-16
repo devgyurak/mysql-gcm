@@ -1,0 +1,21 @@
+# Given: a scoped table with an index on (dept_id, name_enc)
+# Scenario 1 — When: a scoped search is forced through the index
+2	in-scope-b
+3	in-scope-c
+# Then: the two in-scope 길 rows, taken through the index (above)
+# Scenario 2 — Given: a tampered in-scope row that would match if it were intact
+# When: the same scoped search is forced through the index
+# Then: a tag error — the row inside the scope is decrypted and rejected (errors section)
+# Scenario 3 — When: a different scope is searched the same way
+4	other-scope-a
+5	other-scope-b
+6	other-scope-c
+# Then: the three healthy other-scope rows — the tampered row is never decrypted (above)
+# Scenario 4 — Given: a covering (dept_id, id, name_enc) index
+# When: the newest page is forced through it
+6
+5
+4
+# Then: the same three matches, newest first (the plan is pinned in the MTR case)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 41: gcm_decrypt UDF failed; authentication tag verification failed

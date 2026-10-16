@@ -1,0 +1,30 @@
+# Given: a scoped table with an index on (dept_id, name_enc)
+CREATE TABLE pushdown (id INT AUTO_INCREMENT PRIMARY KEY, dept_id INT NOT NULL,
+name_enc VARBINARY(128) NOT NULL, note VARCHAR(64) NOT NULL,
+KEY ix_dept_name (dept_id, name_enc)) ENGINE=InnoDB;
+INSERT INTO pushdown (dept_id, name_enc, note) VALUES
+(1, gcm_encrypt_det('홍길동', @k), 'a'),
+(1, gcm_encrypt_det('박길수', @k), 'b');
+# When: a scoped LIKE search is explained
+EXPLAIN SELECT note FROM pushdown FORCE INDEX (ix_dept_name)
+WHERE dept_id = 1 AND gcm_decrypt(name_enc, @k) LIKE '%길%';
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+#	#	#	#	ref	#	ix_dept_name	#	#	#	#	Using index condition
+Warnings:
+#	#	#
+# Then: type=ref on ix_dept_name and Extra has "Using index condition" — ICP
+#       applies to a loadable function, so the wide row is read only for a match
+# Given: a covering (dept_id, id, name_enc) index beside the first
+ALTER TABLE pushdown ADD INDEX ix_dept_id_name (dept_id, id, name_enc);
+# When: the newest page within a scope is explained
+EXPLAIN SELECT id FROM pushdown FORCE INDEX (ix_dept_id_name)
+WHERE dept_id = 1 AND gcm_decrypt(name_enc, @k) LIKE '%길%'
+ ORDER BY id DESC LIMIT 50;
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+#	#	#	#	ref	#	ix_dept_id_name	#	#	#	#	Using where; Backward index scan; Using index
+Warnings:
+#	#	#
+# Then: type=ref on ix_dept_id_name and Extra has no "Using filesort" and reads
+#       the index alone — the (id) order inside the scope satisfies ORDER BY id
+#       DESC, and the envelope is in the key
+DROP TABLE pushdown;

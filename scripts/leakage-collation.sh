@@ -10,6 +10,12 @@
 # are never blamed on the environment. A counterexample count is a finding for
 # docs/leakage-ngram.md, not a failure of this script.
 #
+# The same file also checks the final filter's monotonicity under prefix extension, which
+# the "refine inside the previous result" SQL recipe depends on (docs/like-recipes.md):
+# with q a byte-substring of q′, `h LIKE '%q′%'` must imply `h LIKE '%q%'`, or refining a
+# needle inside a previous result would silently drop a row. The Hangul IME composition
+# states the repertoire carries must match nothing at all. Both counts are gated at 0 too.
+#
 #   scripts/leakage-collation.sh 8.0
 #   scripts/leakage-collation.sh 8.4
 #   scripts/leakage-collation.sh 9
@@ -47,21 +53,34 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
+# The healthcheck goes over TCP for the reason scripts/dev-up.sh gives: the temporary
+# server the image starts while initialising listens on the socket only, so a socket
+# probe succeeds against it and the real run then hits the restart that follows.
 docker run -d --name "${name}" \
   -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
+  --health-cmd='mysqladmin ping -h 127.0.0.1 -P 3306 -uroot --silent' \
+  --health-interval=2s \
+  --health-retries=30 \
   "${image}" \
   --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci >/dev/null
 
 mysql() { docker exec -i "${name}" mysql -uroot --default-character-set=utf8mb4 "$@"; }
 
 deadline=$((SECONDS + 300))
-until mysql -N -e 'SELECT 1' </dev/null >/dev/null 2>&1; do
+while [ "$(docker inspect -f '{{.State.Health.Status}}' "${name}")" != healthy ]; do
   if [ "${SECONDS}" -ge "${deadline}" ]; then
-    echo "${name} did not become ready; last log lines:" >&2
+    echo "${name} did not become healthy within 300s; last log lines:" >&2
     docker logs --tail 40 "${name}" >&2
     exit 1
   fi
   sleep 2
+done
+until mysql -N -e 'SELECT 1' </dev/null >/dev/null 2>&1; do
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    echo "${name} is healthy but not answering queries" >&2
+    exit 1
+  fi
+  sleep 1
 done
 
 echo "== ${name}: collation differential (A17) ==" >&2
@@ -69,14 +88,17 @@ output="$(mysql -t < "${root}/tests/leakage/collation/normalisation.sql")"
 echo "${output}"
 
 # The recorded result is a gate, not a printout: N1 (binary) must keep its counterexamples
-# and N2 (WEIGHT_STRING) must have none. A change here is a finding to investigate, not a
-# number to update silently.
+# and N2 (WEIGHT_STRING) must have none, and the prefix-extension monotonicity count must
+# be zero. A change here is a finding to investigate, not a number to update silently.
 n1="$(echo "${output}" | awk -F'|' '/\| summary \| N1 binary/ {gsub(/ /, "", $4); print $4}')"
 n2="$(echo "${output}" | awk -F'|' '/\| summary \| N2 weight/ {gsub(/ /, "", $4); print $4}')"
 n2gram="$(echo "${output}" | awk -F'|' '/\| summary \| N2 n-gram violations/ {gsub(/ /, "", $4); print $4}')"
-echo "N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
-if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ]; then
-  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0," \
-    "got N1=${n1} N2=${n2} N2_ngram=${n2gram}" >&2
+ime="$(echo "${output}" | awk -F'|' '/\| summary \| IME intermediate hits/ {gsub(/ /, "", $4); print $4}')"
+mono="$(echo "${output}" | awk -F'|' '/\| summary \| Mono prefix-extension violations/ {gsub(/ /, "", $4); print $4}')"
+echo "N1=${n1} N2=${n2} N2_ngram=${n2gram} Ime=${ime} Mono=${mono}" >&2
+if [ "${n1}" != "6" ] || [ "${n2}" != "0" ] || [ "${n2gram}" != "0" ] || [ "${ime}" != "0" ] \
+  || [ "${mono}" != "0" ]; then
+  echo "collation differential changed: expected N1=6 N2=0 N2_ngram=0 Ime=0 Mono=0," \
+    "got N1=${n1} N2=${n2} N2_ngram=${n2gram} Ime=${ime} Mono=${mono}" >&2
   exit 1
 fi

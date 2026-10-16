@@ -47,21 +47,34 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
+# The healthcheck goes over TCP for the reason scripts/dev-up.sh gives: the temporary
+# server the image starts while initialising listens on the socket only, so a socket
+# probe succeeds against it and the real run then hits the restart that follows.
 docker run -d --name "${name}" \
   -e MYSQL_ALLOW_EMPTY_PASSWORD=1 \
+  --health-cmd='mysqladmin ping -h 127.0.0.1 -P 3306 -uroot --silent' \
+  --health-interval=2s \
+  --health-retries=30 \
   "${image}" \
   --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci >/dev/null
 
 mysql() { docker exec -i "${name}" mysql -uroot --default-character-set=utf8mb4 "$@"; }
 
 deadline=$((SECONDS + 300))
-until mysql -N -e 'SELECT 1' </dev/null >/dev/null 2>&1; do
+while [ "$(docker inspect -f '{{.State.Health.Status}}' "${name}")" != healthy ]; do
   if [ "${SECONDS}" -ge "${deadline}" ]; then
-    echo "${name} did not become ready; last log lines:" >&2
+    echo "${name} did not become healthy within 300s; last log lines:" >&2
     docker logs --tail 40 "${name}" >&2
     exit 1
   fi
   sleep 2
+done
+until mysql -N -e 'SELECT 1' </dev/null >/dev/null 2>&1; do
+  if [ "${SECONDS}" -ge "${deadline}" ]; then
+    echo "${name} is healthy but not answering queries" >&2
+    exit 1
+  fi
+  sleep 1
 done
 
 echo "== ${name}: collation differential (A17) ==" >&2

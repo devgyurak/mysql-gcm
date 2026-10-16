@@ -144,7 +144,9 @@ for case_file in "${cases[@]}"; do
   ensure_installed gcm
   ensure_installed probe
   mysql -N -e 'SELECT probe_reset()' >/dev/null </dev/null
-  mysql -N -e 'SET GLOBAL gcm.strict = DEFAULT' </dev/null
+  # No nested case touches gcm.min_key_bytes today, but resetting it next to
+  # gcm.strict keeps a future case from having to remember to.
+  mysql -N -e 'SET GLOBAL gcm.strict = DEFAULT, gcm.min_key_bytes = DEFAULT' </dev/null
   drop_case_keys
 
   # --force so the case's expected errors do not stop the client; streams captured

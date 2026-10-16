@@ -103,10 +103,11 @@ for case_file in "${cases[@]}"; do
   # buffers stdout but not stderr, so a plain 2>&1 interleaves them in an order
   # that depends on buffer boundaries — exactly the kind of flakiness the testing
   # rule forbids. Errors therefore appear in their own section, in statement order.
-  # Cases run in sequence against one server and 31_strict_scope touches a GLOBAL
-  # variable, so the default is restored before each case: order independence should
-  # not depend on a case cleaning up after itself.
-  mysql -N -e "SET GLOBAL gcm.strict = DEFAULT"
+  # Cases run in sequence against one server and several touch a GLOBAL variable —
+  # gcm.strict (12, 31, 61, 63) and gcm.min_key_bytes (12, 60, 61, 70). Both defaults
+  # are restored before each case: order independence should not depend on a case
+  # cleaning up after itself.
+  mysql -N -e "SET GLOBAL gcm.strict = DEFAULT, gcm.min_key_bytes = DEFAULT"
   drop_case_keys
   case_mysql -N --force < "${case_file}" > "${actual}.out" 2> "${actual}.err" || true
   {

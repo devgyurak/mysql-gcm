@@ -77,7 +77,7 @@ These cases run **not** through `verify.sh` but through `scripts/verify-nested.s
 - starts its own throwaway container, reusing the `dev-up.sh` keyring setup through `GCM_DEV_NAME`, so
   the development server and its data are untouched;
 - before each case, reinstalls the components, resets the probe counters, restores
-  `gcm.strict = DEFAULT` and drops the `it_%` keys;
+  `gcm.strict` and `gcm.min_key_bytes` to `DEFAULT` and drops the `it_%` keys;
 - after each case, prints `probe_counts:` and then `UNINSTALL COMPONENT`. When the uninstall is
   refused — the observable the case exists to pin — it restarts the server, which reloads the
   component from `mysql.component`, and continues. That branching lives in the harness and never in a

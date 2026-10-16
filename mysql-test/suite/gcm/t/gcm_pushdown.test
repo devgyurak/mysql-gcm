@@ -1,0 +1,43 @@
+# Index condition pushdown over the loadable function, and the covering scope index
+# shape that keeps `ORDER BY id DESC LIMIT` from sorting (docs/like-recipes.md).
+#
+# The .result is recorded against 8.4 only (mysql-test/AGENTS.md). The behaviour that
+# has to hold on every major is in tests/integration/21_like_pushdown.sql; what this
+# pins is the plan shape, which the optimizer is free to change between versions.
+#
+# The access type (col 5), the chosen key (col 7) and the Extra column (col 12) are
+# asserted; the cost estimates, possible_keys, ref, row counts and filtered are not —
+# they move with statistics and a fixture of two rows. Only those three columns are
+# left readable, so a plan that changes its access path or index fails here.
+--source suite/gcm/include/gcm_install.inc
+
+--echo # Given: a scoped table with an index on (dept_id, name_enc)
+CREATE TABLE pushdown (id INT AUTO_INCREMENT PRIMARY KEY, dept_id INT NOT NULL,
+  name_enc VARBINARY(128) NOT NULL, note VARCHAR(64) NOT NULL,
+  KEY ix_dept_name (dept_id, name_enc)) ENGINE=InnoDB;
+INSERT INTO pushdown (dept_id, name_enc, note) VALUES
+  (1, gcm_encrypt_det('홍길동', @k), 'a'),
+  (1, gcm_encrypt_det('박길수', @k), 'b');
+
+--echo # When: a scoped LIKE search is explained
+--replace_column 1 # 2 # 3 # 4 # 6 # 8 # 9 # 10 # 11 #
+EXPLAIN SELECT note FROM pushdown FORCE INDEX (ix_dept_name)
+ WHERE dept_id = 1 AND gcm_decrypt(name_enc, @k) LIKE '%길%';
+
+--echo # Then: type=ref on ix_dept_name and Extra has "Using index condition" — ICP
+--echo #       applies to a loadable function, so the wide row is read only for a match
+
+--echo # Given: a covering (dept_id, id, name_enc) index beside the first
+ALTER TABLE pushdown ADD INDEX ix_dept_id_name (dept_id, id, name_enc);
+
+--echo # When: the newest page within a scope is explained
+--replace_column 1 # 2 # 3 # 4 # 6 # 8 # 9 # 10 # 11 #
+EXPLAIN SELECT id FROM pushdown FORCE INDEX (ix_dept_id_name)
+ WHERE dept_id = 1 AND gcm_decrypt(name_enc, @k) LIKE '%길%'
+ ORDER BY id DESC LIMIT 50;
+
+--echo # Then: type=ref on ix_dept_id_name and Extra has no "Using filesort" and reads
+--echo #       the index alone — the (id) order inside the scope satisfies ORDER BY id
+--echo #       DESC, and the envelope is in the key
+DROP TABLE pushdown;
+--source suite/gcm/include/gcm_uninstall.inc

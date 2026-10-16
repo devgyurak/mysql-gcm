@@ -502,13 +502,14 @@ an `ALTER TABLE` option of the harness.
 (gcm_decrypt(...) like '%김%'))`: the scope predicate is evaluated first and short-circuits the UDF, so
 the discriminating run — with the tag of **every** out-of-scope row flipped — returns its 50 rows with
 **no error** under `gcm.strict=ON`. The covering index avoids the two worse paths the other shapes
-take, and which one is taken is a property of the statistics:
+take; on the harness fixture (all three majors) the optimizer takes the first, and a fixture that
+differed only in the name distribution took the second:
 
-- **primary reverse scan** (this fixture): the decrypting call runs only on the in-scope rows the scan
-  passes — about the same ~553 as the covering index — but the wide row is read **5,530** times.
-- **scope index + sort** (a fixture that differed only in the name distribution): no wide-row read, but
-  the scope is a `ref` access, so the UDF is the filter's only condition and the whole scope is
-  decrypted — 3,000 rows here against 553.
+- **primary reverse scan** (the harness fixture, all three majors): the decrypting call runs only on the
+  in-scope rows the scan passes — about the same ~553 as the covering index — but the wide row is read
+  **5,530** times.
+- **scope index + sort** (observed on 8.4): no wide-row read, but the scope is a `ref` access, so the
+  UDF is the filter's only condition and the whole scope is decrypted — 3,000 rows here against 553.
 
 The covering `(dept_id, id, name_enc)` index does neither: 553 ordered index entries, no wide-row read,
 no sort, and its early termination is a genuine reduction in decryptions. What holds on all three majors

@@ -260,8 +260,9 @@ with `spec/`, unit and server tests in the same PR. Crypto paths need two review
 | bench | `scripts/bench.sh --gate` |
 
 [Design and amendments](docs/design.md) · [Envelope spec](spec/envelope.md) ·
-[Operational constraints](docs/ops-constraints.md) · [Performance](docs/perf.md) ·
-[Changelog](CHANGELOG.md). Working with an AI agent: start at `AGENTS.md` (or `CLAUDE.md`).
+[Conformance](docs/conformance.md) · [Operational constraints](docs/ops-constraints.md) ·
+[Performance](docs/perf.md) · [Changelog](CHANGELOG.md). Working with an AI agent: start at `AGENTS.md`
+(or `CLAUDE.md`).
 
 Applications call these functions through their existing MySQL driver; there is no client SDK.
 Python in this repository is test, vector and documentation-chart tooling only.

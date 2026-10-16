@@ -247,9 +247,9 @@ PR 로 들어옵니다. 암호 경로는 리뷰어 두 명이 필요합니다.
 | load | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
 | bench | `scripts/bench.sh --gate` |
 
-[설계와 개정](docs/design-KO.md) · [봉투 spec](spec/envelope.md) · [운영 제약](docs/ops-constraints.md) ·
-[성능](docs/perf.md) · [변경 이력](CHANGELOG.md). AI 에이전트와 작업한다면 `AGENTS.md`(또는
-`CLAUDE.md`)에서 시작하세요.
+[설계와 개정](docs/design-KO.md) · [봉투 spec](spec/envelope.md) · [적합성](docs/conformance.md) ·
+[운영 제약](docs/ops-constraints.md) · [성능](docs/perf.md) · [변경 이력](CHANGELOG.md). AI
+에이전트와 작업한다면 `AGENTS.md`(또는 `CLAUDE.md`)에서 시작하세요.
 
 애플리케이션은 기존 MySQL 드라이버로 이 함수를 부릅니다. 클라이언트 SDK 는 없습니다. 이 저장소의
 Python 은 테스트, 벡터, 문서용 그래프 도구에만 씁니다.

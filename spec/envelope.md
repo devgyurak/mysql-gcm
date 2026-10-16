@@ -288,10 +288,11 @@ Rules that follow, and that every implementation MUST honour:
 **A client implementation has no `gcm.strict` and no `gcm.min_key_bytes`.** There is no server setting
 for it to read, and it MUST NOT reproduce the lenient one. A tag mismatch is **always an error**: an
 independent implementation MUST NOT return unauthenticated plaintext and MUST NOT map a tag failure to
-NULL or to an empty result. The floor of §4.1 is a sealing policy the server's operator sets. A client
-SHOULD prefer 32-byte keys but MUST be able to seal with 16 and 24 bytes — §6's conformance vectors and
-the recipe in `docs/conformance.md` use all three suites — and MUST NOT apply any floor to decryption,
-so that data the server wrote under a lower floor stays readable.
+NULL or to an empty result. A client MUST implement all three suites, but its **sealing floor SHOULD
+default to 32 bytes**, as the server's does — it seals with 16 or 24 bytes only when the application
+explicitly lowers the floor, which is what §6's conformance vectors and the recipe in
+`docs/conformance.md` do inside the test. It MUST NOT apply any floor to decryption, so that data the
+server wrote under a lower floor stays readable (§4.1).
 
 ### 4.1 `gcm.min_key_bytes`
 

@@ -42,7 +42,8 @@ SET @k128 = UNHEX('030a11181f262d343b424950575e656c');
 
 Your implementation seals `홍길동` (`ed998deab8b8eb8f99`) deterministically under each key; the server
 reseals the same plaintext and must produce the same bytes. The server's answers are the vectors
-`det-korean-hong`, `aes192-det-korean` and `aes128-det-korean` in `spec/test-vectors.json`.
+`det-korean-hong`, `aes192-det-korean` and `aes128-det-korean` in `spec/test-vectors.json`. Lower your
+implementation's own sealing floor for this check, as the server does below (`spec/envelope.md` §4).
 
 ```sql
 -- The 16- and 24-byte suites are refused by the default floor; lower it only for this check.

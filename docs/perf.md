@@ -448,6 +448,94 @@ Three values per cell, one per run, in run order. What the runs establish:
 Reproduce with `gh workflow run load.yml -f rows=300000`, or locally with
 `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --baseline aes --gate tests/load/baseline.json`.
 
+### SQL recipes — developer-machine runs (indicative only, NOT a baseline)
+
+The rows a `gcm_decrypt(...) LIKE` query decrypts, for the recipes in
+[`docs/like-recipes.md`](like-recipes.md). Two developer-machine runs sit here, both **indicative**:
+Docker on an arm64 macOS laptop, and the absolute milliseconds moved by up to ~2× between sessions on
+the same host. What reproduced across re-runs are the plan properties — the rows into the
+`gcm_decrypt` filter, the plan shape, and which index the optimizer picks — and those are what the
+tables are read for. This is not the release baseline; the post-A11 **CI** recipe baseline is a
+separate `load` dispatch (`gh workflow run load.yml -f recipes=...`), and until it lands these numbers
+are a fixture, not a gate.
+
+The recipes run through `tests/load/recipes.py`, which measures each recipe **alone** — so a full scan
+in one recipe is never measured against another recipe's full scan — and records the filter child line
+and the rows into the filter from `EXPLAIN ANALYZE`, plus the buffer-pool, table and index sizes. That
+last is what makes a wide-row number trustworthy: with a pool smaller than the table the non-covering
+wide-row case measured ~470 ms, which is I/O, not the bytes the UDF skips.
+
+The dispatch runs on the 8.4 CI server: it reproduces the 8.4 column of the second table below, not
+the 8.0 and 9.x columns, which stay hand-measured. It shares the `rows` input with the gated load run,
+so reproducing the 30,000-row index table runs the gate at 30,000 rows too; pass `rows=300000` for the
+gate's own size.
+
+**The study's first run** (MySQL 8.4.11, component after A11, 300,000 rows unless noted, one session,
+p95), from the **discarded study harness of #77** — it predates `tests/load/recipes.py` and had its
+own scope and window modes. The full-scan column is the same query with no reduction.
+
+| Recipe | Case | Recipe p95 | Full scan p95 | Rows decrypted |
+|---|---|---:|---:|---:|
+| Early termination `LIMIT 50` | `'%김%'` p ≈ 9.97% | 1.0–1.7 ms | ~81 ms | 453 vs 300,000 |
+| | `'%김길%'` p ≈ 0.99% | 1.6–3.1 ms | 66–84 ms | 4,530 |
+| | `'%없음%'` (absent) | 77–106 ms | 50–83 ms | 300,000 — no help |
+| Window 10k / 20k / 50k | `'%없음%'` | grows with the window | | 10,000 / 20,000 / 50,000 |
+| Scope (`INDEX (dept_id)`) | 10 / 100 / 1,000 scopes | 21.6–26.0 / 4.8–5.5 / 1.7–2.7 ms | 63–101 ms | 29,913 / 2,998 / 323 |
+| Covering vs non-covering | ~1 KiB rows, ~30,000 in scope, pool > table | 8.9–9.0 ms vs 37–39 ms p50 | | 29,913 |
+
+Where that harness could read the count directly — a single-condition filter — the last column is the
+rows decrypted. The two-control decomposition in the section above is the same idea: a difference
+between two queries, not a component timing.
+
+**The index shape** (`scope_page`, the ordered page inside a scope at 30,000 rows, 10 scopes, 1 KiB
+padding, 10 measured runs), from `tests/load/recipes.py` on all three majors. The cell is the rows
+**into** the `gcm_decrypt` filter — **not** the rows decrypted, which is the trap below; the shape is
+an `ALTER TABLE` option of the harness.
+
+| Index shape in place | 8.0.46 | 8.4.11 | 9.4.0 | Access path (8.4) |
+|---|---:|---:|---:|---|
+| `(dept_id, name_enc)` | 5,530 | 5,530 | 5,530 | PRIMARY reverse scan `rows=5530` |
+| `(dept_id, id, name_enc)` | 553 | 553 | 553 | covering index lookup `rows=553` |
+| both | 5,530 | 5,530 | 5,530 | PRIMARY reverse scan `rows=5530` |
+
+**The 5,530 is rows into the filter, not 5,530 decryptions.** The filter is `((dept_id = 0) and
+(gcm_decrypt(...) like '%김%'))`: the scope predicate is evaluated first and short-circuits the UDF, so
+the discriminating run — with the tag of **every** out-of-scope row flipped — returns its 50 rows with
+**no error** under `gcm.strict=ON`. The covering index avoids the two worse paths the other shapes
+take; on the harness fixture (all three majors) the optimizer takes the first, and a fixture that
+differed only in the name distribution took the second:
+
+- **primary reverse scan** (the harness fixture, all three majors): the decrypting call runs only on the
+  in-scope rows the scan passes — about the same ~553 as the covering index — but the wide row is read
+  **5,530** times.
+- **scope index + sort** (observed on 8.4): no wide-row read, but the scope is a `ref` access, so the
+  UDF is the filter's only condition and the whole scope is decrypted — 3,000 rows here against 553.
+
+The covering `(dept_id, id, name_enc)` index does neither: 553 ordered index entries, no wide-row read,
+no sort, and its early termination is a genuine reduction in decryptions. What holds on all three majors
+is the shape's effect, not one exact plan, and the fixture's milliseconds are the developer machine's.
+This is what makes `docs/like-recipes.md` say to keep one shape, not both.
+
+Reading the plans these numbers come from:
+
+- **Index condition pushdown applies to a loadable function** on all three majors — the predicate
+  shows as `with index condition:` — so a single-step `SELECT *` reads the wide row only for a match,
+  and on that path a tampered row still raises `ER_UDF_ERROR` under `gcm.strict=ON`. There is no
+  filter child node to read, so the harness records the rows into the filter as **absent**, not zero,
+  for that recipe.
+- `EXPLAIN ANALYZE`'s child iterator under the `gcm_decrypt` filter is the rows **into the filter**. It
+  equals the rows decrypted only when the UDF is the filter's sole condition; with a preceding
+  conjunct (the scope predicate above, or `id IN (...)` on a table scan) MySQL short-circuits and
+  decrypts fewer, which is why the filter node line is recorded beside the number.
+- The per-row residual `gcm_len − plain_len` measured 113–266 ns/row across sessions, against a
+  kept-context `gcm/open_session` of 111–137 ns in the core benchmark. The two are different
+  measurements and the agreement did not reproduce, so the residual is **not attributed** to any one
+  cause. Nothing bounded is worth taking: the envelope parse (~2 ns) and the key compare would sit far
+  inside the load gate's noise.
+
+Reproduce the index table with
+`python tests/load/recipes.py --rows 30000 --depts 10 --pad-bytes 1024 --index <shape> --recipes scope_page`.
+
 ### Per suite — developer-machine run (indicative only, NOT a baseline)
 
 The same question one layer up: does the suite change what `gcm_decrypt(col) LIKE` costs? Docker on an

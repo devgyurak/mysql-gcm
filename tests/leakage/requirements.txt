@@ -1,0 +1,7 @@
+# Leakage simulation only (tests/leakage, design amendment A17); not a runtime dependency
+# of component_gcm. Pinned exactly: the committed result JSON is checked, and SciPy's
+# assignment is part of the attack's result.
+numpy==2.5.4
+scipy==1.18.1
+# Stubs so `mypy --strict tests/leakage/` type-checks the Attack 1 assignment.
+scipy-stubs==1.18.1.1

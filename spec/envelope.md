@@ -1,6 +1,8 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v3 of this document, 2026-10-06). v3 adds the AES-192 version bytes `0x06` and
+Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 and §4.3 added 2026-10-12 with no byte change;
+§1, §2.7, §4 and §6 revised 2026-10-16 by amendment A18 — the public-format section list and the
+plaintext/AAD byte rules — with no byte change). v3 adds the AES-192 version bytes `0x06` and
 `0x07`; v2 added the AES-128 bytes `0x04` and `0x05` and the key-length rule in §2.5. Neither changes
 a byte of any earlier envelope, and an older implementation reading a newer envelope rejects it as a
 reserved version, which §2.6 has required throughout. Supersedes the
@@ -14,14 +16,39 @@ Conformance keywords MUST / MUST NOT / SHOULD are used in the usual sense.
 
 The envelope is the value stored in a MySQL column. It is produced by the server functions
 `gcm_encrypt` and `gcm_encrypt_det` and consumed by `gcm_decrypt`. Applications use these functions
-through an existing MySQL driver. No language-specific encryption SDK is shipped.
-Internal fixture generation MUST match this format; this scope change does not alter its bytes.
+through an existing MySQL driver. Internal fixture generation MUST match this format; this scope
+change does not alter its bytes.
+
+**The format is public and any third party MAY implement it** (`docs/design.md` amendment A18). This
+document is the normative contract for such an implementation; the project ships no client and
+supports none. An independent implementation MUST follow these sections:
+
+| Section | What the implementation takes from it |
+|---|---|
+| §2.1–§2.3, §2.5–§2.7 | The byte layout of every version, including v1 read-only (§2.3) and the reserved-version rule (§2.6); §2.7 states the bytes that are sealed |
+| §3 | The key-length-to-suite mapping and the deterministic nonce derivation |
+| §4 and §4.1 | The failure table and the key-length floor, read for a client (no server setting) |
+| §6 | The conformance suite and how to consume it |
+
+The table is a reading guide, not a copy of the server's internals: §3's paragraph on when the server
+derives and wipes the nonce key, and §4's rules about SQL NULL and a function instance's lifetime,
+describe the server's implementation. §2.7 and §4 state what a client does instead.
+
+`docs/conformance.md` is the non-normative companion: it checks an implementation against a real
+server for what the byte vectors cannot — the plaintext conversion and the AAD bytes. Passing either
+is not a security proof and is not a support commitment.
 
 | Function | Envelope | Result type |
 |---|---|---|
 | `gcm_encrypt(plaintext, key [, aad])` | version `0x02`, `0x04` or `0x06`, per §2.5 | BLOB (charset `binary`) |
 | `gcm_encrypt_det(plaintext, key [, aad])` | version `0x03`, `0x05` or `0x07`, per §2.5 | BLOB (charset `binary`) |
 | `gcm_decrypt(ciphertext, key [, aad])` | accepts `0x01`–`0x07` | VARCHAR tagged `utf8mb4` |
+
+Three further functions take a **key id** in place of the key and read the key from the server's
+keyring: `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and `gcm_decrypt_kr`. They produce and accept exactly
+the envelopes of the function each is named after — byte for byte, so either family opens what the
+other sealed under the same key bytes — and differ only in where the key comes from. Their argument
+contract and their additional failures are §4.2. Nothing else in this document distinguishes them.
 
 ## 2. Byte layout
 
@@ -147,6 +174,36 @@ Every version byte outside `0x01`–`0x07` — that is `0x00` and `0x08`–`0xFF
 decryptor MUST reject it with `bad_envelope`; it MUST NOT be silently treated as a known version and
 MUST NOT return NULL.
 
+### 2.7 Plaintext and AAD bytes
+
+The plaintext and the AAD are the byte strings the AEAD is given; nothing else is sealed, and no byte
+is added, removed or rewritten between them and the version layouts above. They are the bytes a
+third-party implementation is most likely to get subtly wrong, because the server's rules for them live
+in its own charset handling rather than in the envelope (`docs/design.md` amendment A18).
+
+**Plaintext.** A *character* argument is converted to `utf8mb4` before sealing, so the bytes sealed are
+its UTF-8 encoding. A `binary` argument is copied byte for byte, so `gcm_encrypt(UNHEX('ff'), key)`
+seals `FF` and its decryption returns ill-formed `utf8mb4` (§2.3). An implementation MUST use the same
+`utf8mb4` conversion for a character value and MUST seal `binary` input unchanged. It MUST NOT
+normalise (NFC, NFD or otherwise): the server does not, so normalising changes the deterministic
+envelope for the same visible string and breaks JOIN, UNIQUE and exact match against data the server
+sealed. A non-UTF-8 plaintext is **not** rejected — the server seals it, and §6's vectors include
+non-UTF-8 plaintexts — so refusing one is an application decision rather than a conformance rule; an
+implementation whose API cannot seal opaque bytes cannot pass the suite.
+
+**AAD.** AAD is always requested as `binary`: it is never converted to `utf8mb4`, and its bytes are used
+exactly as supplied. An implementation MUST NOT convert or normalise AAD. Two consequences follow:
+
+* The **byte encoding** of a string AAD depends on the source charset — a `latin1` connection and a
+  `utf8mb4` connection send different bytes for the same visible string — so an implementation MUST fix
+  the encoding it uses for AAD explicitly rather than inherit the caller's or the connection's.
+* **One fixed AAD byte string per key** across every server, column, application and client (§3). A
+  different AAD domain needs a different key, and a ciphertext-equality join needs the same key and the
+  same AAD bytes on both sides. The random variant has no fixed-AAD requirement.
+
+**Decrypted output.** `gcm_decrypt` tags its result `utf8mb4` for every version and converts nothing:
+the bytes come back exactly as they were sealed, or as the legacy `0x01` body held them (§2.3).
+
 ## 3. Key and nonce derivation
 
 The key is an argument, 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128); §2.5 maps each length to
@@ -221,6 +278,21 @@ Rules that follow, and that every implementation MUST honour:
    not a failure mode.
 4. Error messages, logs and assertion strings MUST NOT contain key, plaintext, nonce, tag or
    ciphertext bytes. Lengths and the version byte are the only values allowed.
+5. A row that raises any error MUST give up, before it returns, every secret its instance holds: a
+   key read from the keyring, any context, key copy or derived key the instance kept for later rows,
+   and the result buffer. It MUST NOT leave that to the function's de-initialisation, which the
+   server does not always run after an error (`docs/design.md` amendment A16). This applies to all
+   six functions. A row that ends in NULL — a NULL argument (rule 3), or a tag mismatch that
+   `gcm.strict=OFF` turns into NULL — is not an error and is not covered by this rule.
+
+**A client implementation has no `gcm.strict` and no `gcm.min_key_bytes`.** There is no server setting
+for it to read, and it MUST NOT reproduce the lenient one. A tag mismatch is **always an error**: an
+independent implementation MUST NOT return unauthenticated plaintext and MUST NOT map a tag failure to
+NULL or to an empty result. A client MUST implement all three suites, but its **sealing floor SHOULD
+default to 32 bytes**, as the server's does — it seals with 16 or 24 bytes only when the application
+explicitly lowers the floor, which is what §6's conformance vectors and the recipe in
+`docs/conformance.md` do inside the test. It MUST NOT apply any floor to decryption, so that data the
+server wrote under a lower floor stays readable (§4.1).
 
 ### 4.1 `gcm.min_key_bytes`
 
@@ -239,6 +311,100 @@ applied to decryption would lock out exactly the rows that need migrating.
 
 Reading the setting is per statement, not per row. Any failure to read it MUST be treated as 32 — for
 a floor, failing closed means refusing the weaker suites.
+
+### 4.2 The key-id functions
+
+`gcm_encrypt_kr(plaintext, key_id [, aad])`, `gcm_encrypt_det_kr(plaintext, key_id [, aad])` and
+`gcm_decrypt_kr(ciphertext, key_id [, aad])` (`docs/design.md` amendment A13). Everything in §2–§4.1
+applies to them with "the key" read as "the key stored under `key_id`"; this section is what is
+added.
+
+**The key.** It is the keyring entry stored under `key_id` for the calling account, where the account
+is the keyring namespace `priv_user@priv_host` — the one the server's own keyring functions
+(`keyring_key_generate`, `keyring_key_store`) write to. The entry MUST be of type `AES` and 16, 24 or
+32 bytes long; its length selects the suite as in §2.5, and §4.1 applies to the two encryption
+functions and never to `gcm_decrypt_kr`. Inside a `SQL SECURITY DEFINER` stored routine the calling
+account is the definer; inside a view it is the invoker.
+
+**The key id.** 1 to 255 bytes after conversion to `utf8mb4`, with no NUL byte.
+
+**One key per statement instance.** The keyring is read at most once per instance of a function in
+an executing statement, on the first row whose arguments are all non-NULL. Every later row of that
+instance MUST bring the same `key_id` bytes and run as the same account. A different id is an error,
+so a `key_id` taken from a column is accepted only while every row names the same id.
+
+| Condition | `gcm.strict=ON` | `gcm.strict=OFF` |
+|---|---|---|
+| The keyring is not loaded, or reading it failed | error | **error** |
+| No usable key: no entry under this id for this account, or an entry that is not type `AES`, or one whose length is not 16, 24 or 32 | error | **error** |
+| Invalid key id: empty, over 255 bytes, a NUL byte, or different from an earlier row's | error | **error** |
+| No calling account: no session, an anonymous account, or one that changed between rows | error | **error** |
+
+Rules that follow, in addition to those of §4:
+
+1. `gcm.strict` keeps its one meaning. A key that cannot be had is misconfiguration and is never
+   turned into NULL.
+2. The three "no usable key" conditions MUST be reported identically, so that an entry of another
+   type or an odd length is not revealed.
+3. An error is final for the instance. The server makes no further row call after one; an
+   implementation MUST NOT serve a call made anyway, and MUST NOT read the keyring again for it.
+4. SQL NULL in any argument yields SQL NULL (§4 rule 3) with no keyring access and no check of the
+   key id.
+5. Rule 4 of §4 is extended: messages MUST NOT contain the key id, the account, or the type or
+   length of a keyring entry. A key shorter than `gcm.min_key_bytes` is reported with the floor and
+   without the key's length — which, the floor being a public setting, still bounds the length (with
+   a floor of 24 the refusal means a 16-byte key); this is accepted; a key whose length disagrees with the envelope's version byte is
+   reported without either length.
+6. A tag mismatch that `gcm.strict=OFF` turns into NULL does not discard the key read from the
+   keyring: the following rows are decrypted without a second read.
+7. Rule 5 of §4 applies here as everywhere: a row that raises gives up the key read from the
+   keyring, along with any context, key copy or derived key the instance kept and the result
+   buffer. Rule 6 above is the one failure that rule does not cover, because `gcm.strict=OFF` turns
+   it into a NULL rather than an error.
+
+### 4.3 `gcm_key_usage`
+
+`gcm_key_usage(key_id)` (`docs/design.md` amendment A14) returns what the key-id functions of §4.2
+have counted under one key name on this server. It is not part of the envelope contract and changes
+no byte of it; it is here because it is public surface.
+
+**The answer** is a VARCHAR tagged `utf8mb4` holding one JSON object, always with these six members
+in this order:
+
+| Member | Meaning |
+|---|---|
+| `random_seals` | successful `gcm_encrypt_kr` calls |
+| `det_seals` | successful `gcm_encrypt_det_kr` calls — calls, not distinct messages, and not statements either: the server may evaluate one call site several times |
+| `bytes_sealed` | plaintext bytes of those calls, after conversion to `utf8mb4`, without the AAD |
+| `tag_failures` | `gcm_decrypt_kr` calls that ended in a tag mismatch, with `gcm.strict` ON or OFF |
+| `since` | Unix time, in seconds, at which counting began: the component's initialisation |
+| `complete` | `false` once a name of the calling account did not fit in the table; some use by that account is then in no row |
+
+Rules an implementation MUST honour:
+
+1. **The name is (calling account, `key_id`)**, the account being §4.2's. The answer is for the
+   calling account only; no argument selects another.
+2. The function reads no keyring and does not report whether `key_id` names a key: a name with no
+   counts answers zeros. `key_id` is validated as in §4.2; an invalid one is an error. SQL NULL
+   yields SQL NULL.
+3. A call is counted when it returns successfully (a seal) or with a tag mismatch, whether or not
+   its statement later fails or its transaction rolls back. A count is a **lower bound**: an
+   instance the server abandons without de-initialising, and which did not itself raise, loses what
+   it counted. Successful decryptions, failed seals
+   and the key-argument functions of §1 are not counted.
+4. Counts become visible when the instance of the function that made them ends, not row by row. A
+   `gcm_key_usage` call in the same statement as a seal does not see that seal.
+5. Counts are 64-bit unsigned and saturate, in the instance and in the table. They start from zero whenever `since` changes: at server
+   start and when the component is installed.
+6. A row is created only by a non-zero count, which requires that a usable key was read under that
+   name. `gcm_key_usage` creates none.
+7. The table holds at most 64 names per account and 1024 in all, and never evicts one. One account
+   reaching its own bound MUST NOT change any other account's answer. When the whole table is full
+   and an account with no row loses a use, `complete` MAY be `false` for every account with no row;
+   it MUST NOT be `true` for an account that lost a use.
+
+A count is **not** a key's usage: it does not include other servers, other names for the same key
+bytes, the key-argument functions, or anything before `since`.
 
 ## 5. Worked examples
 
@@ -282,10 +448,11 @@ envelope = 01101112131415161718191a1b1c1d1e1fc40f242a0eb2f5da5572ab310442d463   
 
 ## 6. Test vectors
 
-`spec/test-vectors.json` is the single source of truth for the C++ conformance tests.
-`scripts/gen-vectors.py` generates reproducible fixtures with `cryptography` and checks known-good
-fixtures before writing. It is an internal development tool, not a client library. The C++ suite
-MUST consume every case, including expected failures; SQL integration tests cover server behavior.
+`spec/test-vectors.json` is the single source of truth for the **conformance suite of any
+implementation** — this project's C++ suite and an independent one alike (`docs/design.md` amendment
+A18). `scripts/gen-vectors.py` generates reproducible fixtures with `cryptography` and checks known-good
+fixtures before writing. It is an internal development tool, not a client library. A suite MUST consume
+every case, including expected failures; SQL integration tests cover server behavior.
 
 ```jsonc
 {
@@ -309,17 +476,23 @@ MUST consume every case, including expected failures; SQL integration tests cove
 }
 ```
 
-How a suite MUST consume a vector:
+How a suite MUST consume a vector. The operation names below (`seal_with_nonce`, `encrypt`,
+`encrypt_det`, `decrypt`, `derive_nonce_key`) are conceptual; an implementation maps them to its own
+entry points.
 
 | `expect` | Required assertions |
 |---|---|
 | `ok`, kind `nist`/`random` | `seal_with_nonce(key, nonce, pt, aad) == envelope` and `decrypt(envelope, key, aad) == pt` |
-| `ok`, kind `det` | `decrypt(envelope, key, aad) == pt`, `encrypt_det(pt, key, aad) == envelope` and, when present, `derive_nonce_key(key) == nonce_key_hex` and the derived nonce equals `nonce_hex`. Not `seal_with_nonce`: that seam writes version `0x02` and cannot produce a `0x03` envelope |
+| `ok`, kind `det` | `decrypt(envelope, key, aad) == pt`, `encrypt_det(pt, key, aad) == envelope` and, when present, `derive_nonce_key(key) == nonce_key_hex` and the derived nonce equals `nonce_hex`. Not `seal_with_nonce`: that entry point writes version `0x02` and cannot produce a `0x03` envelope |
 | `ok`, kind `legacy` | `decrypt(envelope, key, aad) == pt` only — encryption of v1 does not exist |
 | `bad_tag` | `decrypt` raises the tag error (server: error under `strict=ON`, NULL under OFF) |
 | `bad_envelope` | `decrypt` raises the envelope error under **both** strict settings |
 | `bad_key_len`, key length no suite has | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
 | `bad_key_len`, key length valid but disagreeing with the envelope's version | `decrypt` raises it. `encrypt` and `encrypt_det` **succeed** — they have no envelope to disagree with, and the key is a perfectly good key for its own suite. A conformance runner MUST NOT feed these to the encryption entry points |
+
+The vectors verify bytes only. They pin the AAD **bytes** a case carries, but not how an implementation
+chooses and encodes its own plaintext and AAD inputs — §2.7's conversion and encoding rules;
+`docs/conformance.md` checks those against a real server.
 
 Current contents: 2250 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 AES-256 (191 authentication failures), 750 AES-192 (190) and 750 AES-128 (196) — plus 54 project cases covering the deterministic envelopes, which the
 CAVP files never reach because they are all random-nonce.

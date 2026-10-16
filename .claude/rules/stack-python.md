@@ -14,7 +14,10 @@ paths:
   chart script depends on `matplotlib`, pinned exactly in `scripts/requirements-docs.txt` because its
   output is checked byte for byte; it reads committed JSON and draws SVG, nothing else. The SQL E2E and load
   runners standardise on `PyMySQL` and do their encryption and decryption through the server's SQL
-  functions.
+  functions. The leakage simulation (`tests/leakage`, amendment A17) depends on `numpy`/`scipy`,
+  pinned exactly in `tests/leakage/requirements.txt`; it models the token function directly,
+  **performs no cryptographic operation and holds no key material**, and is shipped nowhere. It is not
+  a second reference tokeniser for the component to agree with.
 - `ruff` (lint + format) and `mypy --strict`, both enforced in CI. A `# type: ignore` needs a comment
   giving the reason.
 - Do not expose a public encrypt/decrypt/parse API. Keep the minimum crypto construction the vector

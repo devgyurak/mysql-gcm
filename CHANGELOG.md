@@ -3,6 +3,117 @@
 Notable changes per release. Envelope-format changes get their own entry with a compatibility note
 (`ci-release` skill release checklist).
 
+## Unreleased
+
+### Added
+- **`gcm_key_usage(key_id)`** (#35, design amendment A14): what the key-id functions have counted
+  under a key id for the calling account since the component started — random seals, deterministic
+  seals, plaintext bytes sealed and tag failures — as JSON text, with the start time. It reads no
+  keyring. **It is a count, not a key's usage**: the key-argument functions, other servers and
+  anything before the last server start or reinstall are not in it; operational constraint 19 lists what it leaves out.
+  No persistence, no thresholds. No new server service and no envelope change.
+- **Key-id functions** (#34, design amendment A13): `gcm_encrypt_kr`, `gcm_encrypt_det_kr` and
+  `gcm_decrypt_kr` take a key id and use the `AES` key stored under it in the MySQL keyring for the
+  calling account (`priv_user@priv_host`, the namespace of `keyring_key_generate`). The key is no
+  longer an argument of the statement. **No envelope change**: they produce and read the same
+  `0x02`–`0x07` bytes as the key-argument functions, which are unchanged, and either family opens
+  what the other sealed. Optional: the component installs without a keyring and only these three
+  functions then fail. Every failure to obtain the key is an error regardless of `gcm.strict`. The
+  component now requires `keyring_reader_with_status`, `mysql_thd_security_context` and
+  `mysql_security_context_options`, and `mysql_current_thread_reader` on 8.0 and 8.4 as well as 9.x.
+  All four were found in the 8.0.43, 8.4.11 and 9.4.0 trees it is built against; the oldest 8.0
+  release that has them all was not established (the keyring reader arrived in 8.0.24). Read
+  operational constraint 17 before using them — with the file keyring the key is stored beside the
+  data, and external keyring backends are untested.
+
+### Documented
+- **The conformance kit of amendment A18: the spec's client rules, the server-oracle recipe and its
+  test** (#36). `spec/envelope.md` now names the sections an independent implementation MUST follow
+  (§1), states the plaintext and AAD byte rules in a new §2.7 (the `utf8mb4` conversion of a character
+  argument, opaque `binary` sealed unchanged and never normalised, AAD as raw bytes with one convention
+  per key), reads the failure table for a client (no `gcm.strict`, a tag failure is always an error, the
+  floor is sealing-only), and presents `spec/test-vectors.json` as the conformance suite of **any**
+  implementation — with the honest limit that vectors check bytes, not inputs.
+  `docs/conformance.md` (new, non-normative) is the how-to: a throwaway server as the oracle for the
+  checks the bytes cannot make. `tests/integration/70_conformance_oracle.sql` pins the recipe on 8.0,
+  8.4 and 9, so the document cannot drift. **No `src/` and no envelope byte change**; still no client.
+- **Design amendment A18, adopted — the envelope is an open format; A4 stands** (#36). A team on a
+  managed service cannot install the component (constraint 3), and the question was whether the project
+  should help it implement the same envelope in the application instead. **Option 1, a conformance
+  kit, is adopted; A4 stands and no client is shipped.** The amendment records why (the format is
+  already implementation-neutral, so the marginal cost is documentation; a reference client is an
+  unowned compatibility promise), the condition that would reopen reference clients (a named owner and
+  a CI that does not execute external code), and answers to the five questions issue #36 raises:
+  equivalence is the implementer's responsibility (one AAD byte-convention per key; the vectors are
+  byte-level only, the server-oracle recipe covers charset and AAD bytes), plaintext bytes are the
+  server's `utf8mb4` conversion of a character argument but opaque `binary` input is sealed unchanged
+  and never normalised (non-UTF-8 rejection is the application's concern, not a conformance rule), a
+  tag failure is always an error for a client and `gcm.min_key_bytes` is a sealing-only floor of 32, the
+  component's key-cleanse guarantees do not carry over, and managed services remain out of scope. v1
+  (`0x01`) is in the kit's scope **read-only**. **No `src/`, `spec/` or vector change.** The spec
+  section list, the server-oracle recipe and the integration case follow.
+- **SQL recipes that reduce the rows `gcm_decrypt(...) LIKE` decrypts** (#77, `docs/like-recipes.md`):
+  A17 closes the index direction, so the only lever left is the number of rows the server decrypts.
+  Four recipes — scope first, a `(scope, id, envelope)` covering index, a bounded window with `LIMIT`,
+  and a per-keystroke refine — with the caveats (Hangul IME composition states, complete results,
+  `range_optimizer_max_mem_size` / `Warning 3170`, the id list in the logs, the 3,072-byte index-key
+  limit, buffer-pool sizing). **No `src/` and no envelope change.** Constraint 5, the READMEs and
+  `docs/perf.md` link to it, and §8 records that index condition pushdown applies to a loadable
+  function and that a tampered in-scope row still raises under `gcm.strict=ON` on 8.0.46, 8.4.11 and
+  9.4.0 (`tests/integration/21_like_pushdown.sql`; the plan shape on 8.4 in
+  `mysql-test/suite/gcm/t/gcm_pushdown.test`).
+- **Design amendment A17, declined — the keyed n-gram token index is not adopted** (#38): a
+  deterministic n-gram token side table to give `LIKE` an index was **researched and declined**. The
+  amendment pre-registered the threat model, the data, the attacks, the metrics, the baselines
+  (B0/B1/B1′), the variants, the normalisation invariant and the adoption criteria **before** the
+  experiment, so the criteria could not be fitted to the result; the experiment's method and results
+  are in `docs/leakage-ngram.md`. It has an allowance under amendment A4 for `tests/leakage`
+  (synthetic data, no cryptographic operation, no key material, shipped nowhere). **The result:** the
+  deterministic tokens leak n-gram frequency and co-occurrence, and on Korean the attack recovered
+  20.7% of n-grams occurrence-weighted under the S1 attack (17.3% for the second S1 attack and 31.7%
+  under the stronger S3 attack 3), far
+  above the B1 + 10 pp ceiling; the motivating `'%김%'` is the index's worst case (~21% selectivity),
+  and a binary token key misses rows the collation matches. An independent `crypto-reviewer` pass — a
+  scoped AI design review, **not a human audit** — concurred: **decline (C0)**. **No `src/`, `spec/` or
+  vector change**; operational constraint 5 points at the study, §5.3's collation label is corrected
+  to `utf8mb4_0900_ai_ci`, and the Korean partial-match test is untouched.
+- **Design amendment A15, proposed** (#34, the part A13 deferred): a key version in the envelope,
+  under a new version byte `0x10`, so that the key-id functions can read a half-rotated column and
+  re-seal it without a second column. What is authenticated and how the deterministic nonce is
+  derived do not change: the header is as unauthenticated as today's version byte. **Nothing is
+  implemented, and nothing may be until it has been reviewed** — it changes the envelope, and an
+  earlier draft that put the header into the associated data without changing the nonce derivation
+  was blocked for a nonce reuse.
+- **Design amendment A14** (#35), the rationale for `gcm_key_usage` above: what a count is and is
+  not, why there is no persistence and no threshold, and the rules for the component's first shared
+  state (`src/usage`, bounded per account).
+- **Design amendment A13** (#34), the rationale for the key-id functions above: the decisions, what
+  a probe observed on 8.0, 8.4 and 9.4, what the implementation pinned and what it did not, and
+  what is deliberately left out (a key version in the envelope, rotation). It also records a
+  server defect found on the way (#43, operational constraint 18).
+- **The nested-call server defect of issue #43 is pinned per major** (`tests/integration/nested`,
+  run by `scripts/verify-nested.sh` on a throwaway server; operational constraint 18). A test-only
+  probe component (`tests/probe`) counts the `init` and `deinit` calls the server makes, so the leak
+  is a number that does not depend on this component. Its trigger is different from its name: a
+  prepared statement whose **re-prepare** fails after a loadable function has been fixed abandons
+  every such function, so `UNINSTALL COMPONENT` is refused until the server restarts on 8.0, 8.4
+  and 9 — for `gcm_decrypt(gcm_encrypt(?, ?), ?)`, but also for a sibling function, for a key-id
+  instance that raised nothing (whose seal is then never counted) and for a re-prepare invalidated
+  by `ALTER TABLE`, with no nesting and no parameter.
+- **The server cause behind it** (#43): a failed re-prepare leaves every loadable function the
+  statement had already fixed holding its handler, because `udf_handler::cleanup()` returns early
+  while a statement is being (re)prepared. Read from the 8.0.43, 8.4.11 and 9.4.0 sources,
+  cross-checked against the probe's init/deinit counts, and recorded with a reproducer in
+  `docs/upstream-udf-handler-leak.md` — a draft that is not submitted anywhere.
+
+### Changed
+- **An error row gives up everything its instance holds, in all six functions** (#43, amendment
+  A16). A13 gave this to the three `_kr` functions: a nested call that raises while the server is
+  initialising an outer one is never de-initialised, so nothing may be left to `deinit`. The code,
+  the spec, the rules and the adapter tests now say it for `gcm_encrypt`, `gcm_encrypt_det` and
+  `gcm_decrypt` as well. The success path is unchanged, no byte of any envelope changes, and nothing
+  new is counted.
+
 ## 0.1.0 — 2026-10-10
 
 First release. The component builds, installs and passes every suite on MySQL 8.0, 8.4 and 9.x. It

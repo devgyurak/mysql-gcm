@@ -14,7 +14,9 @@ usage() {
 ver="$1"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-name="mysql-dev-${ver}"
+# Must match what scripts/dev-up.sh below creates, including a GCM_DEV_NAME override
+# (scripts/verify-nested.sh relies on the same variable).
+name="${GCM_DEV_NAME:-mysql-dev-${ver}}"
 so="${root}/build/${ver}/component_gcm.so"
 outdir="${root}/build/${ver}"
 
@@ -48,10 +50,33 @@ fi
 # boilerplate out of every case file and guarantees a clean slate per run.
 schema=gcm_it
 mysql -N -e "DROP DATABASE IF EXISTS ${schema}; CREATE DATABASE ${schema}"
-case_mysql() { docker exec -i "${name}" mysql -uroot --default-character-set=utf8mb4 -D "${schema}" "$@"; }
+# --loose-commands=ON: a case that needs a fresh session uses the client's `connect`
+# command (61_kr_key_source does, to pick up a GLOBAL gcm.strict on every major). The
+# 9.x client only honours client commands in a batch when asked; the 8.x clients do not
+# know the option, hence loose.
+case_mysql() {
+  docker exec -i "${name}" mysql -uroot --loose-commands=ON --default-character-set=utf8mb4 \
+    -D "${schema}" "$@"
+}
 
 tmp_disk() { mysql -N -e "SHOW GLOBAL STATUS LIKE 'Created_tmp_disk_tables'" | awk '{print $2}'; }
 disk_before="$(tmp_disk)"
+
+# A key a case generated must not be there for the next one, and an aborted run must
+# not leave one behind (design A13) — the same reasoning as resetting gcm.strict. Only
+# the cases' own keys go: ids starting with it_, stored by the account the cases run
+# as. This is a development server and may hold keys for data outside this suite;
+# emptying the keyring would leave that data without its key.
+drop_case_keys() {
+  local key_id
+  mysql -N -e "SELECT KEY_ID FROM performance_schema.keyring_keys
+               WHERE KEY_ID LIKE 'it\\_%' AND KEY_OWNER = CURRENT_USER()" |
+    while IFS= read -r key_id; do
+      # </dev/null: the client is `docker exec -i`, which would otherwise read the
+      # rest of the list as its own input and end the loop after one key.
+      mysql -N -e "DO keyring_key_remove('${key_id}')" </dev/null
+    done
+}
 
 status=0
 shopt -s nullglob
@@ -78,10 +103,12 @@ for case_file in "${cases[@]}"; do
   # buffers stdout but not stderr, so a plain 2>&1 interleaves them in an order
   # that depends on buffer boundaries — exactly the kind of flakiness the testing
   # rule forbids. Errors therefore appear in their own section, in statement order.
-  # Cases run in sequence against one server and 31_strict_scope touches a GLOBAL
-  # variable, so the default is restored before each case: order independence should
-  # not depend on a case cleaning up after itself.
-  mysql -N -e "SET GLOBAL gcm.strict = DEFAULT"
+  # Cases run in sequence against one server and several touch a GLOBAL variable —
+  # gcm.strict (12, 31, 61, 63) and gcm.min_key_bytes (12, 60, 61, 70). Both defaults
+  # are restored before each case: order independence should not depend on a case
+  # cleaning up after itself.
+  mysql -N -e "SET GLOBAL gcm.strict = DEFAULT, gcm.min_key_bytes = DEFAULT"
+  drop_case_keys
   case_mysql -N --force < "${case_file}" > "${actual}.out" 2> "${actual}.err" || true
   {
     cat "${actual}.out"
@@ -121,6 +148,7 @@ disk_after="$(tmp_disk)"
 } > "${outdir}/tmp_disk.txt"
 cat "${outdir}/tmp_disk.txt" >&2
 
+drop_case_keys
 mysql -N -e "DROP DATABASE IF EXISTS ${schema}"
 mysql -N -e "UNINSTALL COMPONENT 'file://component_gcm'"
 

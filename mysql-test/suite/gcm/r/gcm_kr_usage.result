@@ -1,0 +1,82 @@
+# ----------------------------------------------------------------------
+# Setup
+# Creating local configuration file for keyring component: component_keyring_file
+# Creating manifest file for current MySQL server instance
+# Re-starting mysql server with manifest file
+# ----------------------------------------------------------------------
+# Given: a key that has not been used
+DO keyring_key_generate('mtr_usage', 'AES', 32);
+# When: its usage is read
+SELECT JSON_VALID(gcm_key_usage('mtr_usage')) AS is_json,
+JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals', '$.bytes_sealed', '$.tag_failures') AS counts,
+JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.complete') AS complete;
+is_json	counts	complete
+1	[0, 0, 0, 0]	true
+# Then: valid JSON, all zeros, complete
+# Given: three names sealed at random and one value sealed deterministically
+CREATE TABLE patients (id INT PRIMARY KEY, name_enc VARBINARY(128));
+INSERT INTO patients VALUES
+(1, gcm_encrypt_kr('김철수', 'mtr_usage')),
+(2, gcm_encrypt_kr('홍길동', 'mtr_usage')),
+(3, gcm_encrypt_kr('박길수', 'mtr_usage'));
+SET @d = gcm_encrypt_det_kr('EMR-001', 'mtr_usage');
+# When: the usage is read
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals', '$.bytes_sealed', '$.tag_failures') AS counts;
+counts
+[3, 1, 34, 0]
+# Then: 3 random, 1 deterministic, 34 plaintext bytes, no tag failure
+# Given: the second row made unauthentic, and gcm.strict at its default
+UPDATE patients SET name_enc = CONCAT(LEFT(name_enc, LENGTH(name_enc) - 1), CHAR(ASCII(RIGHT(name_enc, 1)) ^ 1)) WHERE id = 2;
+# When: it is opened
+SELECT gcm_decrypt_kr(name_enc, 'mtr_usage') FROM patients WHERE id = 2;
+ERROR HY000: gcm_decrypt_kr UDF failed; authentication tag verification failed
+# Then: an error, and the failure is counted although the statement failed
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.tag_failures') AS tag_failures;
+tag_failures
+1
+# Given: gcm.strict turned off globally
+SET GLOBAL gcm.strict = OFF;
+# When: the three rows are opened in one statement
+SELECT id, gcm_decrypt_kr(name_enc, 'mtr_usage') IS NULL AS is_null FROM patients ORDER BY id;
+id	is_null
+1	0
+2	1
+3	0
+# Then: the middle row is NULL, and it is a second tag failure
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.tag_failures') AS tag_failures;
+tag_failures
+2
+SET GLOBAL gcm.strict = DEFAULT;
+# Given: the same key bytes passed to the key-argument functions
+DO gcm_encrypt('홍길동', keyring_key_fetch('mtr_usage'));
+# When: the usage is read
+SELECT JSON_EXTRACT(gcm_key_usage('mtr_usage'), '$.random_seals', '$.det_seals') AS counts;
+counts
+[3, 1]
+# Then: still 3 and 1 — the key-argument functions are not counted
+# Given: a NULL key id, and one that is not an id
+# When: their usage is read
+SELECT gcm_key_usage(NULL) IS NULL AS null_id;
+null_id
+1
+SELECT gcm_key_usage('');
+ERROR HY000: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
+# Then: NULL, and an error
+# Given: the longest key id allowed, one byte more, and a call with no argument
+# When: their usage is read
+SELECT JSON_EXTRACT(gcm_key_usage(REPEAT('k', 255)), '$.random_seals') AS longest_id;
+longest_id
+0
+SELECT gcm_key_usage(REPEAT('k', 256));
+ERROR HY000: gcm_key_usage UDF failed; the key id must be 1 to 255 bytes without a NUL byte
+SELECT gcm_key_usage();
+ERROR HY000: Can't initialize function 'gcm_key_usage'; gcm_key_usage(key_id) needs 1 argument
+# Then: zero for the longest id, an error for the id that is too long, and the usage for the wrong arity
+DROP TABLE patients;
+# ----------------------------------------------------------------------
+# Teardown
+# Removing manifest file for current MySQL server instance
+# Removing local keyring file for keyring component: component_keyring_file
+# Removing local configuration file for keyring component: component_keyring_file
+# Restarting server without the manifest file
+# ----------------------------------------------------------------------

@@ -97,14 +97,49 @@ bool init_decrypt_session(UDF_INIT *initid, char *msg) {
 void free_state(UDF_INIT *initid) {
   auto *state = reinterpret_cast<UdfState *>(initid->ptr);
   if (state == nullptr) return;
+  fold_usage(state);                     // before the name it folds under is wiped below
   decrypt_session_free(state->decrypt);  // wipes its key copy; nullptr for the encrypt UDFs
   if (state->out != nullptr) {
     wipe(state->out, state->capacity);  // the last plaintext lives here
     std::free(state->out);
   }
-  det_session_clear(&state->det);  // the key copy and the derived nonce_key
+  det_session_clear(&state->det);       // the key copy and the derived nonce_key
+  wipe(&state->kr, sizeof(state->kr));  // the key fetched from the keyring (design A13)
   std::free(state);
   initid->ptr = nullptr;
+}
+
+void fold_usage(UdfState *state) {
+  const KeyHold &hold = state->kr;
+  /* The name is the account and the id recorded when the key was read, not a fresh
+     look at the caller. Counts exist only after a key was read, so the name is set
+     whenever there is anything to fold. */
+  usage_fold(UsageName{hold.account.text, hold.account.len, hold.id, hold.id_len}, state->used);
+  state->used = UsageCounts{0, 0, 0, 0};
+}
+
+void give_up_secrets(UdfState *state) {
+  KeyHold *hold = &state->kr;
+  wipe(hold->key, sizeof(hold->key));
+  hold->key_len = 0;
+  hold->loaded = false;
+  state->spent = true;
+  /* What this instance counted must not depend on a deinit that may not come either
+     (design A14). After the key is gone, since the fold takes a lock and the name it
+     folds under — the id and the account — is not wiped here. Nothing is counted for
+     the key-argument functions, so this is a no-op for them. */
+  fold_usage(state);
+  det_session_clear(&state->det);
+  decrypt_session_free(state->decrypt);
+  state->decrypt = nullptr;
+  if (state->out != nullptr) wipe(state->out, state->capacity);
+}
+
+bool refuse_if_spent(UdfState *state, const char *func) {
+  if (!state->spent) return false;
+  /* Carries no key, id or account (spec/envelope.md §4 rule 4, design A13). */
+  raise_message(func, "this call already raised an error and cannot be used again");
+  return true;
 }
 
 bool reserve(UdfState *state, size_t need) {

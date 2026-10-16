@@ -10,6 +10,8 @@ Two layers. Both are GWT (`--echo # Given/When/Then`).
 | Layer | Location | When | Needs |
 |---|---|---|---|
 | SQL smoke | `tests/integration/<case>.sql` + `<case>.expected` | local loop, PR CI | the official `mysql:<ver>` image plus the `.so` |
+| SQL smoke, no keyring | `tests/integration/bare/` | PR CI | `scripts/verify-bare.sh` |
+| Nested defect | `tests/integration/nested/<case>.sql` + `<case>.<major>.expected` | PR CI | `scripts/verify-nested.sh`, `scripts/build-probe.sh` |
 | MTR | `mysql-test/suite/gcm/t/*.test`, `r/*.result` | PR CI (the server-tree build job), releases | a server source tree build |
 
 ## SQL smoke
@@ -39,6 +41,11 @@ Case files (the name is the intent):
 31_strict_scope.sql                 per-major-expected — GLOBAL vs SESSION (amendment A5)
 40_null_and_edge.sql                NULL propagation, the empty string (29 B), 64 KB, boundary-length round trips
 50_dual_read_v1.sql                 a 0x01 envelope matches AES_DECRYPT, AAD rejected, reading all three versions mixed
+60_kr_roundtrip.sql                 key-id functions (A13): round trip, LIKE '%길%', interop with the key-argument functions, floor, 0x01
+61_kr_key_source.sql                key-id failures: absent / wrong type / odd length as one error, invalid ids, NULL, an id per row, bound parameters, strict=OFF over good/tampered/good rows
+62_kr_accounts.sql                  the account boundary: another account's id, definer and invoker functions, a definer view
+63_kr_usage.sql                     gcm_key_usage (A14): counts per kind, visible when the statement ends, tag failures, key-argument calls not counted, another account
+bare/kr_unavailable.sql             NOT run by verify.sh — scripts/verify-bare.sh runs it on a throwaway server with no keyring
 90_tmp_disk_observation.sql         a decrypt + ORDER BY + GROUP BY workload (the counter is recorded in tmp_disk.txt)
 91_server_udf_arg_defect.sql        per-major-expected — pins the amendment A7 server defect
 ```
@@ -51,6 +58,60 @@ Produce an `.expected` by running the case, **read it through by eye**, then com
 changed `.expected` has to be explained. Keep ciphertext and plaintext bytes out of the expected files
 — an error that prints a value, such as a UNIQUE violation message, is replaced by `INSERT IGNORE`
 plus an assertion on the row count.
+
+## Nested defect (`tests/integration/nested`)
+The server defect of issue #43: a **prepared statement whose re-prepare at `EXECUTE`** fails after a
+loadable function has been fixed abandons that function's `UDF_INIT` — its `deinit` never runs and
+the component can no longer be uninstalled until the server restarts. Case `25_ddl_reprepare`'s
+control pins the other side: a re-prepare that fails *before* the function is fixed leaks nothing.
+The first shape found is a function that is the argument of another and takes a prepared-statement
+parameter: the inner call is evaluated while the outer function is being initialised, sees an empty
+string and raises. Nesting, the bound parameter and the raising are all incidental, and the cases
+say so —
+`23_sibling_leak` (a sibling function), `24_nonraising_kr_inner` (a key-id instance that raises
+nothing, and whose seal is never counted), `25_ddl_reprepare` (a plain `ALTER TABLE` re-prepare, no
+nesting and no parameter) and `26_probe_nested_bound_const`. The cause is read in
+`docs/upstream-udf-handler-leak.md`.
+
+These cases run **not** through `verify.sh` but through `scripts/verify-nested.sh <ver>`, which:
+- starts its own throwaway container, reusing the `dev-up.sh` keyring setup through `GCM_DEV_NAME`, so
+  the development server and its data are untouched;
+- before each case, reinstalls the components, resets the probe counters, restores
+  `gcm.strict` and `gcm.min_key_bytes` to `DEFAULT` and drops the `it_%` keys;
+- after each case, prints `probe_counts:` and then `UNINSTALL COMPONENT`. When the uninstall is
+  refused — the observable the case exists to pin — it restarts the server, which reloads the
+  component from `mysql.component`, and continues. That branching lives in the harness and never in a
+  case body;
+- diffs per major against `<case>.<major>.expected` (`GCM_RECORD=1` records; read the diff by eye).
+
+`tests/probe` is a test-only component (`scripts/build-probe.sh <ver>`; no crypto, not shipped) whose
+functions count their own `init` and `deinit`. `probe_counts()` lets a case separate a *leaked*
+`UDF_INIT` — an `init` with no matching `deinit` — from a re-run init, independently of
+`component_gcm`. A case that has to tell the harness which component to put back writes
+`-- nested-uninstall: <component>`.
+
+Case files (the shape each pins):
+```
+10_prepared_decrypt_of_encrypt.sql   outer decrypt, inner encrypt, bound parameter
+11_prepared_decrypt_of_det.sql       outer decrypt, inner det, bound parameter (det claims const_item)
+12_literal_det_bad_key.sql           a literal inner with a bad key
+13_literal_encrypt_bad_key.sql       a literal inner with a bad key
+14_user_variable.sql                 a user-variable argument
+15_row_time_column_failure.sql       a per-row column failure
+16_outer_init_fails.sql              the outer's own init fails
+17_kr_reseal_chain.sql               the _kr open/re-seal/open chain (amendment A15 shape)
+20_probe_nested_bound.sql            ★ the probe: a bound inner, counts init against deinit
+21_probe_nested_literal.sql          the probe with a literal inner, as a control
+22_probe_direct_bound.sql            the probe with a bound argument but no outer, as a control
+23_sibling_leak.sql                  ★ a sibling function beside the raising one: no nesting
+24_nonraising_kr_inner.sql            ★ a key-id seal that raises nothing is dropped; the count is lost
+25_ddl_reprepare.sql                 ★ a re-prepare invalidated by ALTER TABLE: no nesting, no parameter
+26_probe_nested_bound_const.sql      the probe's const_item variant in the bound-inner shape
+```
+
+Cases 23 to 26 are the ones that showed the defect's trigger is the failed fix, not the nesting; a
+case that pins a leak has to leave the component uninstallable, so the harness restarts the server
+after it.
 
 ## MTR
 - Location: `mysql-test/suite/gcm/{t,r,include}`. `scripts/mtr.sh` **copies** it to
@@ -83,4 +144,5 @@ SELECT gcm_decrypt(@c, @k) LIKE '%길%' AS hit;
 ## Done when
 - [ ] `20_korean_like` passes (without it the project misses its purpose)
 - [ ] The smoke suite passes on 8.0, 8.4 and 9.x, with identical output outside the per-major cases
+- [ ] `scripts/verify-nested.sh` passes on 8.0, 8.4 and 9.x for every `tests/integration/nested` case
 - [ ] Every MTR `.result` is a `--record` output and the reason it changed is in the PR description

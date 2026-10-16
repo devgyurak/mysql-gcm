@@ -1,0 +1,27 @@
+# Given: the three public fixture keys and the spec deterministic vectors
+# When: the server reseals 홍길동 under each suite
+03B9C3A065D8C76EA9D627C591BB12160661AD43902EB8263C49815E07483158555819839732	07348A854E37FE9F0337DCE05EFBC5E3762D1EC5EC00EA8FA2E02B3D5659BE88295CA61354FF	05305E0ED5680AE1D025321750E994328BFB663BFC8F5DCFF26E7EAAB92DA58FA86552DCDCFF
+# Then: the vectors det-korean-hong, aes192-det-korean, aes128-det-korean (above)
+# Scenario 2 — Given: the v1 (legacy CBC) spec vector, which is decrypt-only
+# When: it is opened with the 32 byte key
+홍길동	ED998DEAB8B8EB8F99
+# Then: 홍길동 and ed998deab8b8eb8f99 — v1 opens byte for byte on both sides (above)
+# Scenario 3 — Given: the same v1 vector with a non-empty AAD
+# When: it is decrypted
+# Then: bad_envelope — v1 predates AAD and cannot bind one (errors below)
+# Scenario 4 — Given: the same visible string as a latin1 and a utf8mb4 character argument,
+#              and the same bytes as a binary argument
+# When: each is sealed deterministically under one key
+1	1	038E48435CA20CA6608CA7793F8C74A86C027F03E54F4D269BA98179F2552D996CE81675
+# Then: 1 and 1 — a character argument is converted to utf8mb4, binary bytes are sealed as they are (above)
+# Scenario 5 — Given: one letter as NFC (C3A9) and NFD (65CC81) utf8mb4 bytes
+# When: each is sealed deterministically under one key
+0
+# Then: 0 — the server does not normalise, so a normalising client diverges (above)
+# Scenario 6 — Given: one visible AAD string from a latin1 and a utf8mb4 source,
+#              and the same letter as NFC and NFD
+# When: each is the AAD of the same plaintext, and the latin1 form is compared with its raw byte
+0	1	0
+# Then: 0, 1 and 0 — AAD is used as bytes and is neither converted nor normalised (above)
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 25: gcm_decrypt UDF failed; malformed or unsupported envelope (length 33)

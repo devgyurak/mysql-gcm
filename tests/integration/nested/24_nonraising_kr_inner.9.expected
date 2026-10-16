@@ -1,0 +1,15 @@
+# Given: a key in the keyring
+1
+# When: a key-id seal is evaluated inside an outer function, and another function raises in the same select list
+random_seals after the failed statement: 0
+# And one plain seal of the same key, for what a folded count looks like
+envelope length: 30
+random_seals after it: 1
+# Then: the first line is 0 — the seal inside the leaked instance was lost — the second is 1,
+#       and the after block shows gcm unable to uninstall, so the instance is still held
+--- errors, in statement order ---
+ERROR 3200 (HY000) at line 17: probe_raise_volatile UDF failed; no value for the argument: the server evaluated this function before its bound parameter had one
+--- after the case ---
+probe_counts: {"probe_outer":{"init":1,"deinit":0},"probe_raise_const":{"init":0,"deinit":0},"probe_raise_volatile":{"init":1,"deinit":0}}
+uninstall gcm: refused: ERROR 3538 (HY000) at line 1: De-initialization method provided by component 'gcm' failed.
+restarted: gcm re-loaded at server start

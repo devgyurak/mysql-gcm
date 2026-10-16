@@ -1,5 +1,6 @@
 -- Phase S spike checklist (docs/design.md §4, as amended by A1: the key is a SQL
--- argument, there is no keyring). Answers the "unconfirmed" items of §8.
+-- argument, there is no keyring). Answers the "unconfirmed" items of §8. The key-id
+-- functions of amendment A13 are not part of it; see tests/integration/6*_kr_*.sql.
 --
 -- This is a MANUAL checklist, kept for eyeballing a new server or a new version by
 -- hand. It is not part of any gate: the automated equivalents are

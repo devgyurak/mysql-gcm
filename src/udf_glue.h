@@ -12,8 +12,29 @@
 #include <mysql/udf_registration_types.h>
 
 #include "gcm.h"
+#include "key_source.h"
+#include "usage.h"
 
 namespace gcm {
+
+/* The *_kr functions only (design A13): the key read from the keyring on the first
+   row, with the id and the account it was read under. One per UDF item, never
+   shared, wiped in free_state and — with the A11 states, the result buffer and the
+   spent latch — by every row that raises an error (design A16). Unlike the two A11
+   states below it survives a bad_tag that gcm.strict=OFF turns into NULL — the next
+   row still has to decrypt, and reading again would let a planted corrupt row cost
+   one keyring read per row. Zeroed by calloc. */
+struct KeyHold {
+  bool loaded;
+  /* A key-source failure is latched: later rows raise it again without touching
+     the keyring. KeySource::ok (zero) means none. */
+  KeySource failure;
+  size_t key_len;
+  unsigned char key[kKeyLen256];
+  size_t id_len;
+  char id[kMaxKeyIdLen + 1];
+  CallerAccount account;
+};
 
 /* Hung off UDF_INIT::ptr, one per UDF item. Nothing is shared between items: the
    same UDF runs concurrently in many sessions (component-src rule). Everything in
@@ -25,12 +46,25 @@ struct UdfState {
   size_t min_key_bytes; /* gcm.min_key_bytes, read once in init (design A10) */
   unsigned char *out;   /* result bytes; holds plaintext for gcm_decrypt */
   size_t capacity;
+  /* Set by the row that raised an error, which has given up every secret in this
+     state and released what it held (design A16). Covers all six functions: the
+     A11 context, the A11 nonce key, the fetched key and the result buffer. The
+     server makes no further row call after an error; a call made anyway — only a
+     test can make one — is refused instead of using the released state. Zeroed by
+     calloc. */
+  bool spent;
   /* gcm_decrypt only: the scheduled context and its key copy (design A11).
      nullptr for the encrypt UDFs; freed and cleansed in free_state. */
   DecryptSession *decrypt;
   /* gcm_encrypt_det only: the cached nonce_key and the key copy it is valid for
      (design A11). Zeroed by calloc in init_state, cleansed in free_state. */
   DetSession det;
+  /* The *_kr functions only: the fetched key (design A13). Unused otherwise. */
+  KeyHold kr;
+  /* The *_kr functions only: what this instance has done under kr's name and not
+     yet folded into the component's table (design A14). Plain integers, touched by
+     one thread; fold_usage moves them to the table and zeroes them. */
+  UsageCounts used;
 };
 
 /* Every helper below follows the UDF init convention: true means failure, with
@@ -48,7 +82,35 @@ bool init_argument_charset(UDF_ARGS *args, char *msg, unsigned index, const char
 bool init_argument_collation(UDF_ARGS *args, char *msg, unsigned index, const char *collation);
 
 bool init_state(UDF_INIT *initid, char *msg);
+/* Folds any usage not yet folded (design A14), then wipes and releases. */
 void free_state(UDF_INIT *initid);
+
+/* Moves the instance's counts into the component's table under the name its key
+   was read under, and zeroes them — so calling it twice counts once. One lock, and
+   none at all when there is nothing to fold. Called when the instance ends: from
+   free_state, and from the row that raises an error, because the server does not
+   always call deinit after one (design A14). */
+void fold_usage(UdfState *state);
+
+/* Gives up every secret this instance holds and marks it spent (design A16): the
+   fetched key, the A11 context, the A11 nonce key and the result buffer, at once,
+   without waiting for deinit. Every row callback of every crypto UDF calls this
+   before it returns, and nothing is lost by it — the server does not enter the row
+   callback again once the function has raised, and deinit cannot be relied on,
+   because a loadable function that raises while an outer one is being initialised
+   never gets its deinit (design A13, "Implementation notes"); what it held would stay
+   in memory, unwiped, for the life of the server. A row that ends in a NULL — a NULL
+   argument, or gcm.strict=OFF on a bad tag — is not an error and does not call this.
+
+   This covers the instance that raised. One the server abandons *without* an error —
+   the same leak drops those too (design A16, "The row that raised, and only it") —
+   keeps what it held, keyring key included; the component never regains control of it. */
+void give_up_secrets(UdfState *state);
+
+/* The refusal such a call gets when it is made anyway: true when it refused, after
+   raising. Only a test can reach this (the server stops calling a function that
+   reported an error). */
+bool refuse_if_spent(UdfState *state, const char *func);
 
 /* Gives the state its decrypt session (design A11). Call after init_state;
    free_state releases it. True on allocation failure, after releasing the state. */
@@ -121,6 +183,8 @@ void raise_too_long(const char *func, size_t len);
    bad_key_len: the key is a valid length for a suite, and the server policy is
    what refuses it, so the message has to say that rather than claim the length
    is wrong (design A10). Carries lengths only. */
+/* Not for the *_kr functions: there the length belongs to a keyring entry and must
+   not appear in a message (design A13). udf_kr.cc reports the floor alone. */
 void raise_below_floor(const char *func, size_t key_len, size_t floor);
 
 }  // namespace gcm

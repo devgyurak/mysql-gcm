@@ -19,6 +19,13 @@ a charset** so partial-match search survives through MySQL's native `LIKE`.
 gcm_encrypt(plaintext, key [, aad])       -> BLOB     random nonce (RAND_bytes, 12 B)
 gcm_encrypt_det(plaintext, key [, aad])   -> BLOB     deterministic — joins, UNIQUE and exact match only
 gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 → native LIKE works
+
+gcm_encrypt_kr(plaintext, key_id [, aad])       the same three, with the key read from the keyring
+gcm_encrypt_det_kr(plaintext, key_id [, aad])   under the calling account (amendment A13). Same
+gcm_decrypt_kr(ciphertext, key_id [, aad])      envelopes, byte for byte; optional to use
+
+gcm_key_usage(key_id)                     -> VARCHAR  JSON text: what the three above counted under
+                                                      this id for the caller (amendment A14)
 ```
 
 - `key`: 32 binary bytes (AES-256), 24 (AES-192) or 16 (AES-128). Any other length is an error
@@ -45,7 +52,17 @@ gcm_decrypt(ciphertext, key [, aad])      -> VARCHAR  tagged charset utf8mb4 →
   32) — the smallest key the two encryption functions accept, which is what keeps a truncated key
   from silently selecting a weaker suite; decryption ignores it (amendment A10). In my.cnf both take the
   `loose_` prefix.
-- Withdrawn (amendment A1): keyring integration, `gcm.key_id`, `gcm.nonce_key_id`, `gcm_key_id()`. If
+- Key-id functions (amendment A13): `key_id` is 1–255 bytes; the key is the `AES` entry of 16, 24 or
+  32 bytes stored under it for the caller's `priv_user@priv_host`; the keyring is read at most once
+  per `UDF_INIT`, on the first non-NULL row; every key-source failure is an error regardless of
+  `gcm.strict`, and no message names the id, the account or the entry. The contract is
+  `spec/envelope.md` §4.2.
+- Usage counts (amendment A14): per (calling account, key id), random and deterministic seals,
+  plaintext bytes and tag failures of the `_kr` functions since the component started; folded once
+  per `UDF_INIT`; no persistence, no thresholds; the key-argument functions are not counted. A count
+  is an input to the usage budget, never the budget. The contract is `spec/envelope.md` §4.3.
+- Withdrawn (amendment A1) and still withdrawn: `gcm.key_id`, `gcm.nonce_key_id`, `gcm_key_id()`, a
+  key id or key version in the envelope, and any function that writes to the keyring. If
   asked for one, turn it back into a proposal to amend the design.
 
 ## 3. Repository layout
@@ -57,25 +74,46 @@ AGENTS.md / CLAUDE.md          Agent instructions (this file is the source)
 docs/design.md                 The design document (the source of rationale, including amendment A1)
 docs/design-KO.md              Its Korean translation. The English file above is canonical
 docs/ops-constraints.md        Operational constraints — also duplicated on the README's first screen
+docs/conformance.md            How a third party checks an independent implementation against a server
+                               (amendment A18). Non-normative, and not a client
+docs/upstream-udf-handler-leak.md
+                               The server cause of issue #43, from the 8.0.43/8.4.11/9.4.0 sources,
+                               with a reproducer. A draft only: never submitted upstream
 spec/envelope.md               The settled envelope and failure semantics (Phase 1)
 spec/test-vectors.json         NIST CAVP GCM KAT plus the project's own vectors. The common reference for the server tests
 src/                           The component (C++17)
   CMakeLists.txt               MYSQL_ADD_COMPONENT — copied into the server tree as components/gcm and built there
   component.cc                 DECLARE_COMPONENT, the REQUIRES_SERVICE list, init/deinit (including registration rollback)
   udf_encrypt.cc udf_decrypt.cc   The UDF glue — argument validation, charset tagging and error translation only
-  udf_glue.{h,cc}              Arguments, buffers and error translation shared by the two UDF glues (no crypto logic)
+  udf_usage.cc                 gcm_key_usage (amendment A14) — reads the table in usage.{h,cc}; no keyring, no crypto
+  udf_kr.cc                    The key-id UDFs (amendment A13) — the same glue, with the key resolved from key_source
+  key_source.{h,cc}            The caller's account and the keyring read behind the key-id UDFs (a server adapter, no crypto)
+  udf_glue.{h,cc}              Arguments, buffers and error translation shared by the UDF glues (no crypto logic)
   gcm.{h,cc}                   The OpenSSL EVP wrapper (no server header dependency → unit testable)
   envelope.{h,cc}              Envelope encoding and decoding (does not depend on OpenSSL either)
   nonce.{h,cc}                 The synthetic nonce and the nonce_key derivation (EVP_MAC HMAC-SHA256)
+  usage.{h,cc}                 The table of usage counts for the key-id functions (amendment A14; no server header → unit testable)
   sysvar.{h,cc}                Registering and reading gcm.strict — the session scope is 9.0+ only (amendment A5)
-tests/unit/                    GoogleTest — gcm/envelope/nonce, linking libcrypto alone with no server
+tests/unit/                    GoogleTest — gcm/envelope/nonce/usage, linking libcrypto alone with no server
 tests/integration/             Real-server SQL scenarios on docker (sql + expected)
+tests/integration/nested/      issue #43 nested-function cases, per-major expected, run by scripts/verify-nested.sh
+tests/probe/                   Test-only component pinning issue #43. Not shipped: scripts/check-architecture.py
+                               refuses the reserved name under src/ and docker/
 mysql-test/suite/gcm/          MTR .test/.result (run from a server source tree build)
 tests/e2e/                     compose: mysql (ROW) + replica + a Python SQL runner → LIKE / replication / dual-read
 tests/load/                    Load: decrypt + LIKE over 10k/100k/300k rows, with a regression gate against AES_DECRYPT
 tests/bench/                   Core micro-benchmarks (Google Benchmark) — ratios against bare EVP. No server
 tests/adapter/                 The component install and uninstall paths — failure injected through stub services, inside the build image
+tests/leakage/                 The leakage experiment of amendment A17 — synthetic Korean and Latin names from
+                               committed public aggregates, with NO cryptographic operation and no key material:
+                               data/ *.json, names.py, tokens.py, attacks.py, metrics.py, variants.py, run.py.
+                               Not shipped; CI runs a smoke only, the full run's JSON is committed
 scripts/                       dev-up.sh, build-in-docker.sh, verify.sh, verify.sql, mtr.sh, agents-sync.sh
+  verify-bare.sh               The same kind of check on a throwaway server with no keyring (amendment A13)
+  build-probe.sh               Builds the test-only probe component (tests/probe) inside the build image
+  verify-nested.sh             Runs tests/integration/nested on a throwaway server (issue #43)
+  leakage-collation.sh         Runs the collation differential of tests/leakage/collation on a throwaway server
+                               per major (amendment A17, question 4) — plain SQL, no component
   bench.sh                     Builds and runs the core micro-benchmarks and the ratio gate
   adapter-tests.sh             Verifies the install and uninstall paths against stub services (reusing the build image)
   unit-in-docker.sh            Runs the unit tests on the same GCC and ubuntu as CI (catching what the host clang lets through)
@@ -104,6 +142,8 @@ site/                          Landing page and docs site (Astro Starlight, Node
 | Build the component (in a server source tree) | `scripts/build-in-docker.sh 8.4` | `mysql-component` |
 | Unit tests | `cmake -S tests/unit -B build/unit && cmake --build build/unit && ctest --test-dir build/unit` | `unit-tests` |
 | Integration smoke | `scripts/verify.sh 8.4` (installs the .so in a container, then diffs the SQL scenarios) | `integration-tests` |
+| Integration, no keyring | `scripts/verify-bare.sh 8.4` (a throwaway server without a keyring: install, the key-id functions fail cleanly, uninstall) | `integration-tests` |
+| Nested UDF defect | `scripts/build-probe.sh 8.4` then `scripts/verify-nested.sh 8.4` (a throwaway server: per-major cases for issue #43) | `integration-tests` |
 | MTR | `scripts/mtr.sh 8.4` (`GCM_RECORD=1` re-records the `.result` files) | `integration-tests` |
 | E2E | `docker compose -f tests/e2e/compose.yml up --exit-code-from runner` | `e2e-load-tests` |
 | Load | `python tests/load/run.py --rows 300000 --baseline aes` | `e2e-load-tests` |
@@ -123,8 +163,11 @@ different build method on your own.
 - Use the libcrypto the server has loaded. No static linking and no bundling of another version.
 - Never put a key, plaintext or nonce in a log, an error message or an assertion string.
   `OPENSSL_cleanse` the key and plaintext buffers. The per-`UDF_INIT` key copies amendment A11 allows
-  (beside `gcm_decrypt`'s scheduled context and `gcm_encrypt_det`'s nonce key) are the one exception,
-  on the conditions in `crypto-safety.md` "Key handling".
+  (beside `gcm_decrypt`'s scheduled context and `gcm_encrypt_det`'s nonce key), and the key a `_kr`
+  function fetched from the keyring (amendment A13), are the exceptions, on the conditions in
+  `crypto-safety.md` "Key handling". In all six functions a row that raises gives up everything the
+  instance holds — a fetched key, both A11 states and the result buffer — before it returns
+  (amendment A16); never leave that to `deinit`.
 - A tag verification failure is an error when `gcm.strict=ON`. Do not swallow it as NULL. Never return
   unauthenticated plaintext.
 - The key length is 32, 24 or 16 bytes and selects the suite (amendment A10); the two encryption
@@ -157,12 +200,16 @@ different build method on your own.
   client/SDK.
 - Applications call the SQL functions through their existing MySQL driver. Driver integration is out of
   scope.
-- Python is used only for vector generation and verification, for the SQL E2E and load runners, and
-  for drawing documentation charts from committed measurements (`scripts/plot-perf.py`, which
-  encrypts nothing and reads no database). Vector generation uses `cryptography` only; hand-rolled
-  crypto primitives are forbidden.
+- Python is used only for vector generation and verification, for the SQL E2E and load runners, for
+  drawing documentation charts from committed measurements (`scripts/plot-perf.py`, which encrypts
+  nothing and reads no database), and for the leakage simulation of `tests/leakage` (amendment A17:
+  synthetic data, no cryptographic operation, no key material, shipped nowhere). Vector generation
+  uses `cryptography` only; hand-rolled crypto primitives are forbidden.
 - `scripts/gen-vectors.py` is an internal tool and exposes no public encrypt/decrypt/parse API. The E2E
   runner does its encryption and decryption through the server's SQL functions.
+- The conformance document and recipe (`docs/conformance.md`, amendment A18) are **not a client**: they
+  describe how a third party checks its own implementation against a server. Nothing in this repository
+  is that implementation, and the envelope being an open format does not change the two bullets above.
 
 **Review (`code-review.md`)**
 - Comment priorities are **P1 (blocks the merge) / P2 (resolve before merge) / P3 (optional)**, plus
@@ -225,7 +272,9 @@ There is one source for each concept and the rest are adapters **generated by
   not guess a signature and ship code that does not compile.
 - Commits: Conventional Commits (`feat(component): ...`, `fix(crypto): ...`, `test(mtr): ...`,
   `ci: ...`, `docs: ...`). One commit, one concern.
-- PRs: fill in every item of `.github/PULL_REQUEST_TEMPLATE.md`. Split a diff over 400 net lines.
+- PRs: fill in every item of `.github/PULL_REQUEST_TEMPLATE.md`. Split a diff over 400 net lines
+  (`.result` files, vector JSON and a `-KO.md` translation that mirrors its original in the same PR
+  are not counted).
 - **English first.** Everything committed — code, comments, commit messages, PR descriptions,
   documents, specs — is written in English. A document may carry a translation named
   `{document}-{LANG}.md` (`README-KO.md`, `docs/design-KO.md`); the English file is canonical and both
@@ -233,5 +282,6 @@ There is one source for each concept and the rest are adapters **generated by
   `spec/`. Korean strings in tests are **data** (`'홍길동'`, `LIKE '%김%'`) and are never translated.
   Full rule: `.agents/rules/docs.md`. **Conversation with the user is in Korean**, which is a separate
   matter from what gets committed.
-- Managed MySQL, proxies, key management systems themselves and keyring integration are out of scope.
+- Managed MySQL, proxies, key management systems themselves and anything about the keyring beyond
+  amendment A13's read-by-id (rotation, a key version in the envelope, writing keys) are out of scope.
   If asked for one, turn it back into a proposal to amend the design.

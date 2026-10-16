@@ -19,10 +19,13 @@ const PAGES = {
   "README.md": { route: "/overview/", out: "overview.md", title: "Overview" },
   "README-KO.md": { route: "/ko/overview/", out: "ko/overview.md", title: "개요" },
   "docs/ops-constraints.md": { route: "/ops-constraints/", out: "ops-constraints.md" },
+  "docs/like-recipes.md": { route: "/like-recipes/", out: "like-recipes.md", title: "SQL LIKE recipes" },
   "spec/envelope.md": { route: "/envelope/", out: "envelope.md" },
+  "docs/conformance.md": { route: "/conformance/", out: "conformance.md", title: "Conformance" },
   "docs/design.md": { route: "/design/", out: "design.md" },
   "docs/design-KO.md": { route: "/ko/design/", out: "ko/design.md" },
   "docs/perf.md": { route: "/performance/", out: "performance.md" },
+  "docs/leakage-ngram.md": { route: "/leakage/", out: "leakage.md", title: "N-gram leakage" },
   "CHANGELOG.md": { route: "/changelog/", out: "changelog.md" },
 };
 const ASSETS = "docs/assets";

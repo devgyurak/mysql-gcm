@@ -22,7 +22,7 @@ Style comes last.
 2. Automated review (the `code-reviewer` agent, plus `crypto-reviewer` on a crypto path): a
    prerequisite **before** human review, not a substitute for it.
 3. Human review: one reviewer for an ordinary PR. Two for the crypto, envelope and sysvar paths
-   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `spec/`).
+   (`src/gcm.cc`, `envelope.cc`, `nonce.cc`, `sysvar.cc`, `key_source.cc`, `udf_kr.cc`, `spec/`).
 4. Merge conditions: CI green + the required approvals + zero open P1 + zero P2 that has not been
    explicitly deferred.
 
@@ -35,6 +35,19 @@ Style comes last.
 - [ ] NULL, empty-string and maximum-length arguments are handled
 - [ ] Result charset tagging (`gcm_decrypt`) / BLOB (`gcm_encrypt*`)
 - [ ] A session sysvar is actually read as the session value
+- [ ] `_kr` functions (amendment A13): one keyring read per `UDF_INIT` and none in init, the reader
+      released on every path, id and account compared on every row, failures latched and never NULL,
+      every secret of the instance (fetched key, A11 states, result buffer) wiped by a row that
+      raises an error,
+      no key id, account or entry length or type in a message
+- [ ] Error-row wipe (amendment A16): in all six functions, every secret of the instance — the
+      fetched key, the A11 context and its key copy, the A11 nonce key, the result buffer — is given
+      up before it returns and the instance is left spent, so a call made afterwards is refused; a
+      row that ends in NULL (a NULL argument, or a tag mismatch under `gcm.strict=OFF`) is not an
+      error row and is not covered
+- [ ] Usage counts (amendment A14): counted in the instance and folded once (deinit and the error
+      row), never per row; no key-derived value in the table; nothing but a real seal or tag failure
+      creates a row; documentation never calls a count a key's usage
 
 **Safety (P1)** — grep for the blocked patterns in `crypto-safety.md`, check for keys or plaintext in
 logs, check that memory is cleansed
@@ -60,5 +73,13 @@ constraints (§6) is reflected in the README
 **Style (P3)** — the conventions in `stack-*.md`
 
 ## PR size
-- Over 400 net lines, ask for a split (excluding `.result` files and vector JSON). Do not mix a
-  refactor and a behaviour change in one PR.
+- Over 400 net lines, ask for a split. Not counted: `.result` files, vector JSON, and a `-KO.md`
+  translation that mirrors a document changed in the same PR (`README-KO.md`, `docs/design-KO.md` —
+  `docs.md` requires them there, so counting them would make every documented change look twice its
+  size). Also not counted: **generated assets checked byte for byte by a `--check` tool**
+  (`docs/assets/**`: the chart SVGs and the committed measurement JSON they are redrawn from, e.g.
+  `scripts/plot-perf.py --check` and `scripts/plot-leakage.py --check`). They are output, not authored
+  lines, and a reviewer reads the chart and its source data rather than the diff. The original is
+  counted, and the translation is still reviewed against it; a translation
+  changed on its own, or beyond its original, is counted. Do not mix a refactor and a behaviour
+  change in one PR.

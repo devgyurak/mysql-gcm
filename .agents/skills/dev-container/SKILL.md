@@ -18,6 +18,9 @@ The script is the source of truth. Read it rather than repeating it here. Only w
   server will not start.
 - The port is `0:3306`, and readiness is a `HEALTHCHECK` poll with a timeout. Never wait with a bare
   `sleep`.
+- `GCM_DEV_NAME=<name>` renames the container (default `mysql-dev-<major>`), which
+  `scripts/verify-nested.sh` uses to get the same keyring setup on a throwaway server without
+  touching the development one.
 
 ## Installing
 `plugin_dir` differs per image (the official OL-based images use `/usr/lib64/mysql/plugin/`). Do not

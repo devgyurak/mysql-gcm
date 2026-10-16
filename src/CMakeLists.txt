@@ -21,11 +21,15 @@ MYSQL_ADD_COMPONENT(gcm
   component.cc
   udf_encrypt.cc
   udf_decrypt.cc
+  udf_kr.cc
+  udf_usage.cc
+  key_source.cc
   udf_glue.cc
   sysvar.cc
   gcm.cc
   envelope.cc
   nonce.cc
+  usage.cc
   MODULE_ONLY
   LINK_LIBRARIES ${GCM_CRYPTO_LIBRARIES}
 )

@@ -65,9 +65,12 @@ Error open(const uint8_t key[32], const uint8_t nonce[12], span ct, span aad, co
   exception: under design amendment A11 `gcm_decrypt` keeps one scheduled context per `UDF_INIT` and
   re-initialises it with the nonce alone while the key bytes and the suite are unchanged. The copy of
   the key that makes that decision is compared with `CRYPTO_memcmp`, cleansed before it is replaced,
-  cleansed and forgotten on any cipher-operation failure (`bad_tag` included; the `bad_key_len` and
-  `bad_envelope` pre-checks leave it alone), cleansed in `deinit`, and never shared —
-  the full list is in `crypto-safety.md` "Key handling" and design A11. `gcm_encrypt` stays per call.
+  cleansed and forgotten on any cipher-operation failure (`bad_tag` included), cleansed in `deinit`,
+  and never shared; the `bad_key_len` and `bad_envelope` pre-checks leave it alone while the call
+  runs, and then that call raises, which under amendment A16 gives up every secret the `UDF_INIT`
+  holds — that context included — rather than waiting for a `deinit` the server does not always call.
+  The full list is in `crypto-safety.md` "Key handling" and design A11. `gcm_encrypt` stays per
+  call.
 
 ## Tests that must come with it (the unit-tests skill, GWT)
 Convert the IV-96 / tag-128 cases from the NIST CAVP `gcmEncryptExtIV256.rsp` and `gcmDecrypt256.rsp`

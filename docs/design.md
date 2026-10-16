@@ -6,6 +6,1470 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A18 (2026-10-16) — the envelope as an open format: a conformance kit, and A4 stands
+>
+> **Status: adopted (2026-10-16) — option 1, a conformance kit. A4 stands and is not amended; options 2
+> and 3 are not adopted.** This is a documentation decision: no file under `src/` changes, the envelope
+> bytes do not change, and `spec/test-vectors.json` and the public surface of `scripts/gen-vectors.py`
+> stay exactly as they are. Issue #36 proposed giving a team on a managed service a path: constraint 3
+> says this component cannot be installed on RDS, Aurora or Cloud SQL (no `plugin_dir`), so a team there
+> cannot adopt the project at all. If the same envelope were implemented in the application, that team
+> could encrypt and decrypt client-side now and move to a self-managed server later **without converting
+> data**, gaining server-side `LIKE` when it does. A4 removes exactly that obligation, so the default
+> answer was no; this amendment records why no is still the right answer, and what a third party is
+> given instead.
+>
+> ### The three options
+>
+> 1. **A conformance kit, no code.** The README states that the envelope is an open format, names the
+>    spec sections an implementation MUST follow, and presents `spec/test-vectors.json` as the
+>    conformance suite, with a server-based recipe for what byte vectors cannot check.
+> 2. **Reference clients in a separate repository**, under their own versioning and licence, tested
+>    against this repository's vectors and against a real server in E2E.
+> 3. **Clients in this repository.** Rewrites A4 and the Python rule (§5, `AGENTS.md`) and adds a
+>    release and a compatibility obligation per language.
+>
+> **Option 1 is adopted.** The format half of `spec/envelope.md` is already implementation-neutral and
+> the vectors already let a third party check an implementation, so the marginal cost is documentation
+> this repository would write anyway, and the conformance suite is a set of tests it already runs.
+> Option 2 creates a maintenance obligation with no owner — a second repository needs someone to keep
+> it equivalent, and "tested against a real server" is this repository's CI running code it does not
+> own. Option 3 rewrites A4 and the Python rule for a product that is not being built. **A4 stands**:
+> "no separate Python or Java encryption client is offered as a product" stays true, because option 1
+> ships no client — it ships the specification and the means to check one.
+>
+> **When option 2 would be reconsidered.** It may be reopened when both hold: a named maintainer owns
+> the separate repository, and this repository's CI does not execute the external code (it may
+> *reference* an external test target, never run it). Until then a reference client is an unowned
+> compatibility promise, which is the failure A4 exists to prevent.
+>
+> ### What a third-party implementation is told (the five questions of issue #36)
+>
+> 1. **Equivalence is the implementer's responsibility.** This repository provides two independent
+>    checks and no promise: the **vectors** check byte-level correctness (`spec/envelope.md` §6), and a
+>    **server-oracle recipe** (the change that follows this one, `docs/conformance.md`, pinned by
+>    `tests/integration/70_conformance_oracle.sql`) checks what bytes alone cannot — that the plaintext
+>    bytes and the AAD bytes an implementation seals are the ones the server would seal — by comparing
+>    its output against a real server's. The recipe will check AAD **bytes**; it cannot check the
+>    one-AAD-per-key convention, which no oracle can and which the implementer owns. Neither check
+>    proves the construction safe, and neither is a support commitment. A client's own seals are also
+>    invisible to `gcm_key_usage` (§4.3), so they have to be folded into the usage budget (constraint
+>    11) by hand.
+> 2. **Charset and AAD bytes.** A plaintext is the bytes of the argument *after* the server has
+>    converted a character argument to `utf8mb4`; a `binary` argument is not converted and its bytes
+>    are sealed unchanged. AAD is always `binary` and is never converted, so an implementation must fix
+>    the byte encoding of its AAD explicitly (a `latin1` connection and a `utf8mb4` connection otherwise
+>    send different bytes for the same visible string). An implementation MUST NOT normalise (NFC, NFD
+>    or otherwise) — the server does not, so a normalising client produces different deterministic
+>    ciphertext for the same visible string **against data the server sealed**, and breaks JOIN, UNIQUE
+>    and exact match across the migration this kit exists for. It MUST use the same `utf8mb4`
+>    conversion when it seals a *character* string, but it MUST seal opaque bytes unchanged: the server
+>    validates nothing here, sealing `UNHEX('ff')` and returning ill-formed `utf8mb4` on decryption
+>    (§2.3), and the conformance vectors include non-UTF-8 plaintexts, so a receiver that rejects bytes
+>    the server accepts fails the suite. Non-UTF-8 input is a boundary concern for the application, not
+>    a conformance rule. Two further facts carry over: `gcm_decrypt` tags its result `utf8mb4` for every
+>    version and converts nothing, and `gcm_encrypt_det` reveals equality (and, by length and
+>    repetition, frequency) of plaintexts — joins, UNIQUE and exact match only, never free text (§2.2,
+>    §3). The AAD rule follows from the same place: **one AAD byte-convention per key** across every
+>    server, column, application and client — a different AAD domain needs a separate key, and a
+>    ciphertext-equality join needs the same key *and* the same AAD bytes on both sides (§3). The random
+>    variant has no fixed-AAD requirement.
+> 3. **`gcm.strict` has no client equivalent.** On the server, `gcm.strict=OFF` turns a tag mismatch
+>    into NULL; a client is told to treat a tag failure as **always an error**, because a NULL that
+>    means "wrong key or tampered" is the one lenient behaviour a server operator may opt into and a
+>    client has no operational reason to reproduce it. `gcm.min_key_bytes` is likewise a server policy
+>    and applies to **sealing only**: the recommendation is **32**, the server default, so a truncated
+>    key is refused rather than silently selecting a weaker suite, but a decryptor MUST accept whatever
+>    key length the version byte states (§4.1) — a floor applied to decryption would lock out exactly
+>    the rows a migration has to read.
+> 4. **The key-cleanse guarantees do not carry over.** A11's per-statement context retention, A13's
+>    keyring read and A16's give-up-on-error rule are guarantees the component makes inside its own
+>    memory. In a garbage-collected runtime a client cannot make the same promises, and the
+>    conformance documentation MUST NOT repeat them.
+> 5. **This does not promise managed-service support.** Constraint 3 stands unchanged: this component
+>    is self-managed MySQL only. A client implementation is a way to interoperate with the format, not
+>    a supported managed-service offering, and nothing in this repository is tested against RDS,
+>    Aurora or Cloud SQL.
+>
+> ### v1 (`0x01`) is in the kit's scope, read-only
+>
+> An independent implementation is told it MAY decrypt `0x01` and MUST NOT produce it, exactly as the
+> server does. Because v1 is a legacy CBC format with no AEAD, its conditions are stated rather than
+> implied:
+>
+> - **Decrypt only.** Producing `0x01` is forbidden; the version exists only to read an existing column
+>   during a migration.
+> - **A 32-byte key only.** v1 is AES-256-CBC, and no other key length applies to it.
+> - **A non-empty AAD is `bad_envelope`,** as §2.3 and §4 already require — v1 predates AAD and cannot
+>   bind one.
+> - **The "not authenticated" warning is carried over as it stands:** a wrong key can return garbage
+>   rather than fail, because CBC padding is occasionally valid by chance.
+> - **No charset conversion at decryption.** A v1 plaintext is not converted, so a legacy non-UTF-8
+>   value comes back ill-formed, exactly as the server documents it.
+> - **The structural failures §2.3 and §4 name are `bad_envelope` on every `gcm.strict` setting:** a
+>   v1 shorter than 33 bytes, a body that is not a multiple of 16, and invalid PKCS#7 padding.
+>
+> ### Scope is unchanged: no client, and the Python rule stands
+>
+> A4 and the one extension A17 added to its Python scope are unchanged by this amendment. What this
+> repository will contain is a specification, the vectors it already has, and a document describing how
+> to check an implementation against a server. It will not contain an encrypt/decrypt client, a
+> reusable Python or Java API, or a reference implementation in any language.
+>
+> ### What follows
+>
+> This amendment is the decision. The document it calls for is the next change, after this one is
+> merged: the normative section list and the MUST rules in `spec/envelope.md`, `docs/conformance.md`
+> (the server-oracle recipe), the integration case that pins it, and the README section. Nothing else
+> changes. Issue #36 marks the E2E items of options 2 and 3 **not applicable**.
+>
+> | | Decision | Conditions | Reviewer | Date |
+> |---|---|---|---|---|
+> | A18 (first) | **adopt option 1; A4 stands** — blocked on the corrections below | Scope the UTF-8 rule (the server seals opaque bytes and its own vectors require it), add the one-AAD-per-key rule, the sealing-only scope of `gcm.min_key_bytes`, the deterministic-variant warnings, and the v1 structural failures | crypto-reviewer — scoped AI design review, separate from the author; **not a human cryptographic audit** (constraint 13) | 2026-10-16 |
+> | A18 (second) | **adopt option 1; A4 stands** | The corrections above applied; no P1/P2. Three P3 observations recorded: the one-AAD rule is duplicated into the charset answer, the non-ASCII-AAD byte-encoding claim is to be pinned by `tests/integration/70_conformance_oracle.sql`, and the CHANGELOG summary is tightened | crypto-reviewer — scoped AI design review, separate from the author; **not a human cryptographic audit** (constraint 13) | 2026-10-16 |
+
+> ## Amendment A17 (2026-10-14) — a keyed n-gram token index for partial match: a pre-registered leakage experiment
+>
+> **Status: declined (2026-10-14) — the experiment was run and the index is not adopted; no file under
+> `src/`, `spec/` or the vectors changed, and issue #38 closes with no implementation PR.** The
+> protocol below was **pre-registered** before the experiment ran, so the criteria could not be moved
+> once the result was seen; the result and the review are in the **Outcome** block at the end. That
+> review is a **scoped design review, not a human cryptographic audit** (constraint 13). The experiment
+> used Python only, under the A4 extension this amendment records ("Python scope").
+>
+> ### Why this is registered before it is run
+>
+> The project rule is that the design is amended before the code (`docs/design.md` §0,
+> `.agents/rules/architecture.md` §2). For an experiment the same rule means the *criteria* come
+> before the *result*, or the result decides them. The numbers in "Adoption criteria" are therefore
+> starting values, confirmed in the PR 1 review and **frozen once PR 1 merges**: after that they change
+> only by an amendment that says why, never because a result was inconvenient. A result that fails
+> them is a "declined" outcome, and declining is a successful outcome for the issue.
+>
+> ### The problem, and why the motivating query is the worst case
+>
+> Constraint 5: the functions are opaque to the optimizer, so `WHERE gcm_decrypt(col, @k) LIKE '%김%'`
+> scans and decrypts every candidate row. Measured on 300k rows: a serial p95 of 235–255 ms, ~1 s at 8
+> sessions and ~4 s at 32 (`docs/perf.md`). Issue #38 proposes a two-stage search — keyed n-gram
+> tokens in a side table with an ordinary index narrow the candidates, and the real decryption stays
+> the final filter, so a token collision costs time and never returns a wrong row.
+>
+> **The motivating query is the index's worst case.** `'%김%'` matches about a fifth of a real Korean
+> name column (김 alone is ~21% of the population). A unigram index over such a column leaks the most
+> and helps the least: the token `김` selects ~21% of rows, which is no selectivity worth an index. Any
+> adopted variant is judged on the whole query mix, not on the one query that motivated the issue.
+>
+> ### Threat model — who sees what
+>
+> A deterministic keyed n-gram token is the same token for the same n-gram, so an attacker who reads
+> the table sees a labelled graph of (row, token) edges. Four adversaries are in scope:
+>
+> - **S1 — snapshot.** A stolen backup, dump or replica: the token table, the ciphertext column (whose
+>   length the GCM envelope already exposes), the plaintext columns that are not encrypted, and public
+>   name statistics. The base case.
+> - **S2 — S1 plus a conditional prior.** S1 plus other plaintext columns (birth year, sex) that make
+>   the name prior conditional. The adoption criteria are judged on this adversary, because a real
+>   table has these columns.
+> - **S3 — S1 plus m known or injected rows.** S1 plus m rows whose plaintext the adversary knows or
+>   chose (a patient who registers under a name the adversary picked, or a leaked sample), for
+>   m ∈ {1, 10, 100, 1% of N}.
+> - **S4 — the log reader.** The search key and the search pattern reach the server logs
+>   (constraint 2), and the Korean bigram space is ~1.2×10⁸, so a holder of the search key can
+>   enumerate every token. **Not simulated — argued**, because the outcome is total by construction.
+>   S4 is why question 6 (component or recipe?) matters: a construction that never puts the search key
+>   on the server removes the log exposure.
+>
+> **Leakage outside the token multiset, listed so it is not forgotten:** physical and insertion order
+> (and therefore a row's first token, which for a name is the surname), the `ROW` binlog and the undo
+> log (change history), `mysql.innodb_index_stats` and index page fill (which tokens are hot), a buffer
+> pool dump, and any join back to `patient_id`.
+>
+> **Out of scope, deliberately:** active tampering, memory scraping, and volume/access-pattern query
+> recovery. They are real, and they are not what this experiment measures.
+>
+> ### What is modelled, and what is not
+>
+> Whatever the PRF is, the adversary sees the same (row, token) graph, so the simulation models the
+> token function as a **random injection** — an injective relabelling of the n-gram space — truncated
+> to `b` bits, which behaves as a random function for `b` below the space's entropy. **No
+> cryptographic operation is performed and the harness holds no key material.** This keeps the
+> extension to A4's Python scope as small as it can be and stops `tests/leakage/` from becoming a
+> second reference tokeniser the shipped component would then have to agree with.
+>
+> **The limit of that model:** it assumes an ideal token function. It does not measure the security of
+> any concrete PRF, and cannot — that is a separate argument, made where a construction is chosen. The
+> experiment measures **leakage from the token structure given an ideal tokeniser**, which is the view
+> the adoption decision needs.
+>
+> ### Data
+>
+> Only aggregates are committed, each with its source, licence and retrieval date; the licences are
+> checked before the data is committed.
+>
+> - Korean surnames: Statistics Korea, 2015 Population and Housing Census (KOSIS).
+> - Korean given names by birth year and sex: the Supreme Court's birth registration statistics.
+> - Latin surnames: the US Census 2010 surname list (public domain).
+> - Latin given names: US Social Security Administration baby names (public domain).
+>
+> N ∈ {5k, 50k, 300k, 1M}, seeds ≥ 20, and the adversary's knowledge is deliberately incomplete:
+> regional skew, cohort mismatch, top-K truncation and Dirichlet noise. Every recovery rate is
+> reported against the total-variation distance between the generator and the adversary's prior, so a
+> rate under a *perfect* prior is not mistaken for a rate under a realistic one.
+>
+> ### Attacks (a citation is checked against its source before it is written into A17)
+>
+> 1. **Frequency rank / maximum-likelihood matching** as an assignment problem.
+> 2. **Co-occurrence graph matching** under the n-gram uniqueness constraints (a bigram always
+>    co-occurs with its own unigrams; the most frequent token in a row is the surname).
+> 3. **Known-row seeding** for m ∈ {1, 10, 100, 1%}.
+> 4. **Row reconstruction:** token multiset → name, ordering the bigrams into a path.
+>
+> **Not attempted:** simulated annealing, query-recovery attacks, and learning-based attacks. Each
+> attack implementation is itself validated by a **known-answer test** on small data where the ground
+> truth is planted: the attack must recover 100% there and fall to the B0 level on a control with no
+> tokens.
+>
+> ### Metrics and baselines
+>
+> - **Leakage:** token recovery (unique and occurrence-weighted), per-row surname accuracy, full-name
+>   top-1 and top-5, and attack-independent structural metrics (the distribution of rows sharing an
+>   identical token set, and the unique-row fraction).
+> - **B0 — length and prior only.** The surname floor (~21%).
+> - **B1 — whole-name `gcm_encrypt_det`** (equality of the whole value only).
+> - **B1′ — split surname/given-name `gcm_encrypt_det`.**
+>
+> Every result is reported as an increment over B0 and B1, never in isolation. "The attack failed" is
+> not evidence of safety: the attack-independent metrics and the full-knowledge ceiling are reported
+> together with the attack results.
+>
+> ### Variants — every leakage number stands beside a utility number
+>
+> Utility is reported **with** leakage: the candidate-set blow-up a token query produces, the fraction
+> of queries the index can answer without a scan, and the storage cost. Leakage without utility is not
+> a result.
+>
+> - **V0** unigrams + bigrams + trigrams.
+> - **V1** bigrams only (strings shorter than 2 characters fall back to a scan).
+> - **V2** trigrams only.
+> - **V3** truncation at b ∈ {8, 12, 16} bits.
+> - **V4** homophonic (per-value multiple) tokens.
+> - **V5** dummy padding.
+> - **V6** per-row salt / Bloom (structurally impossible for this index — recorded, not simulated).
+> - **V7** no tokens (B1′ + scan) — the "decline" comparator.
+>
+> There is no real workload, so the query model is stated explicitly as three mixes: whole name, given
+> name alone, surname alone, and a single syllable.
+>
+> ### Normalisation — the invariant the index must not break
+>
+> **The designated final filter must never miss a row the index should have offered.** If a token is
+> computed on a normalised form the final `LIKE` does not use, the index silently drops rows the
+> decryption would have matched — the failure is missing results, not a slow query. Three candidate
+> answers:
+>
+> - **N1 — binary fixed:** `COLLATE utf8mb4_0900_bin LIKE`, giving up case- and accent-insensitivity.
+> - **N2 — let MySQL normalise** via `WEIGHT_STRING` (a hypothesis; to be verified).
+> - **N3 — a coarser key** (case-folded, accent-stripped) with a documented narrowing.
+>
+> PR 6 verifies this on real 8.0/8.4/9.x servers with **plain SQL only** — no component function and no
+> C++ — over a declared repertoire (Korean syllables and jamo variants, Latin-1 and extended, full
+> width) plus random multi-character pairs: there must be **zero** rows where `h LIKE '%q%'` holds while
+> `tokens(q) ⊄ tokens(h)`. A non-zero count is recorded as it stands, not blamed on the environment.
+> The measured comparison collation is `utf8mb4_0900_ai_ci` (`tests/integration/20_korean_like.expected`),
+> which is **not** the `utf8mb4_general_ci` that §5.3 names as the worked example; this amendment's
+> Outcome PR corrects that wording to the version-dependent truth instead of a label.
+>
+> ### Candidate constructions (question 6: the component, or a recipe?)
+>
+> - **C0 — decline** (V7 documented). The baseline outcome.
+> - **C1 — application recipe.** The search key never reaches the server; the cost is per-language
+>   segmentation and normalisation drift, and it sits in tension with A4.
+> - **C2 — no new function.** `SUBSTRING(gcm_encrypt_det(@g, @search_key), 2, 12)`: the deterministic
+>   nonce is a 96-bit PRF, but this freezes the envelope layout as API and reuses the deterministic
+>   label, so its separation rests on key independence alone.
+> - **C3 — a scalar function** `gcm_search_token(bytes, key)` over 16 bytes, with its own label and a
+>   `_kr` form to keep the key out of the logs.
+> - **C4 — the issue's JSON function** (highest cost).
+>
+> **A component function is chosen only if the selected construction cannot be expressed in SQL or in
+> the application.** The default is to add no shipped surface.
+>
+> ### Adoption criteria (registered values — frozen at the protocol commit, before the experiment)
+>
+> Judged on **S2** (the snapshot adversary with a conditional prior), incomplete side knowledge,
+> N = 300k, over ≥ 20 seeds. The experiment implemented **S1**, a lower bound of S2; see Outcome.
+>
+> **Leakage ceiling** against B1:
+>
+> - occurrence-weighted **token** recovery ≤ B1 token recovery + 10 pp;
+> - **surname** accuracy ≤ B1 surname accuracy + 10 pp;
+> - **full-name top-1** ≤ B1 top-1 + 5 pp, and **top-5** ≤ B1 top-5 + 5 pp;
+> - unique-row fraction ≤ 1.5 × B1′'s.
+>
+> **Utility floor** under the three-mix query model, with recall 100%:
+>
+> - p95 ≤ 0.5 × the scan's p95 at **1 session and at 32 sessions** (≥ 2×);
+> - the fraction of queries the index can answer without a scan is reported, not thresholded.
+>
+> A reviewer may change these numbers before PR 1 merges; no one changes them after.
+>
+> ### Python scope — the A4 extension
+>
+> A4 limits Python to vector generation and verification, the SQL E2E and load runners, and drawing
+> documentation charts from committed measurements. A17 **adds one narrow allowance:**
+>
+> > leakage simulation over synthetic data, performing no cryptographic operation and shipped nowhere.
+>
+> `tests/leakage/` is therefore a fourth Python site, and the last one. It builds no
+> encrypt/decrypt/parse API, holds no key bytes (it needs none — the token function is modelled
+> directly), and is imported by nothing that ships. `AGENTS.md` §5 and `.agents/rules/stack-python.md`
+> carry the same wording, so the rule and this amendment do not drift. The earlier chart allowance was
+> added to the rule alone and left A4's body stale; this amendment corrects that for its own case by
+> naming the extension inside A4 rather than only in the rule.
+>
+> ### Experiment harness conventions
+>
+> - Location `tests/leakage/` — not shipped, the same shape as `tests/load` and `tests/bench`.
+>   `scripts/check-architecture.py` reads only `src/` and `docker/`, so it is untouched.
+> - `ruff` (all rules) and `mypy --strict` — added to the explicit file list in `lint.yml`, which is
+>   what makes mypy check them — plus one `unittest discover` line. Test names are GWT, and case bodies
+>   contain no `if`/`for`/`while`.
+> - Randomness is seeded and marked: `random.Random(seed)  # noqa: S311 - synthetic names, not key
+>   material` (the precedent is `tests/load/run.py:104`). There are no key bytes to leak.
+> - `run.py` takes `argparse`, writes results as JSON on stdout and a summary on stderr. The full run
+>   is not in CI (it is slow); the result JSON is committed with its seed and command, and CI runs a
+>   small smoke only.
+> - The assignment problem is beyond pure Python at this N, so `numpy`/`scipy` are pinned exactly in
+>   `tests/leakage/requirements.txt` and applied to the top-K tokens only; the rest is greedy matching.
+> - Charts follow `scripts/plot-perf.py`'s deterministic SVG settings (`hashsalt`, path fonts,
+>   `Date: None`) in `scripts/plot-leakage.py --check`, emitted under `docs/assets/leakage/`, the only
+>   asset path the site copies.
+>
+> ### Outcome — the result, and the recommendation
+>
+> **The experiment is reported in [`leakage-ngram.md`](leakage-ngram.md).** The author's analysis, put
+> before the independent review recorded in the table below:
+>
+> - **The harness implements S1, not the registered S2.** It uses one unconditional prior and does not
+>   condition on the birth-year and sex columns, so attacks 1 and 2 are S1 attacks and the measured
+>   leakage is a **lower bound of S2**. Recorded as a deviation, not a pass.
+> - **The leakage ceiling fails on Korean under the S1 attacks alone.** Against B1 (whole-value
+>   equality only) the ceiling is B1 + 10 pp. Korean V0 recovers **20.7% (attack 1) and 17.3% (attack
+>   2)** occurrence-weighted, and 31.7% under the stronger S3 attack 3; Latin V0 is 10.2%, 26.5% and
+>   36.2%. That is 1.7–2.1× the ceiling on the S1 attacks, not a rounding. The decision is on Korean,
+>   the language the issue is filed for.
+> - **The variants that fall under the ceiling stop being an index.** V2 (trigrams) reaches 5.5% Korean
+>   but answers only 25% of the query mix; V7 (no tokens) recovers nothing and is the B1′ baseline it
+>   exists to be compared against.
+> - **The motivating query is the worst case.** `'%김%'` selects ~21% of the column, which is no
+>   selectivity worth an index.
+> - **V4 (homophonic) and V5 (padding) were not validly evaluated** and carry no claim. V5's shared
+>   dummies are stripped by the attack table. V4's utility is fine, but **the attack was not adapted to
+>   homophones** (a one-to-one assignment recovers only one of the h tokens of an n-gram); an adapted
+>   spot check in review measured about 20.9% on Korean, above the ceiling, so no V4 claim is made. Both
+>   are recorded in `results.json` and explained, not reported, in the results document.
+> - **Normalisation is answerable, but not by a binary key** — N2 (`WEIGHT_STRING`) holds both the
+>   whole-string and the n-gram containment checks; N1 has 6 counterexamples on every major measured.
+>
+> **Recommendation: decline (C0).** No construction in C1–C4 makes the index narrow the motivating
+> query enough to be worth a deterministic n-gram side table that leaks this much, and the project
+> does not reimplement collation for an unproven index (§5.3). Record the reason, close issue #38 with
+> no implementation PR, and point constraint 5 at the study.
+>
+> **The first reviewer's verdict, in its own words (2026-10-14, on the first harness):** "decline
+> (C0) — concur with the author. The Korean occurrence-weighted token recovery exceeds the frozen
+> ceiling under every variant that answers the query mix (38.8% at V0 vs a 10 pp ceiling), and it still
+> fails under the strict S2-only attacks (attack 1 = 25.5%, attack 2 = 27.4%); the motivating query
+> `'%김%'` is the index's own worst case; the utility floor is not demonstrated; and no construction
+> C1–C4 changes the structural leakage that fails."
+>
+> That verdict was on the **first harness**, whose tail-draw, Latin-name-format and V0-truncation
+> defects a later code review found; the fixes and the re-run are recorded in `leakage-ngram.md`, and
+> the corrected Korean figures are 20.7% / 17.3% (S1) and 31.7% (S3). The quote is left as it was
+> given; the reviewer did not see the corrected numbers.
+>
+> | | Decision | Conditions | Reviewer | Date |
+> |---|---|---|---|---|
+> | A17 (first) | **decline (C0)** — adopt none of C1–C4, on the first harness | Apply the review's P1/P2 corrections to `leakage-ngram.md` (the noise parameter, the S2/S3 caption, the Latin coverage, the attack-4 wording, and which criteria went unmeasured) | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
+> | A17 (second) | **decline (C0) upheld** on the corrected harness and result; declaring V4/V5 not-validly-evaluated instead of re-measuring is honest and sufficient | Sync the rewritten English Outcome into `design-KO.md`, remove or mark V4/V5 in the chart and its caption, and fix the chart subtitle to "Attacks 1-3" | crypto-reviewer — scoped AI design review, separate from the author; **not a human audit** | 2026-10-14 |
+>
+> Each review is a scoped design review of the amendment, the results document and the harness at the
+> revision it was given; none measured a PRF, and none is a human cryptographic audit.
+>
+> **No code, spec or vector change follows from A17**, and issue #38 closes with no implementation PR.
+> Constraint 5 points at [`leakage-ngram.md`](leakage-ngram.md). Revisiting the index would be a new
+> amendment: a construction that answers the collation invariant (N2), a stated and bounded leakage,
+> and its own pre-registered experiment.
+
+> ## Amendment A16 (2026-10-13) — a row that raises gives up every secret, in all six functions
+>
+> **Status: implemented and merged (issue #43; PRs #53 and #54, 2026-10-13, merged by the repository
+> owner after the reviews recorded below).** The rule is `give_up_secrets` in `src/udf_glue.cc`,
+> called by every row callback of all six functions; the refusal is `refuse_if_spent` beside it.
+> Pinned: `tests/adapter/udf_kr_test.cc` (the wipes, the refusal, and the two paths that were
+> unpinned until the second review) and `tests/integration/nested` (cases 20 to 26, per major).
+> Measured: `scripts/bench.sh --gate` on the merge, and the ASan/UBSan adapter run recorded on #54.
+> The server cause is read in `docs/upstream-udf-handler-leak.md`. **This revision — made while it
+> was still proposed — widened what the amendment *says*: the review of the whole #51–#55 stack
+> measured that the same server defect also drops instances that raise **nothing**, so the guarantee
+> is scoped to the row that raised and the limit is stated rather than implied.** A13 gave the three
+> `_kr` functions this
+> rule. This gives it to the three key-argument functions as well, and says why the cost is zero.
+>
+> A13's "The key copy" already requires it of a `_kr` row that raises: the fetched key, the A11
+> context, the A11 nonce key and the result buffer are given up at once, not at `deinit`. It stopped
+> there because the function that needed it most was the one holding a key the statement's text does
+> not contain. **The reason is not specific to those three functions.** A13 recorded the shape that
+> shows it, and the sweep added for #43 pins it — `tests/integration/nested`, in the PR that precedes
+> this one, which is also where A13's "not pinned by a committed case" sentence is corrected: when a
+> loadable function raises while the server is evaluating it as the argument of another one — which
+> needs the *inner* call to take a prepared-statement parameter, the one condition A13 names — that
+> function's `deinit` is not called, not at the end of the statement, not on `DEALLOCATE PREPARE`,
+> not when the session ends; and afterwards `UNINSTALL COMPONENT` is refused until the server
+> restarts. What that `UDF_INIT` held would have stayed in memory, unwiped, for the life of the
+> server — which is what the rule below exists to prevent for the instance that raises.
+>
+> **The decision.** Every row callback of all six crypto functions — `gcm_encrypt`,
+> `gcm_encrypt_det` and `gcm_decrypt`, and the three `_kr` forms — gives up, before it returns an
+> error to the server:
+>
+> - the key fetched from the keyring (a `_kr` function only, A13);
+> - the A11 states: the scheduled `EVP_CIPHER_CTX` with its key schedule behind `gcm_decrypt`, and
+>   the cached nonce key with the key copy it is valid for behind `gcm_encrypt_det` (`gcm_encrypt`
+>   keeps neither);
+> - the result buffer, which at that moment may still hold the previous row's output — plaintext
+>   for the two decrypt functions, an envelope for the four encrypt ones.
+>
+> The instance is then **spent**: a further call on it raises instead of using a released session. (A
+> NULL argument still yields SQL NULL — the NULL check comes first and consults no session,
+> spec/envelope.md §4 rule 3.) The latch is what makes the wipe observable, because no such call can
+> be made except by a test (the reason is read in the sources, not pinned — see the paragraph below).
+>
+> **Why the cost is zero.** A11's invariant list lets a pre-check failure leave the schedule intact,
+> on the grounds that "a wrong-length key on one row is that row's SQL error, not a reason to
+> discard a valid schedule". That a wrong-length key is that row's SQL error is exactly why
+> discarding it costs nothing: the row's error ends the execution. **Read in the 8.0.43, 8.4.11 and
+> 9.4.0 sources rather than pinned by a test**: `udf_handler::get_arguments` returns early on the
+> handler's error flag, so the row callback is not entered again after it has reported an error, and
+> the wipe runs while that statement is ending. No success path changes — a row that succeeds keeps
+> the context and the nonce key for the next row exactly as A11 says. Nothing here rests on the
+> three majors behaving alike in the nested shape: they do not (A13, "Implementation notes", case
+> `20`), and the rule is what makes that difference irrelevant to what the instance that raised
+> leaves in memory — not to what an instance the server abandons *without* an error keeps.
+>
+> **What it does not cover, deliberately.**
+>
+> - **A `bad_tag` that `gcm.strict=OFF` turns into NULL does not wipe.** The row succeeded as far as
+>   the server is concerned and the statement continues, so the session is still wanted. A11's rule
+>   already applies there: the core discards the copy, the context and the nonce key on the failure,
+>   and only a `_kr` function keeps its fetched key, because the next row must still decrypt (A13).
+>   The result buffer is left alone too: the statement has not ended, and whatever ends it wipes —
+>   `deinit` on success, A16 on an error row. What the buffer may hold past the current row's output
+>   is the previous row's output of that same statement, not a secret the statement's end leaves
+>   behind.
+> - **`deinit` is still the normal exit** and still cleanses everything (A11). A16 removes the
+>   reliance on `deinit` from the error path only.
+> - **The row that raised, and only it.** The rule fires from a row callback, so it can cover only
+>   an instance whose row reports an error. The same server defect also drops instances that raise
+>   *nothing* — a sibling of the function that raised, a key-id instance that sealed successfully,
+>   any function a failed re-prepare abandons — and the component never regains control of those, so
+>   what they hold stays, a fetched keyring key included. No row callback can close that; whether it
+>   could be reduced at the price of the cross-row reuse A11 and A13 exist for is an open question,
+>   and this amendment states the limit rather than implying a guarantee it cannot give. Cases `23`
+>   to `25` of `tests/integration/nested` pin the three shapes; `26` is the `const_item` variant of
+>   `20`, the control that says constness is not the trigger.
+> - **It does not fix the server defect.** A leaked instance is still leaked, and `UNINSTALL
+>   COMPONENT` is still refused until a restart. What A16 guarantees is that the leaked per-instance
+>   state **of an instance whose row raised** holds no key material, no plaintext and no usable
+>   context; the server's own argument buffers are outside the component's reach, as A11 already
+>   says. The defect is issue #43, pinned by `tests/integration/nested` and summed up in operational
+>   constraint 18; a fix would be the server's.
+> - **`init` failures are not part of it.** A9's rollback already frees what `init` allocated; A16 is
+>   about the row callback.
+>
+> **What A11 loses.** Its invariant list says the pre-checks "leave it intact … untouched by a
+> `bad_key_len` pre-check". That sentence is replaced above: the pre-checks still do not touch it
+> while the call runs, and the call then raises, which does. Nothing else in A11 changes — not the
+> byte layout, not the measurements, not the threat model.
+>
+> **Review record.** An independent `crypto-reviewer` pass (2026-10-13, this PR) read the six row
+> callbacks, `udf_glue`, `gcm`, `nonce`, `key_source`, `spec/envelope.md` and `crypto-safety.md`
+> against this draft. It found the enumerated secret set complete for component-owned state, and the
+> "cost is zero" argument sound — no shape in the repository enters one `UDF_INIT`'s row callback
+> again after an error. Four things it raised are fixed above: the result buffer holds an envelope,
+> not plaintext, in the encoding functions; the `get_arguments` claim and the uniformity of the three
+> majors are source reads, now marked as such, and the major difference in the nested shape is named
+> rather than smoothed over; the NULL path's result buffer now says why it is not wiped; and the
+> guarantee is scoped to the per-instance state. Three are left to the implementation PR and are in
+> the table below: `architecture.md` §3 and §5 and `docs/ops-constraints.md` 18 still tie the wipe to
+> the `_kr` functions; `spec/envelope.md` states the rule only inside §4.2, so §4 has to carry it for
+> all six; and `tests/adapter/udf_kr_test.cc` asserts on the latch where it lives today. It did not
+> review the server-side claim — that is the next PR's subject — and this is not a human
+> cryptographic review.
+>
+> **Second review (2026-10-13, the whole #51–#55 stack).** It measured a wider scope than the record
+> above assumed: a *sibling* function, a key-id instance that raised nothing (whose seal is then
+> never counted) and a re-prepare invalidated by `ALTER TABLE` — no nesting, no parameter, no error —
+> all leak the same way. The guarantee above is therefore scoped to the instance whose row raised,
+> the limit is stated, and `tests/integration/nested` gained cases `23` to `26` for the shapes.
+>
+> **Impact, for the implementation PR:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/udf_glue.{h,cc}` | A13's `give_up_secrets` moves here from `udf_kr.cc`; its `spent` latch is lifted from the keyring state (`KeyHold`) to the per-instance state, so one rule and one message serve all six functions |
+> | `src/udf_encrypt.cc`, `src/udf_decrypt.cc` | call it before every error they raise |
+> | `src/udf_kr.cc` | uses the moved helper; its own behaviour does not change, its tests do (next row) |
+> | `tests/adapter/udf_kr_test.cc` | its assertions on `spent` follow the field to `UdfState`; the new cases go here |
+> | `src/usage.cc` | unchanged: the error row still folds what the instance counted (A14) |
+> | `spec/envelope.md` | the error-path rule moves into §4 and becomes normative for the three key-argument functions (§4.2 rule 7 currently states it only for the key-id ones). One sentence; no byte layout and no vector change |
+> | `architecture.md` §3, §5 | both still say a `_kr` function's key is what a raising row wipes; they have to say all six |
+> | `docs/design.md` A13's "Implementation notes" and its KO mirror | the defect's scope is corrected there: the nesting, the bound parameter and the error are incidental, and cases `23` to `26` pin the wider shapes (done in the PR that records the sweep) |
+> | `docs/ops-constraints.md` 18, `README.md`/`README-KO.md` 18 | constraint 18 is restated around the real trigger — a prepared statement whose re-prepare fails after a function has been fixed — and says that an instance abandoned *without* an error keeps what it holds, this amendment's rule notwithstanding (done in the same PR) |
+> | `CHANGELOG.md` | a Documented entry, as A15 has |
+> | `crypto-safety.md` (key handling), `.agents/rules/code-review.md`, `AGENTS.md` §5 | the wipe is unconditional on the error path, for all six |
+
+> ## Amendment A15 (2026-10-13) — a key version in the envelope: rotation and dual-read for the key-id functions
+>
+> **Status: proposed (issue #34, the part amendment A13 deferred). Nothing is implemented by this
+> amendment, and it changes the envelope, so nothing may be implemented from it until it has had the
+> `crypto-reviewer` pass and two human reviewers.** It adds a version byte and a header. **It does
+> not change what is authenticated or how the deterministic nonce is derived** — earlier drafts
+> did, and "Why the header is not authenticated" below records what they proposed, why the first
+> was unsafe, and why the smaller design is the one proposed, on a reviewer's recommendation. No
+> draft of this amendment has had a human cryptographic review.
+>
+> **This proposes to drop one of the three things A13 said such an amendment would need.** A13's
+> "Out of scope" listed "an
+> authenticated id, a bound on which ids a stored value may name, and an answer to the per-row
+> lookup". The bound and the per-row lookup are answered below (the id comes from the statement;
+> at most four keys per `UDF_INIT`). The authenticated id is **not** provided: the header is not
+> authenticated, for the reasons in "Why the header is not authenticated", and that section says
+> what follows from it. Every security statement in this amendment is the author's and an
+> automated reviewer's reasoning; none has had an independent cryptographic review.
+>
+> A13 made the key a keyring entry named by id. It left rotation where it was: an application that
+> wants to move a column to a new key has to know, row by row, which key sealed it, and A13 refuses
+> a key id that varies by row, so even reading a half-rotated column takes one statement per key.
+> This amendment lets a row say which version of its key sealed it.
+>
+> ```
+> gcm_encrypt_krv(plaintext, key_id, key_version [, aad])      -> BLOB
+> gcm_encrypt_det_krv(plaintext, key_id, key_version [, aad])  -> BLOB
+> gcm_decrypt_krv(ciphertext, key_id [, aad])                  -> VARCHAR (utf8mb4)
+> gcm_envelope_key_version(ciphertext)                         -> BIGINT, NULL if the envelope has none
+> ```
+>
+> ### The envelope
+>
+> ```
+> 0x10 || suite(1) || key_version(4, big-endian) || nonce(12) || ciphertext || tag(16)
+> ```
+>
+> - **One new version byte, `0x10`, the "extended header".** What `0x02`–`0x07` say in one byte —
+>   which cipher, which nonce mode — moves into the `suite` byte, which **takes the same six values
+>   with the same meanings** (`0x02` AES-256 random … `0x07` AES-192 deterministic). There is no
+>   second table to keep in step, and adding a suite later (issue #37) adds one `suite` value under
+>   `0x10` instead of a new pair of version bytes for every combination. The proposal to #37 is
+>   that new suites exist only under the extended header.
+> - **`key_version`** is an unsigned 32-bit number, 1 to 4294967295, most significant byte first.
+>   Zero is not a version. (`spec/envelope.md` §2 says multi-byte fields have no endianness; this
+>   is the first that does, and the spec has to say so.)
+> - Overhead is 34 bytes instead of 29, and 34 is the shortest well-formed `0x10` envelope.
+> - `0x02`–`0x07` and `0x01` are untouched and stay readable. A build that predates this amendment
+>   rejects `0x10` as a reserved version (`spec/envelope.md` §2.6), which is the failure the spec has
+>   always promised: **0.1.0 cannot read these envelopes**, so a column must not be written with
+>   `_krv` while an older component may still have to read it. (Because the header is not
+>   authenticated, replacing the six header bytes by the `suite` byte alone yields an envelope an old
+>   build would open. That is not a supported way to read these values and nothing promises it will
+>   keep working.)
+> - **Only `gcm_decrypt_krv` reads `0x10`.** `gcm_decrypt` and `gcm_decrypt_kr` reject it with
+>   `bad_envelope`, in the new build too: the key that opens it is named by the header, and those
+>   functions are handed a key or one entry.
+> - The `suite` byte must agree with the length of the key, as the version byte must today; a
+>   mismatch is `bad_key_len`. An unknown `suite` — `0x01` included — or a `key_version` of zero is
+>   `bad_envelope`.
+>
+> ### Decisions
+>
+> - **The key for version N of `key_id` is the keyring entry `key_id` + `.v` + N** (`patient_name.v2`),
+>   for the calling account, with A13's rules for everything else: type `AES`, 16, 24 or 32 bytes,
+>   the length selecting the suite, `gcm.min_key_bytes` on encryption only. N is written in ASCII
+>   decimal with no sign and no leading zero. The convention is the component's;
+>   `SELECT keyring_key_generate('patient_name.v2', 'AES', 32)` makes a version.
+> - **A `_krv` `key_id` must not itself match `\.v[0-9]+$`** — on its `utf8mb4` bytes,
+>   case-sensitively, whatever the digits are (`a.v0` and `a.v01` are refused too) — and is 1 to 243
+>   bytes (`.v` and up to ten digits bring the entry id to A13's 255). Without the rule, the
+>   unversioned fallback of `_krv(…, 'a.v1')` would be the very entry that is version 1 of `a`: one
+>   id's plain key would be another id's version.
+>   An A13 id that ends that way, or is longer than 243 bytes, cannot be used with `_krv`.
+>   **The entry is still an ordinary keyring entry**: the A13 functions reach the same key as
+>   `'patient_name.v2'` — `gcm_decrypt_kr` opens with it and `gcm_encrypt_kr` seals plain
+>   `0x02`–`0x07` envelopes with it. The
+>   component does not prevent that, and it is not a nonce reuse: the two families derive and
+>   authenticate identically, so the same key, plaintext and AAD give the same nonce, ciphertext
+>   and tag in both. "One AAD convention per key" (constraint 7) therefore spans both families for
+>   such an entry.
+> - **Encryption names the version.** There is no "current version": the component does not
+>   enumerate the keyring to find the highest, and a setting that says which is current would be the
+>   `gcm.key_id` that A1 withdrew. Which version writers use is the application's configuration.
+>   `key_version` is taken, like every argument of these functions, as a string (requested as
+>   `utf8mb4` and compared as bytes, so a full-width digit is not a digit), and parsed strictly:
+>   ASCII digits only, no sign, no space, no leading zero, at most ten digits, a value
+>   from 1 to 4294967295. The strings `'02'`, `' 2'`, `'2.5'`, `'0'` and `'4294967296'` are errors, and
+>   NULL gives NULL. The rule is about the string the function receives, and the server decides what
+>   that is for a non-string argument. Observed with the A13 functions, by hand, on 8.0.46, 8.4.11
+>   and 9.4.0: the literals `2`, `02`, `2e0` and `0x32` all arrive as `'2'`, `TRUE` as `'1'`, `2.0`
+>   as `'2.0'` and `-2` as `'-2'`. So `TRUE` would be taken as version 1 and `0x32` as version 2 —
+>   harmless, but worth knowing; pass the version as a plain integer or a string of digits. Like the id, it must be the same on
+>   every row of a `UDF_INIT`: an encryption call site uses one key.
+> - **Decryption takes it from the envelope.** `gcm_decrypt_krv(ciphertext, key_id)` reads `suite`
+>   and `key_version` from the row. Whoever can write the column therefore chooses the version — but
+>   only among the versions of the `key_id` the statement names, under the calling account. A stored
+>   value cannot name another key id or another account's key.
+> - **It reads A13's envelopes too, but not the legacy one.** For `0x02`–`0x07`, which carry no
+>   version, `gcm_decrypt_krv` uses the entry `key_id` itself — A13's key. So a column written with
+>   `gcm_encrypt_kr` is read by `gcm_decrypt_krv` unchanged, and can be rotated row by row into
+>   versioned envelopes. **`0x01` is refused with `bad_envelope`**: it is unauthenticated CBC, and a
+>   new function has no installed base to keep it for. Accepting it would let whoever can write the
+>   column replace an authenticated value with an unauthenticated one — and not only by guessing
+>   past the padding check (about one time in 256): in CBC the IV is part of the stored value, so
+>   given a CBC row under the same key bytes, XOR-ing a difference into its IV XORs the same
+>   difference into the first plaintext block with certainty — to chosen values, if that block is
+>   known. The padding is untouched when the plaintext is sixteen bytes or more; for a shorter one
+>   the padding shares that block and survives only if the difference avoids it. It is a downgrade the existing functions carry for
+>   migration's sake (A3) and this one need not. A CBC column is migrated through `gcm_decrypt_kr` first.
+> - **Every key still in the keyring is still accepted.** A reader opens any version whose entry
+>   exists, and the unversioned entry `key_id` if that exists. Rotating after a compromise therefore protects nothing until
+>   the old entry is removed, and until then whoever can write the column can put an old envelope
+>   back. This amendment has no "minimum version" argument; whether it needs one is an open
+>   question.
+> - **At most four keys per `UDF_INIT`.** A13 allows one keyring read per `UDF_INIT`. A statement
+>   over a half-rotated column needs more than one key, so this is widened to a small table: up to
+>   four distinct keys (versions, and the unversioned entry if a row needs it — it counts as one of
+>   the four), each read once, on the first row that
+>   needs it, and held as A13 holds its one. The lifetime rules are A13's, applied to all of them:
+>   a row that raises an error wipes every held key, with the A11 states and the result buffer, and
+>   so does `deinit`; a `bad_tag` that `gcm.strict=OFF` turns into NULL keeps all of them, while the scheduled context
+>   is reset, as A11 requires after any cipher failure. There is
+>   still **one** scheduled decryption context (A11): a row whose key differs from the previous
+>   row's reschedules it from a held key — no keyring read, but the per-row setup cost A11 removed
+>   comes back for a column whose versions alternate. A14's fold becomes up to four names under one
+>   lock. **A row that needs a fifth is an error**, not an
+>   eviction: evicting would let whoever can write the column make every row cost a keyring read by
+>   alternating versions. Two is the steady state of a rotation; four leaves room for one that
+>   overlaps the next. A version that names no usable entry is A13's *no usable key*, and an error is
+>   final for the `UDF_INIT`, so a made-up version costs one read and one failed statement.
+>   **That is also a way to break reads**: one planted row with a version that has no entry fails
+>   every statement that scans it, with `gcm.strict` OFF as well — the same class as a malformed
+>   envelope today, which strict does not soften either. (It is an error and not that row's NULL
+>   for A13's reason: a key that cannot be had is misconfiguration, and `gcm.strict` has one
+>   meaning.) The "fifth key" error needs five versions that all exist, so it arises only where at
+>   least that many entries are still in the keyring. So that the row can be found, these two errors **do name the
+>   `key_version`**: it is a header field read from the stored value and not a keyring fact —
+>   `spec/envelope.md` §4 rule 4 already allows lengths and the version byte in a message, though
+>   today's messages carry lengths only. The
+>   finder is `WHERE gcm_envelope_key_version(col) NOT IN (…)`. A column that legitimately holds five
+>   versions cannot be scanned in one statement until some of it is re-sealed.
+> - **`gcm_envelope_key_version(ciphertext)`** parses the six header bytes with the same code the
+>   decryptor uses and needs no key: the version for a well-formed extended-header envelope, NULL
+>   for a well-formed `0x01`–`0x07` one, an error for anything else (shorter than its minimum, an
+>   unknown version byte or `suite`, a `key_version` of zero). The result is the loadable-function
+>   integer type, a signed 64-bit `BIGINT`, which holds every version. **It is not authenticated.**
+>   It tells which rows *claim* a version, which is what a re-seal job needs; it cannot prove that
+>   no row still depends on a key. Before an old entry is deleted, every row has to be opened — a
+>   tag check — and not merely inspected, because a rewritten header would hide a row from this
+>   function. **And opened with `gcm.strict = ON`, or with the NULL results counted**: with strict
+>   OFF a row whose header was edited to another version fails its tag silently, as a NULL, the
+>   scan finishes without an error, and the operator deletes the very entry that row needs.
+> - **Usage counts (A14) are per version, and use up names faster.** A14 defines the name as
+>   (account, `key_id`); for these functions it is (account, **entry id**), so `patient_name.v2` is
+>   read with `gcm_key_usage('patient_name.v2')`, and each version has its own row — closer to "per key" than A14 could
+>   get, since a new version is a new name, provided each version is a newly generated key. A14 bounds an account at 64 names and never evicts one,
+>   so a long rotation history counts against that bound.
+> - Everything else is A13's: the account boundary, definer routines, NULL, failure semantics, an
+>   error releasing every secret of the instance, no message naming an id, an account or an entry.
+>   A definer routine over `_krv` adds one thing to A13's oracle: its callers learn which versions
+>   exist.
+>
+> ### Why the header is not authenticated
+>
+> **Decision: the six header bytes are not part of the associated data, and the deterministic nonce
+> is derived exactly as today** — one label, `HMAC-SHA256(nonce_key, plaintext)[:12]`, the caller's
+> AAD the only associated data, and `spec/envelope.md` §3's "the AAD is not an input to the nonce"
+> unchanged. The header is as unauthenticated as the version byte of `0x02`–`0x07` already is.
+> Under the header, the bytes of a `0x10` envelope are those of the `0x02`–`0x07` envelope the same
+> key, plaintext and AAD would give.
+>
+> - **What that leaves open, exactly.** Whoever can write the column can edit the header, or rewrap
+>   a `0x10` envelope as a `0x02`–`0x07` one and back. **No plaintext is forged and none is
+>   revealed** (the author's and an automated reviewer's reasoning; not independently reviewed). If the entry the edited header points to holds *different* key bytes, the tag fails,
+>   as for any wrong key; if it holds the *same* key bytes — one key stored under two versions, or
+>   as `id` and `id.v1` — the value opens to the plaintext it always held. What an edit can do:
+>   1. **misreport the version** to `gcm_envelope_key_version`, which is not authenticated in any
+>      design; the rule above — open every row before deleting an entry — assumes it can be lied to;
+>   2. **flip the random/deterministic marker** in `suite`, which the decryptor ignores, exactly as
+>      it ignores the difference between `0x02` and `0x03` today;
+>   3. **give one value several stored encodings that all open** — another same-bytes version, the
+>      other marker, the unversioned form. So a `UNIQUE` index and ciphertext equality hold only
+>      against writers who cannot write the column: a copied deterministic row with an edited header
+>      is a duplicate the index does not see and a lookup does not find. That is already true of
+>      `0x02`/`0x03`; the header adds more ways to do it;
+>   4. **fail the statement**: a `suite` of another key length is `bad_key_len`, whatever
+>      `gcm.strict` says.
+>
+>   And a writer who can see outcomes learns, by trying, whether two entries hold the same key bytes
+>   (the value opens, or the tag fails) and each version's key length — an addition to the oracle
+>   described above.
+> - **Replay is the caller's AAD to prevent, as it is today.** An envelope can be copied into another
+>   row or another column sealed under the same key bytes, and it opens there. Binding a value to its
+>   row or column is what the caller's AAD is for — in random mode; constraint 7 forbids a per-row
+>   AAD for deterministic values. Nothing in this amendment changes that.
+> - **No new (key, nonce) reuse arises** (again by that reasoning, and not independently reviewed).
+>   "Key" here means key *bytes*. Under the same bytes, the
+>   same plaintext gives the same nonce, and with the same AAD the same ciphertext and tag: one
+>   message, however many headers it is stored under. A different plaintext gives a different nonce
+>   up to the 96-bit truncation `spec/envelope.md` §3 already accepts. The caller's obligation is the
+>   existing one, and its reach has to be said plainly: **constraint 7 and the usage budget span
+>   every version, id and family that hold the same key bytes.** Storing the A13 key again as
+>   `id.v1` and adopting a new AAD convention with it would break constraint 7. Each version SHOULD
+>   be an independently generated key, which makes every same-bytes case above disappear.
+> - **What the earlier drafts did.** The first put the header into the associated data and left the
+>   nonce as it was. That is unsafe: the same key bytes under two versions would seal the same
+>   plaintext with the same key and nonce and *different* associated data, the pair §3 forbids, and
+>   `crypto-reviewer` blocked it. The second also hashed the header into the nonce, under a second
+>   derivation label, which removes that reuse; it passed the automated `crypto-reviewer` with
+>   comments, on the assumption that HMAC-SHA256 is a PRF, and had no human or independent review.
+>   It is not what is proposed, for three reasons a reviewer gave:
+>   - what it protects against exists only where two entries hold the same key bytes, and there it
+>     prevents the edits listed above, none of which forges or reveals a plaintext;
+>   - it changes the associated data, adds a second label, needs new vectors for every suite, alters
+>     A12's cross-suite linkage, and leaves a confusion of its own (an A13 envelope whose caller AAD
+>     begins with the header bytes) — a larger surface in the part of the project that has had no
+>     independent cryptographic review;
+>   - either form can be added later as a further version byte, so the choice is which to commit to
+>     before any independent review: the one that leaves the cipher code as it is.
+> - **If an independent review asks for header binding**, it is added as a further version byte —
+>   `0x11`, "extended header, authenticated" — with the header in the associated data *and* hashed
+>   into the deterministic nonce under a second label; the one without the other is the unsafe first
+>   draft. `0x10` envelopes would stay readable, and stay editable in the ways listed above until
+>   they are re-sealed.
+> - A deterministic value is equal to another, as stored bytes, only within one key, one suite, **one
+>   version** and one envelope family, because the header is part of the stored value. The bytes
+>   after the header are equal whenever key bytes, plaintext and AAD are — so equal plaintexts stay
+>   linkable across versions and families that share key bytes, or whose keys are zero-extensions of
+>   one another. Because the derivation is unchanged, A12's observation carries over as it stands:
+>   a key and its zero-extension derive one nonce key, across versions, ids and families as across
+>   suites. "Pad the 16-byte key to 32 and call it version 2" is the resizing of one key into
+>   another that A12 and constraint 11 forbid.
+>
+> ### What rotation then looks like
+>
+> ```sql
+> -- 0. every reader of the column already calls gcm_decrypt_krv (it reads the A13 rows too)
+> SELECT keyring_key_generate('patient_name.v2', 'AES', 32);            -- 1. a new version
+> -- 1b. the SAME key bytes are in the keyring of every server that reads the column, under the
+> --     same id and account, before step 2 (constraint 14). Generating it again on each server
+> --     gives different bytes under one name.
+> -- 2. writers switch to version 2; readers cope with both:
+> SELECT id FROM patients WHERE gcm_decrypt_krv(name_enc, 'patient_name') LIKE '%길%';
+> -- 3. re-seal the rest, in batches, WITH gcm.strict = ON. Read every warning below this block
+> --    first: the nested call is not a tested shape on 8.0/8.4 (A7), and strict OFF loses rows.
+> UPDATE patients
+>    SET name_enc = gcm_encrypt_krv(gcm_decrypt_krv(name_enc, 'patient_name'), 'patient_name', 2)
+>  WHERE name_enc IS NOT NULL
+>    AND (gcm_envelope_key_version(name_enc) IS NULL OR gcm_envelope_key_version(name_enc) < 2)
+>    AND gcm_decrypt_krv(name_enc, 'patient_name') IS NOT NULL    -- never write a NULL back
+>  LIMIT 1000;
+> ```
+>
+> **Step 3 destroys data if it runs with `gcm.strict = OFF` and without that last predicate** — and,
+> independently of strict, if the nested call turns out to be one of the shapes A7 corrupts (below). A row whose tag fails — corrupted, or
+> with its header edited to a version that holds other key bytes — then decrypts to NULL, sealing
+> NULL gives NULL, and the `UPDATE` writes NULL over a ciphertext that its real version could still
+> have opened; `name_enc IS NOT NULL` then hides the row from every later batch. With the default
+> `gcm.strict = ON` the same row is an error and the batch stops, which is what a re-seal wants.
+> **Re-seal only with `gcm.strict = ON`.** But that setting is GLOBAL-only before MySQL 9.0 (A5)
+> and is read per statement, so checking it and then running is a race with whoever changes it —
+> and the natural moment to change it is exactly when a batch has stopped on a failing row, whose
+> error names no row, and someone turns strict off to find it with `… IS NULL`. Hence the last
+> predicate. **What it does is keep a NULL from being written, not make the job complete**: with
+> strict ON a row whose tag fails is still an error and the batch stops; with strict OFF that row
+> is skipped, and skipped again by every later batch, so it stays behind on its old version. A row
+> naming a version with no entry is an error under either setting. **Count the rows the job left
+> behind** before calling the rotation done, and **stop the job before turning strict off to look
+> for a failing row.** On MySQL 9.0 and later the race can be removed altogether:
+> `SET SESSION gcm.strict = ON` in the session that runs the job.
+>
+> The predicate has a price: the statement now has two instances of `gcm_decrypt_krv`, so each row
+> is decrypted twice, the keyring is read once per instance, and a tag failure is counted by A14 in
+> the `WHERE` instance.
+>
+> **The statement is a sketch, not a tested recipe for these functions**, which do not exist yet.
+> Two things are known about its shape:
+>
+> - It passes the result of one loadable function as the plaintext argument of another. Amendment
+>   A7 found that MySQL 8.0 and 8.4 hand a loadable function a stale view of some *computed* string
+>   arguments. For this shape, with the A13 functions that do exist — `gcm_encrypt_kr(gcm_decrypt_kr(c, id), id)`
+>   in an `INSERT … SELECT` and in an `UPDATE`, in both row orders, over eight rows of very
+>   different lengths including the empty string — every row came back intact on 8.0.46, 8.4.11 and
+>   9.4.0 (the servers of the pinned images; the 8.0 image runs 8.0.46 while the component is built
+>   against the 8.0.43 tree). That is one observation on three servers, run by hand with no committed test behind it,
+>   and not a guarantee across shapes; binary (non-UTF-8) plaintexts, which pass through a `utf8mb4`
+>   result into a `utf8mb4` argument in this shape, were not tried; the
+>   implementation has to pin it per major as `91_server_udf_arg_defect` pins A7, and until it does
+>   the conservative form is constraint 10's: decrypt into a real table and seal from it.
+> - It assumes the column holds no legacy `0x01` rows: the finder answers NULL for them, the
+>   statement would select them, and `gcm_decrypt_krv` refuses them. Migrate those through
+>   `gcm_decrypt_kr` first.
+>
+> A key id containing a dot was tried with `component_keyring_file` on the same three servers
+> (`it_dot.v2`, generated, sealed and opened through the A13 functions) and behaved like any other
+> — again by hand, with no committed test.
+>
+> The component does none of these steps itself. It does not rotate, schedule, or decide that a key
+> is old; A8's "the operator plans the rotation" stands. What changes is that the plan no longer
+> needs a second column or a statement per key.
+>
+> ### What it does not solve
+>
+> - **Deterministic columns.** Equality holds within one key version. During a rotation a `UNIQUE`
+>   index does not see two versions of one value as duplicates, and a join on ciphertext misses rows
+>   on the other version. A deterministic column has to be rotated as one migration, as A8 already
+>   says; the version in the envelope only makes its progress visible.
+> - **Old keys.** A version cannot be removed from the keyring while any row or backup still carries
+>   it. `gcm_envelope_key_version` says which rows claim to; only opening them — with
+>   `gcm.strict = ON`, or counting the NULLs — proves it; backups are the operator's to know. Every server that reads the column needs every version it may meet in
+>   its own keyring (constraint 14).
+> - **Constraint 2.** The plaintext and the `LIKE` pattern are still in the statement.
+> - **The nested-call defect (#43)** applies to these functions as to the others, and the re-seal
+>   statement above nests one inside another — with literals, which is not the shape #43 was
+>   observed in. #43 is about the *inner* call taking a prepared-statement parameter, and the
+>   implemented `_kr` functions answer it: `tests/integration/nested/17_kr_reseal_chain` prepares
+>   `gcm_decrypt_kr(gcm_encrypt_kr(gcm_decrypt_kr(c, ?), ?), ?)` with every key id bound, and it
+>   round-trips on 8.0, 8.4 and 9 with the component uninstalling cleanly afterwards — the column
+>   argument of the innermost call keeps the server from evaluating it early. What is still untried
+>   is `gcm_decrypt_krv` and `gcm_envelope_key_version` with a bound `key_version`: those do not
+>   exist yet, and the PR that implements them has to pin that shape per major the way A7's
+>   finding is pinned.
+>
+> ### Open questions for review
+>
+> 1. ~~Authenticate the header and hash it into the nonce, or neither?~~ **Proposed, on a
+>    reviewer's recommendation: neither** — see "Why the header is not authenticated". What stays open is whether an
+>    independent cryptographic review, when there is one, wants the authenticated form added as
+>    `0x11`.
+> 2. **Four keys per `UDF_INIT`** — the number, and error rather than eviction.
+> 3. **Four bytes of `key_version`.** Two would do for any real rotation history and save two bytes a
+>    row; four costs nothing to reason about.
+> 4. **The `.v` naming convention**, which makes `key_id` values containing `.v<digits>` at the end
+>    ambiguous to a human reader though not to the component.
+> 5. **Whether the unversioned fallback belongs in `gcm_decrypt_krv`** or should be a separate,
+>    explicit migration step; and **whether readers need a minimum-version argument**, so that an
+>    old key stops being accepted before its entry is deleted.
+> 6. **Issue #37**: whether new suites are extended-header only.
+> 7. **Whether `gcm_decrypt_krv` should refuse a second key whose bytes equal one it already holds**
+>    (a constant-time comparison among at most four). It would remove every same-bytes case within a
+>    statement, at the cost of failing the "version 1 is the key we already had" shortcut loudly.
+>
+> **Sequencing.** After A13 and A14. Not backward compatible for readers: see "0.1.0 cannot read
+> these envelopes" above. It needs its own release note and a `spec/envelope.md` version bump.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `spec/envelope.md`, `spec/test-vectors.json` | v4: the `0x10` layout and its big-endian field (§2 says there is none), the `suite` values and the key-length rule of §2.5 restated for them, the reserved range of §2.6, that the header is not authenticated, §1's "nothing else distinguishes them", §4.2's "one key per statement instance" and its rules 5–7 for the four-key table, messages that may carry `key_version` (§4 rule 4). §3 is unchanged. Project vectors for every suite under the extended header: each is an existing `0x02`–`0x07` vector's nonce, ciphertext and tag behind a six-byte header, so the cryptographic content is already pinned by the existing vectors and the NIST KAT |
+> | `src/envelope.{h,cc}`, `src/gcm.{h,cc}` | parsing and building the header, and the entry points that write and read an envelope carrying it. **No change to the cipher calls, the associated data, or `src/nonce.{h,cc}`** |
+> | `src/udf_*.cc`, `src/udf_glue`, `src/key_source` | the four functions; strict parsing of `key_version`; up to four held keys per instance and their wiping; messages that say "suite" where they mean the `suite` byte (today's "does not match the envelope version" and the `suite_for_version` name would otherwise blur "version `0x03`" and "suite `0x03`") |
+> | `spec/envelope.md` §4.3, `src/usage`, `src/udf_usage.cc`, `docs/ops-constraints.md` 19 | the usage name for these functions is (account, entry id), and how a version's count is read |
+> | `tests/unit`, `tests/adapter`, `tests/integration`, `mysql-test` | vectors; a changed header (fails under a different key, opens under the same key bytes — both pinned); mixed-version statements; the fifth key; the unversioned fallback; a rotation end to end |
+> | `crypto-safety.md`, `architecture.md` | "lengths and the version byte are as far as it goes" widened to the `suite` and `key_version` of a stored header; the widened key table (up to four fetched keys per instance) — which is a cross-row value keyed on (account, entry id) and so has to be named as an exception to the blocked pattern "a cross-row cache keyed on anything but the full key bytes". The grounds differ from A13's one key: there the id is the caller's whole input, here the stored header chooses among entries, which is why the table is bounded and a fifth key is an error; the other blocked patterns. The label rule and "AAD is not an input to the nonce" are unchanged |
+> | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the functions, the compatibility note, rotation guidance including "re-seal only with `gcm.strict = ON`" and "open every row with `gcm.strict = ON`, or count the NULLs, before deleting an old entry". `AGENTS.md` §2 ("withdrawn … a key id or key version in the envelope") and §9 ("out of scope: … a key version in the envelope") both become wrong when this is implemented and change with it |
+
+> ## Amendment A14 (2026-10-12) — per-key usage counts for the key-id functions
+>
+> **Status: implemented and merged (issue #35; PRs #44, #45 and #46, 2026-10-13, merged by the
+> repository owner after the reviews recorded on those PRs).** The table is in `src/usage`, the
+> function in `src/udf_usage.cc`, the counting and the fold in `src/udf_kr.cc` and
+> `src/udf_glue.cc`. Pinned: the table in
+> `tests/unit` (18 cases, threads included); the wiring in `tests/adapter/udf_usage_test.cc`;
+> `tests/integration/63_kr_usage` on 8.0, 8.4 and 9.4; `mysql-test/suite/gcm/t/gcm_kr_usage` on
+> 8.4; and on a server with no keyring, where the function still answers. Pinned since: the counts
+> lost by an instance the server abandons without de-initialising it, which
+> `tests/integration/nested/24_nonraising_kr_inner` produces — the seal inside the leaked instance
+> is not in the answer, and the instance's own figures never fold (issue #43).
+>
+> Amendment A8 and operational constraints 11 and 13 tell every deployment to set a usage budget per
+> key and then say "the component does not count uses", so the operator has no number to compare the
+> budget with. Amendment A13 gave a key a name the component may publish. This adds a count under
+> that name, and one function to read it.
+>
+> ```
+> gcm_key_usage(key_id)  -> VARCHAR (utf8mb4), a JSON object as text
+>   {"random_seals":N,"det_seals":N,"bytes_sealed":N,"tag_failures":N,"since":T,"complete":true}
+> ```
+>
+> **What the number is, and it is less than it looks.** A row is *the calls this server has made
+> through the key-id functions under this name since it started counting*. It is **one input** to
+> the budget A8 asks for, not the budget, and the documentation says so wherever the number appears.
+> `random_seals` is a lower bound on the nonces drawn under the key those bytes are. `det_seals` is
+> not a bound on anything: it counts **calls**, so a repeated lookup
+> (`WHERE c = gcm_encrypt_det_kr(?, 'id')`) and an evaluation folded at optimisation each add one
+> though they seal no new message. (Measured in the implementation: a lookup with a constant
+> argument adds three per statement on 8.0, 8.4 and 9.4.)
+>
+> - The budget is about key **bytes**; the count is about a **name**. The same bytes under another id
+>   or another account are counted separately. An id whose entry was removed and generated again is
+>   a new key under an old name, and the count carries on. The component cannot tell either case
+>   without keeping something derived from the key bytes. A11 rejected a hash of the key even as a
+>   cache key, and this amendment does not introduce a retained key-derived value either.
+> - **The key-argument functions are not counted at all**: they have no name to count under. A
+>   deployment that uses both families has a count that is not the total, and
+>   `keyring_key_fetch` lets an application move a keyring key into that uncounted family.
+> - Other servers are other counts. A replica under ROW replication calls no function and counts
+>   nothing; copying or restoring an envelope is not a seal.
+> - It starts again from zero when the server restarts or the component is reinstalled. A reader
+>   detects the reset by **`since` changing or a count being smaller than the one it last read**,
+>   not by `since` alone: `since` has one-second resolution and follows the wall clock, so a
+>   reinstall within the same second leaves it unchanged, and a clock stepped backwards can make
+>   it earlier. The ledger A8 asks the operator to keep holds the previous value to compare with.
+> - Counts held by an instance that neither raises an error nor is de-initialised are lost. Issue
+>   #43 shows the server skipping `deinit` in one shape (observed on 8.0, 8.4 and 9 —
+>   `tests/integration/nested`); the fold in the error row covers the case where the instance
+>   itself raised, and nothing covers the rest.
+>
+> ### Decisions
+>
+> - **The name is (calling account, key id)** — A13's namespace, `priv_user@priv_host` and the id.
+>   `gcm_key_usage` answers for the caller's own account only, which is the boundary A13 already has
+>   and needs no new privilege. There is no cross-account view; an operator reads it as each account,
+>   or through a `SQL SECURITY DEFINER` routine with the id hard-coded, as for A13 — and such a
+>   routine shows its callers the definer's volume and tag failures, which is a decision for
+>   whoever writes it.
+> - **It reads no keyring.** The function looks up a name in the component's own table. It does not
+>   check that the id names a key: a name with no counts answers zeros. `key_id` is validated as in
+>   A13 (1 to 255 bytes after conversion to `utf8mb4`, no NUL); a NULL argument gives NULL.
+> - **What is counted.** `random_seals` and `det_seals`: successful calls of `gcm_encrypt_kr` and
+>   `gcm_encrypt_det_kr`. `bytes_sealed`: the plaintext bytes of those calls, as sealed — after the
+>   conversion to `utf8mb4`, without the AAD. `tag_failures`: `gcm_decrypt_kr` calls that ended in a
+>   tag mismatch, with `gcm.strict` ON or OFF — forgery attempts count against the GCM bound too
+>   (NIST SP 800-38D), and it is the one number here that can show an attack; it also counts an
+>   honest mistake, such as opening a value under the wrong key id. Successful decryptions and failed
+>   seals are not counted. A call counts when it returns, whether or not the statement later fails or
+>   its transaction rolls back. Counts are 64-bit and saturate.
+> - **When a name gets a row.** Only when a `_kr` function folds a non-zero count, which it can only
+>   have after the keyring gave it a usable key under that name. `gcm_key_usage` never creates a
+>   row, and neither does a key-source failure, a floor refusal or a NULL argument. So a row cannot
+>   be made for a name that has no key.
+> - **`since`** is the Unix time, in seconds, at which the component began counting (its
+>   initialisation). **`complete`** is false once a name of **the caller's account** did not fit —
+>   see below — and then some use by that account is in no row. It says nothing about any other
+>   account.
+> - **One fold per `UDF_INIT`, nothing per row.** A `_kr` function counts in its own `UDF_INIT`
+>   state, in plain integers, and folds them into the component's table when the instance ends: in
+>   `deinit`, and in the row that raises an error, because the server was observed not to call
+>   `deinit` after one (issue #43). The counters are zeroed by the fold, so an error row followed by
+>   a normal `deinit` does not count twice, and an instance with nothing to fold takes no lock. The
+>   fold uses the account and the id recorded when the key was read, not a fresh look at the caller.
+>   So a statement's own counts are not visible while it runs, and a `gcm_key_usage` call in the same
+>   statement as the seals it would count sees the earlier value. **The exception is A13's:** through
+>   a definer stored *function* the server makes a `UDF_INIT` per row, so that shape takes the
+>   table's lock once per row, on top of the keyring read it already costs.
+> - **No persistence, no thresholds.** Issue #35 proposed both. A count persisted by the component is
+>   rolled back by a restore, which A8 warns about, and the server offers no shutdown notification
+>   to a component on 8.0. A refusing threshold without persistence is undone by a restart and would
+>   look like enforcement while being none. The durable ledger and the alert are the operator's
+>   monitoring system reading this function — which is where A8 already puts the ledger.
+> - **No new server service**, no envelope change, no change to the core.
+>
+> ### The component's first shared state
+>
+> Until now the component held nothing between calls but the fetched algorithms and its two system
+> variables. The table of counts is shared, mutable, and lives from component init to deinit.
+> `architecture.md` §3 asks for a stated lifetime and synchronisation for any such state:
+>
+> - **Contents:** names (account and key id — not secret, and already visible in
+>   `performance_schema.keyring_keys`) and integers. **No key bytes and nothing derived from them.**
+> - **Synchronisation:** one mutex, taken once per `UDF_INIT` to fold and once per `gcm_key_usage`
+>   call to read. Never on the row path of an encryption or decryption.
+> - **Bound:** at most 64 names per account and 1024 in total. A use under a name that does not fit
+>   is not attributed, and `complete` turns false in that account's answers from then on. The
+>   per-account bound is what keeps one account from switching counting off for the others: an
+>   account that fills its share loses its own later names and changes nothing in anyone else's
+>   answer. The whole table fills when sixteen accounts each hold their 64 names — which needs no
+>   collusion, only that many busy accounts. From then on every new name is lost: an account that
+>   has rows is told `complete: false` when it loses one, and an account with no row at all is told
+>   `false` as soon as any rowless account has lost a use, because the table has nowhere to keep
+>   which one. That last case is the one way another account's use shows in an answer. Names are never evicted: evicting would make a
+>   count go backwards.
+> - **Lifetime:** created in init before any function is registered, released in deinit after every
+>   function is unregistered. An instance the server never de-initialises (issue #43) has already
+>   folded in the row that raised.
+> - **Where it lives:** a module with no server dependency, so `tests/unit` covers it, concurrency
+>   included.
+>
+> ### What stays as it was
+>
+> The component still does not hold a budget, rotate a key, detect a repeated nonce, or enforce an AAD
+> policy (constraint 13). A8's instruction to sum **every** use of a key across servers, columns and
+> applications stands; this gives one of the numbers to sum.
+>
+> **Sequencing.** After the key-id functions (A13), in the same minor release. Backward compatible:
+> one more function.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/` | the table of counts as a server-free module; the counters in the per-instance state and the fold in `deinit` and on the error row; the `gcm_key_usage` UDF; init and deinit of the table in `component.cc` |
+> | `spec/envelope.md` | the function's argument contract and the meaning of each field |
+> | `tests/unit`, `tests/adapter` | the table (folding, the bound, concurrent folds); when a count becomes visible, the error-row fold, account isolation, that the key-argument functions add nothing |
+> | `tests/integration`, `mysql-test` | counts after seals of each kind and after a tag failure, on every major |
+> | `architecture.md` §1, §3 and §5, `crypto-safety.md` (operational responsibility: "do not assume the component counts per-key usage") | the module, the component-level state and its rules; that the table holds no key material; what may and may not be assumed from a count |
+> | README, `docs/ops-constraints.md` 11 and 13 and a new item, §6's A8 entry, A13's "the component still counts nothing", `AGENTS.md`, `CHANGELOG.md` | the function, and what is now counted and what still is not |
+
+> ## Amendment A13 (2026-10-12) — functions that take a key id and read the key from the keyring
+>
+> **Status: implemented and merged (issue #34; PRs #39, #40, #42 and #41, 2026-10-12, merged by the
+> repository owner after the reviews recorded on those PRs).** It changes
+> key handling and widens what amendment A11 lets a `UDF_INIT` keep. "Implementation notes" at the
+> end of this amendment records what the implementation pinned, what it only observed, and one
+> server defect it ran into (issue #43).
+>
+> Amendment A1 withdrew the keyring design and left the door open: "the keyring approach can be
+> revisited later as an optional feature (something like `gcm_encrypt_kr`)". This is that revisit. It
+> **adds** three functions and changes none of the existing three; taking the key as a SQL argument
+> stays the default and stays supported.
+>
+> ```
+> gcm_encrypt_kr(plaintext, key_id [, aad])       -> BLOB     random nonce
+> gcm_encrypt_det_kr(plaintext, key_id [, aad])   -> BLOB     deterministic
+> gcm_decrypt_kr(ciphertext, key_id [, aad])      -> VARCHAR  charset tagged (utf8mb4)
+> ```
+>
+> **What it closes, and what it does not.** Operational constraint 2 has two halves. With these
+> functions the *key* is not an argument of the encryption and decryption statements, so those
+> statements no longer carry it into the general log, the slow log,
+> `performance_schema.events_statements_*` or the binlog. A key created with `keyring_key_generate`
+> never appears in a statement at all. **Importing an existing key does, once**:
+> `keyring_key_store('id', 'AES', <key>)` is a statement with the key in it, and `keyring_key_fetch`
+> returns the key to any session of the account that owns it. The *plaintext* argument and a
+> `LIKE '%김%'` pattern are still in the statement. Constraint 2 shrinks; it does not go away.
+>
+> ### Decisions
+>
+> - **The envelope does not change.** The functions produce `0x02`–`0x07` exactly as
+>   `spec/envelope.md` defines them, `gcm_decrypt_kr` reads everything `gcm_decrypt` reads — the legacy
+>   `0x01` envelope included, through the same core path and with A3's conditions — and no vector
+>   changes. A row written by `gcm_encrypt(…, key)` is
+>   readable by `gcm_decrypt_kr(…, id)` when the keyring holds the same key bytes under `id`, and the
+>   reverse. That is the migration path and a server test pins it.
+> - **The key id is an explicit argument of all three functions.** Issue #34 proposed reading the id
+>   from the envelope on decryption. That is deferred (see "Out of scope"): it needs new version
+>   bytes, lets whoever can write the column choose the key, and makes the keyring lookup per row.
+> - **The key is read through `keyring_reader_with_status`**, with the keyring `auth_id` set to the
+>   caller's `priv_user@priv_host`. This is the namespace the server's own general-purpose keyring
+>   functions (`keyring_udf`) use, so `SELECT keyring_key_generate('id', 'AES', 32)` creates a key
+>   these functions can use and whose bytes were never in a statement. The component does not create,
+>   store or remove keys.
+> - **Authorisation is that namespace.** MySQL has no privilege for invoking a loadable function and
+>   the keyring reader service checks none, so "who may call" cannot be the boundary. "Which key" is:
+>   an account can use only the keys stored under its own `priv_user@priv_host`. No dynamic privilege
+>   is registered. Two differences from `keyring_udf` are deliberate and stated: its functions also
+>   demand the global `EXECUTE` privilege and these do not (reading one's own key is the whole
+>   function); and the `user@host` string is ambiguous for an account name containing `@`, which is
+>   inherited from `keyring_udf` rather than fixed here, since fixing it would leave its keys
+>   unreachable. An account with an empty `priv_user` (anonymous) is refused: it is not one principal.
+>   The namespace is a *string*, with what follows from that and has not been tried: an account
+>   dropped and created again under the same name reaches the old account's keys, `RENAME USER`
+>   leaves them behind, and under a proxy the name is whatever `priv_user` reports. And whoever may
+>   create a routine with another account as its definer (`SET_USER_ID` on 8.0, `SET_ANY_DEFINER`
+>   from 8.2) can use that account's keys; that privilege is already equivalent to being the account.
+> - **Sharing a key between accounts** goes through a stored routine with `SQL SECURITY DEFINER`:
+>   inside it the security context is the definer's, so the definer's keys are used. A view does
+>   **not** do this — a function in a view runs as the invoker, whatever the view's `SQL SECURITY`.
+>   Such a routine is an oracle for its callers over whatever it lets them choose, so it **hard-codes
+>   the key id and the AAD**; neither is a parameter. And its shape matters (observed below): a
+>   stored *function* gets a new `UDF_INIT` on every invocation, so `SELECT f(col) FROM t` reads the
+>   keyring once per row; a stored *procedure* that contains the whole statement reads it once.
+> - **When a call fails with *no usable key*, diagnose as the same account**: `SELECT CURRENT_USER()`
+>   gives the namespace (`app@localhost` and `app@%` are different ones), and
+>   `keyring_key_type_fetch('id')` and `keyring_key_length_fetch('id')` give what is stored — both
+>   need the global `EXECUTE` privilege. The component's message will not say which it was.
+> - **The key must be of keyring type `AES` — compared exactly, in that case — and 16, 24 or 32
+>   bytes.** The length selects the suite and
+>   nothing else does (A10). `gcm.min_key_bytes` applies to the two encryption functions and never to
+>   `gcm_decrypt_kr`, exactly as for the existing functions.
+> - **The key id** is 1 to 255 bytes with no NUL byte, after the server has converted the argument to
+>   `utf8mb4` — which is what `keyring_udf` asks for its own string arguments (read in
+>   `plugin/keyring_udf/keyring_udf.cc`, all three trees), so a non-ASCII id names the same entry from
+>   either side. The bound is this component's, chosen to keep the id in a fixed buffer.
+> - **At most one keyring read per `UDF_INIT`, on the first row whose arguments are all non-NULL.**
+>   Not in `init`: see the observation below. Every later row of that `UDF_INIT` must bring the same
+>   id bytes; a different id is an error. An id that varies by row (a column) is therefore refused on
+>   the second distinct value. The id is not secret and is compared with `memcmp`. The account the
+>   key was read under is recorded with it and compared on every row as well — reading the security
+>   context touches no keyring — so "the account does not change within a `UDF_INIT`" is enforced
+>   rather than assumed; a change is an error. The order on a row is: NULL check, id and account
+>   check, the keyring read if this is the first such row, then the core. The read asks for the
+>   entry's lengths first and for its bytes only when they are those of an `AES` entry of a suite
+>   length, so this component never requests the bytes of an entry it will not use. How many
+>   `UDF_INIT`s a statement has is the server's decision, not the component's — see the stored
+>   function above. Pass the id as a literal, a user variable or a bound parameter: a *computed* id
+>   is subject to the 8.0/8.4 argument defect of A7 like any other argument.
+> - **A NULL argument gives SQL NULL** with no keyring access and no id check
+>   (`spec/envelope.md` §4 rule 3).
+> - **Every key-source failure is an error regardless of `gcm.strict`,** and `gcm.strict` keeps its
+>   one meaning — a tag mismatch. There are four, and no more are distinguished:
+>   *keyring unavailable* (the reader's `init` or a fetch failed); *no usable key* (no entry under
+>   this id for this account, or an entry that is not type `AES` with a length of 16, 24 or 32 —
+>   **one message for all three**, so that entries of another type or an odd length are not
+>   revealed); *invalid id* (empty — which the server's keyring also asserts on in a debug build —
+>   over 255 bytes, a NUL byte, or different from the first row's);
+>   *no caller account*, which includes an account that changed between rows. No message carries
+>   the key id, the account, or the length or type of a keyring entry. **This narrows an oracle and
+>   does not close it**: a definer routine that took the id as a parameter would still tell its
+>   callers which ids name a usable AES key and how long it is — through the `gcm.min_key_bytes`
+>   refusal, through the key-length error a crafted envelope of another suite draws, through
+>   *keyring unavailable* differing from *no usable key*, and through timing, which nothing here
+>   equalises. That is why such a routine hard-codes it.
+> - **An error is final for the `UDF_INIT`.** The server does not call a function's row callback
+>   again once it has reported an error — `udf_handler::get_arguments` returns on the handler's
+>   error flag; read in the 8.0.43, 8.4.11 and 9.4.0 sources — so no row follows a key-source
+>   failure, or any other error, in the same `UDF_INIT`. The implementation records the failure as
+>   well, so that a call made anyway is refused rather than served.
+> - **`gcm_encrypt_det_kr` declares `const_item`, as `gcm_encrypt_det` does** — a constant lookup on a
+>   UNIQUE index is what the variant is for. The consequence is that the keyring read can happen
+>   while the statement is being optimised, in the caller's session and under the caller's account.
+>   Whether `EXPLAIN` of a statement holding a constant `gcm_encrypt_det_kr` call reads the keyring
+>   was not observed.
+> - **The functions are always registered.** "Optional" means using them is: the component installs
+>   and the existing functions work on a server with no keyring, where a `_kr` call raises
+>   *keyring unavailable*. Observed on 8.4 only so far; that it holds on 8.0 and 9.4 is a gate for
+>   the implementation PR, not something this amendment has established.
+>
+> ### The key copy: what A11 is widened to allow
+>
+> A11 lets a `UDF_INIT` hold a key copy only beside `gcm_decrypt`'s scheduled context or
+> `gcm_encrypt_det`'s nonce key. A `_kr` function needs one more: **the key fetched from the keyring
+> (at most 32 bytes), with the id and the account it was fetched under, held in the per-instance
+> state from the first row to `deinit`.** It differs from A11's copies in two ways, and both are deliberate.
+>
+> - It is not a second copy of an argument the server already holds for the statement: no argument
+>   buffer and no text of *this* statement contains the key. The component's copies — this one, and
+>   A11's scheduled context and nonce key derived from it — are what the statement adds to the
+>   keyring's own memory, and a core dump taken mid-statement contains them.
+> - **It survives a `bad_tag` that `gcm.strict=OFF` turns into NULL.** A11 cleanses its copy on
+>   every failure of the cipher operation, and that still happens: the scheduled context and its
+>   copy, and the cached nonce key, are discarded exactly as A11 says, by the unchanged core. The
+>   fetched key is kept, because the next row must still decrypt. **A row in which one of these
+>   functions raises an error — a `bad_tag` under `gcm.strict=ON` included — gives up every secret
+>   its `UDF_INIT` holds at once**: the fetched key, and the two A11 states and the result buffer
+>   with it, because an error the core raises from a pre-check (a malformed envelope, a suite
+>   mismatch) leaves its scheduled context and nonce key as they were. It does not wait for
+>   `deinit`: no row follows an error (above), so nothing is lost, and the server does not always
+>   call `deinit` after one. Giving the key up on the NULL path too would let whoever planted corrupt rows cause one keyring read per row with no error to stop
+>   the statement, which on an external backend may be a network call per row.
+>
+> **What this contradicts, stated rather than left to a reviewer to find.** A11 rejects "a cache keyed
+> on anything other than the full key bytes", `crypto-safety.md` lists it as a blocked pattern, and
+> `architecture.md` §5 says nothing else is carried from one row to the next and that a row callback
+> does not touch a file or the network repeatedly. `crypto-safety.md` also opens its key handling
+> with "the key arrives only as the UDF argument `key`", and `AGENTS.md` §9 lists keyring
+> integration as out of scope. The fetched key is a cross-row value keyed on
+> *(calling account, key id)*, and its one read happens in the row callback. The grounds for the
+> exception: A11's rule exists because a caller-supplied key can change between rows while a
+> cheaper-to-compare proxy for it stays the same; here the id *is* the caller's whole input, there
+> are no key bytes to compare until the keyring has been read, and comparing by re-reading is the
+> per-row backend call this design avoids. Both halves of the cache key are compared on every row,
+> the id and the account. The read is once per `UDF_INIT`. **Through a definer stored function that
+> is once per row**, since the server gives each invocation its own `UDF_INIT`: an accepted breach
+> of §5 for that one shape, listed with the operational constraints below. These rule texts are
+> amended by the implementation PR to name this exception and no other.
+>
+> The conditions: the copy belongs to one `UDF_INIT` and is never shared across threads or instances;
+> it is cleansed in `deinit` and when `init` fails after allocating; the reader object is released
+> immediately after the fetch, never kept across rows (it holds a read lock on the server's global
+> keyring lock from its `init` to its `deinit`), and if that release fails the result is ignored —
+> there is nothing to do about it — and a key already fetched is still used; the fetch buffer is
+> cleansed on every path. Nothing
+> is cached across `UDF_INIT`s, so a key removed from or replaced in the keyring is picked up by
+> the next `UDF_INIT` that reads it. **That is not a promise that one statement sees one key.** It
+> is usually the next execution of the statement, but a definer stored function gets a `UDF_INIT`
+> per row — so a key replaced while such a statement runs can take effect on its next row, and a
+> deterministic column filled by such a scan can come out sealed under two keys. How fresh the answer is on a
+> backend that caches is that backend's property, not this component's.
+>
+> The core (`gcm`, `envelope`, `nonce`) does not change. Reading the keyring and the caller's account
+> is a server adapter (`architecture.md` §1), and the `_kr` functions call the same core entry points
+> as the existing three.
+>
+> ### Observed on 2026-10-12 with a throwaway probe component
+>
+> Servers 8.0.46, 8.4.11 and 9.4.0 (the pinned images), the probe built against the 8.0.43, 8.4.11
+> and 9.4.0 trees. **Observed once, and the tables below are still only an observation**: that
+> throwaway probe was not committed, and no committed test reproduces these rows. A smaller probe is
+> committed instead, as `tests/probe`, and what it pins is the *consequence* of the first table — a
+> call the server evaluates before its bound parameter has a value, and the instance that is then
+> never de-initialised — in `tests/integration/nested/20`–`22` (see "Implementation notes"). The
+> three versions gave the same output for every row of the three tables.
+>
+> | What the function is called with | What `init` sees | What the row function sees |
+> |---|---|---|
+> | a literal, a user variable, a stored-procedure variable, `CONCAT` of literals, `(SELECT 'k')` | the value | the value |
+> | a `?` of a prepared statement (`EXECUTE … USING @v`) | **a null pointer, length 0** | the value |
+> | a column | a null pointer, length = the column width | the value |
+> | a NULL literal | a null pointer, length 0 | NULL |
+>
+> So `init` cannot tell a bound parameter from a NULL literal, and "the id must be resolved in `init`"
+> would refuse the way applications normally send it. Hence the first-row read above.
+>
+> | Caller and context | `auth_id` the component reads under | A key the definer `root@%` owns |
+> |---|---|---|
+> | `app@%` calling directly | `app@%` | absent |
+> | `app@%` through a `SQL SECURITY DEFINER` function defined by `root@%` | `root@%` | found |
+> | `app@%` through a `SQL SECURITY INVOKER` function | `app@%` | absent |
+> | `app@%` through a `SQL SECURITY DEFINER` view defined by `root@%` | `app@%` | absent |
+>
+> | A five-row scan calling the function… | `UDF_INIT`s created |
+> |---|---|
+> | directly in the select list | 1 |
+> | inside a stored *function* called in the select list | 5 — one per row |
+> | directly, with the whole `SELECT` inside a stored *procedure* | 1 |
+> | under `EXPLAIN` (function in a `WHERE` comparison) | 1, and no row call |
+>
+> Keys created with `keyring_key_generate` (`AES`, 16 and 32 bytes) and `keyring_key_store`
+> (`SECRET`, 8 bytes) were read back with their length and type. An absent id returns from the
+> reader's `init` with success and a null reader object, and left no line in the error log at the
+> default `log_error_verbosity` of 2. At 3 the keyring component logs a note for it that carries
+> the data id and the auth id (`ER_NOTE_KEYRING_COMPONENT_READ_DATA_NOT_FOUND`; read in the 8.4.11
+> source, not run) — so with verbose error logging a key id and the account that asked for it reach
+> the error log, from the server's keyring and not from this component. An
+> account without the global `EXECUTE` privilege was refused by `keyring_key_generate` and could
+> still reach the reader. On a server with no keyring loaded — **8.4 only** — the reader's `init`
+> returned failure and `INSTALL COMPONENT` had succeeded. Triggers and events were not tried.
+>
+> Read in the 8.0.43, 8.4.11 and 9.4.0 sources, not run: the service header is identical in all
+> three and was introduced in 8.0.24 — on an older 8.0 a hard `REQUIRES_SERVICE` on it cannot be
+> satisfied and `INSTALL COMPONENT` would fail, which was not tried: the component is built and
+> tested against 8.0.43, and nothing older is supported; `mysql_thd_security_context`,
+> `mysql_security_context_options` and `mysql_current_thread_reader` have the same signatures in all
+> three; the server registers a default implementation of the reader service in all three, which is
+> why requiring it should not block an install on 8.0 and 9.4 either; the server's reader wrapper
+> takes a read lock on its global keyring lock in `init` and holds it until `deinit`; a failed
+> backend read surfaces as `fetch_length` or `fetch` returning failure with no error code, so the
+> component cannot tell "backend unreachable" from any other fetch failure and does not claim to.
+>
+> ### Which keyring, and the §3 prerequisite
+>
+> The original §3 called the keyring backend a prerequisite and ruled `component_keyring_file` "not
+> viable". That verdict was about one goal, and there are two:
+>
+> - **Keeping the key out of the encryption and decryption statements** — this does not depend on
+>   where the keyring stores its data, so the file keyring is enough. This is what the amendment
+>   claims, and the file keyring is the only one it has been tried with.
+> - **Surviving a stolen data directory or backup** — needs the key off the database host, so an
+>   external backend. §3 stands for this goal: with `component_keyring_file` the key sits beside the
+>   data, and this amendment does not claim otherwise.
+>
+> Oracle's MySQL Community distribution ships no external backend: the 8.4 manual lists
+> `component_keyring_file` as its only keyring (the 8.0 image also carries the legacy `keyring_file`
+> plugin), and the external ones are in MySQL Enterprise Edition
+> ([manual](https://dev.mysql.com/doc/refman/8.4/en/keyring.html)).
+> The project's CI can therefore exercise the file keyring and nothing else. Behaviour with an
+> Enterprise backend, and with Percona Server's keyring components, is **untested** and is not
+> claimed as supported. A backend that does not cache makes the one read per `UDF_INIT` a backend
+> call per statement.
+>
+> ### Operational constraints this adds
+>
+> - Keyring contents are not replicated, exactly as the component is not (constraint 14). Every
+>   server that runs a `_kr` function needs the key under the same id **and the same account**.
+> - `gcm_encrypt_kr` and `gcm_encrypt_det_kr` both need ROW binlog. The existing `gcm_encrypt_det`
+>   gives the same bytes wherever it is replayed; a `_kr` function replayed on a replica would
+>   resolve the id in the replica's keyring under whatever account the applier runs as. Not tested;
+>   do not rely on it.
+> - **Sharing through a definer stored *function* costs one keyring read per row**, each taking the
+>   server's global keyring read lock, and on a backend that does not cache, one backend call per
+>   row. `WHERE f(col) LIKE '%길%'` over a shared key is exactly that shape. Prefer one account per
+>   application with its own keys; where a key must be shared, put the whole statement in a definer
+>   procedure, and measure before using the function shape on a large scan.
+> - Key-usage accounting (A8, constraints 11–13) is unchanged by this amendment: the component
+>   counts nothing here. (Amendment A14 later adds a count of calls per key name.)
+>   A key reachable by id from several accounts or servers is one key for the usage budget.
+> - **Every condition on a deterministic key still applies, and a keyring makes two of them easier to
+>   break.** A12 requires an independent, full-length CSPRNG key per suite and security domain:
+>   `keyring_key_generate` gives one, `keyring_key_store` accepts whatever it is handed, padded or
+>   low-entropy keys included, and the component cannot tell. And "one AAD convention per key"
+>   (constraint 7) and "independent keys for the random and the deterministic mode" (A12) are about
+>   the key *bytes*: a key several accounts reach through a routine, or that `keyring_key_fetch`
+>   hands to an application which then passes it to `gcm_encrypt_det`, is still one key with one AAD
+>   convention across all of them.
+> - A key generated in the keyring exists nowhere else. Backing up the keyring, and keeping old keys
+>   for old data, is the operator's responsibility as before — and now the only copy is theirs.
+>
+> ### Out of scope, deliberately
+>
+> - **A key id or key version in the envelope**, and with it rotation and dual-read without the
+>   application's help. It needs new version bytes (to be allocated together with issue #37), an
+>   authenticated id, a bound on which ids a stored value may name, and an answer to the per-row
+>   lookup that `architecture.md` §5 forbids. Its own amendment.
+> - A dynamic privilege, per-key grants, and any function that writes to the keyring.
+> - Per-key usage counters (issue #35), which this makes possible by giving a key a name.
+> - `tests/e2e`: a replica with its own keyring is a separate piece of test infrastructure.
+>
+> ### Implementation notes (2026-10-12)
+>
+> **Pinned by committed tests.**
+>
+> - `tests/integration/60_kr_roundtrip`, `61_kr_key_source` and `62_kr_accounts` run on 8.0, 8.4 and
+>   9.4 with one expected output each: the round trip and Korean `LIKE '%길%'`, interoperation with
+>   the key-argument functions in both directions and identical deterministic bytes, the floor, a
+>   legacy `0x01` envelope, the one "no usable key" error for an absent id, a `SECRET` and an 8-byte
+>   `AES` entry, invalid ids, NULL arguments, an id that varies by row, a key id sent as a bound
+>   parameter, `gcm.strict=OFF` over a good, a tampered and a good row in one statement, and the
+>   account table above — another account's id, a definer function, an invoker function, a definer
+>   view.
+> - `scripts/verify-bare.sh` starts a server with **no keyring** on each major and checks that the
+>   component installs, the key-argument functions work, each `_kr` function raises *keyring
+>   unavailable* with `gcm.strict` ON and OFF, and the component uninstalls afterwards. This closes
+>   the gate the decisions above left open, on 8.0.46, 8.4.11 and 9.4.0.
+> - `tests/adapter/key_source_test.cc` calls the key source directly and
+>   `tests/adapter/udf_kr_test.cc` drives the UDFs, both against stub services, for what a real
+>   server cannot be made to show: one keyring read per `UDF_INIT` and none in `init`, no reader
+>   left open on any path, each keyring call failing, a fetch that disagrees with the length call,
+>   the latch for each kind of failure, the account changing between rows, the fetched key
+>   surviving a `bad_tag` that `gcm.strict=OFF` turns into NULL, and a row that raises an error
+>   wiping every secret of its item — the fetched key, the scheduled context, the cached nonce
+>   key and the result buffer, each asserted on the item's state.
+> - `mysql-test/suite/gcm/t/gcm_kr`, recorded on 8.4: the round trip, `LIKE`, interoperation and
+>   `gcm.strict` ON and OFF across the rows of one statement, under MTR's check that nothing
+>   unexpected reaches the error log.
+>
+> **Observed, not pinned.** The `UDF_INIT` counts in the third table and the argument-visibility
+> rows of the first come from the throwaway probe's counter and are not reproduced by a committed
+> test. A committed probe (`tests/probe`, built by `scripts/build-probe.sh`) counts its own `init`
+> and `deinit` calls instead, and pins the consequence of the first table — the leaked instance of
+> a nested call — in `tests/integration/nested/20`–`22`. The wipe on the error path is pinned; the
+> wipe in `deinit` is established by reading `free_state`, since after `deinit` the memory is
+> released and there is nothing left for a test to look at.
+>
+> **A server defect found on the way, not specific to these functions, pinned per major.** A
+> **prepared statement whose re-prepare at `EXECUTE` fails** after a loadable function has been fixed
+> abandons that function's `UDF_INIT`: its de-initialisation function is never called — not at the
+> end of the statement, not on `DEALLOCATE PREPARE`, not when the session ends — and the component
+> cannot be uninstalled until the server restarts. Every function the statement had already fixed is
+> dropped, whichever component it belongs to.
+>
+> The trigger is the failed *re-prepare*, not a failure of the statement in general: case `25`'s
+> control is the same prepared form with the failing column first, so its re-prepare fails before the
+> function is ever fixed — it adds one `init` and its own `deinit`, and nothing is kept. A prepared
+> statement is what puts the handler in the (re)prepare state that `udf_handler::cleanup()` returns
+> early from; a plain statement's fix failure was not observed to leak. Until #55's cause was read,
+> the shape issue #43 was filed with (the table below) was described as needing the nesting and a
+> bound parameter.
+>
+> The cause was read from the 8.0.43, 8.4.11 and 9.4.0 sources and is recorded, with a
+> self-contained reproducer, in `docs/upstream-udf-handler-leak.md`: `udf_handler::fix_fields`
+> defers its own RAII release as soon as the handler is worth keeping, which leaves
+> `udf_handler::cleanup()` as the only way back — and that one returns early while the statement is
+> being (re)prepared, because the handler is meant to survive into the execution that a failing
+> prepare never reaches.
+>
+> The first shape found, and the one issue #43 was filed with, is a function that is an argument of
+> another and takes a prepared-statement parameter: the outer function's `init` evaluates the inner
+> call before the parameter has its value, the inner sees an empty string, and
+> `PREPARE … 'SELECT gcm_decrypt(gcm_encrypt(?, ?), ?)'` fails on `EXECUTE` with a 0-byte key (the
+> `_kr` form fails with *invalid id*). Nesting, the bound parameter and the raising are all
+> **incidental** — what the leak needs is the failed re-prepare — and three cases added after the first
+> review show it: a *sibling* function in the same select list, a key-id instance that raises
+> nothing at all, and a plain `ALTER TABLE` re-prepare with no nesting and no parameter.
+>
+> `tests/integration/nested/*.sql` are run by `scripts/verify-nested.sh <major>` on a throwaway
+> server — a case that triggers the defect leaves the component unable to uninstall for every case
+> after it, so it cannot live in `scripts/verify.sh` — and their expected output is recorded per
+> major. Measured on the pinned images (8.0.46, 8.4.11 and 9.4.0). The per-major difference is
+> always the same one: on 8.0 the failing statement's *outer* function runs its own `init` — and
+> leaks it — where 8.4 and 9 abort before it, so the cases that contain an outer function's `init`
+> (`20`, `23`, `24`, `26`) show it in their counts, and the other cases are identical across the
+> three:
+>
+> | Case | Shape | Result |
+> |---|---|---|
+> | `10_prepared_decrypt_of_encrypt` | `gcm_decrypt(gcm_encrypt(?, ?), ?)`, prepared | the inner sees a 0-byte key; `UNINSTALL COMPONENT` refused afterwards |
+> | `11_prepared_decrypt_of_det` | the same, inner deterministic | same |
+> | `12_literal_det_bad_key`, `13_literal_encrypt_bad_key` | a literal inner whose key is one byte | inner key error; uninstall succeeds |
+> | `14_user_variable` | the inner plaintext in a user variable | round-trips; uninstall succeeds |
+> | `15_row_time_column_failure` | the inner key from a column, failing on the second row | row-time error; uninstall succeeds |
+> | `16_outer_init_fails` | the outer's own `init` fails over a successful `_kr` inner | argument-count error; uninstall succeeds |
+> | `17_kr_reseal_chain` | A15's re-seal shape with `?` in every key-id position | round-trips; uninstall succeeds |
+> | `20_probe_nested_bound` | the test-only probe instead of the crypto functions, prepared inner, two `EXECUTE`s | the inner's `init` runs twice with no deinit and the uninstall is refused; on 8.0 the outer leaks too |
+> | `21_probe_nested_literal`, `22_probe_direct_bound` | the probe with literals, or a `?` on a direct call | every `init` paired with its `deinit`; uninstall succeeds |
+> | `23_sibling_leak` | a sibling function beside one whose inner raises, no nesting | the sibling's `init` has no `deinit`; uninstall refused |
+> | `24_nonraising_kr_inner` | a key-id seal that succeeds inside an outer function, another item raising | the seal is never counted and the instance that holds the key is never de-initialised; `UNINSTALL COMPONENT gcm` refused |
+> | `25_ddl_reprepare` | `PREPARE … 'SELECT probe_outer(d), c FROM t'`, then `ALTER TABLE … DROP COLUMN c` and a second `EXECUTE` | `probe_outer` reaches two `init`s and one `deinit` — the failed re-prepare kept the handler it had fixed — and the control, the same prepared form with the failing column first, adds one `init` and its own `deinit` |
+> | `26_probe_nested_bound_const` | case `20` with the probe's `const_item` variant | the same counts as `20` |
+>
+> Two consequences are worth separating, because the component can act on only one of them:
+>
+> - **The leaked instance is held for the life of the server.** Nothing to change in the component:
+>   it is the server's, and the fix belongs in `sql/item_func.cc` (the two points are named in
+>   `docs/upstream-udf-handler-leak.md`).
+> - **The instance may hold secrets.** Amendment A16 gives up the secrets of the instance that
+>   *raises* an error; one the server abandons **without** an error keeps what it holds, a key
+>   fetched from the keyring included. Case `24` measures the visible half of that (the seal is
+>   never counted); whether the component could do more — at the price of the cross-row reuse
+>   A11 and A13 exist for — is an open design question, and A16 states the limit rather than
+>   implying a guarantee it cannot give.
+>
+> Operational constraint 18 carries the rule for users.
+>
+> **Sequencing.** After 0.1.0, as an optional feature of the next minor release. Adding functions is
+> backward compatible: no envelope a released build wrote or reads is affected.
+>
+> **Impact, for the implementation PRs:**
+>
+> | Area | Change |
+> |---|---|
+> | `src/` | a keyring-and-caller adapter; the three `_kr` UDFs reusing `udf_glue`'s argument and buffer handling and the unchanged core, with messages of their own (the shared ones carry a key length); the per-instance key copy; three more service requirements in `component.cc`, with `mysql_current_thread_reader` required on every version |
+> | `spec/envelope.md` | the argument contract and failure semantics of the three functions. No byte layout and no vector changes |
+> | `tests/adapter` | stubs for the new services; every key-source failure injected |
+> | `tests/integration`, `mysql-test` | round trip, Korean `LIKE '%길%'`, interoperation with the key-argument functions, account isolation, a definer routine, a bound parameter, an id that varies by row, the floor |
+> | `scripts/dev-up.sh`, `scripts/verify.sh`, `scripts/verify-bare.sh` | the test servers load `component_keyring_file` and `keyring_udf`; a second check runs on a server with no keyring |
+> | `crypto-safety.md` (key handling, failure semantics, blocked patterns), `architecture.md` §1, §3 and §5 | the widened key-copy rule, the module and lifetime rows, and the one cross-row value keyed on (account, key id) |
+> | README, `docs/ops-constraints.md`, `AGENTS.md`, `CHANGELOG.md` | the function table, constraints 2 and 14, what verbose keyring logging records, and the "withdrawn" note of A1 narrowed to `gcm.key_id`, `gcm.nonce_key_id` and `gcm_key_id()` |
+
+> #### The server cause, read from the sources (2026-10-13)
+>
+> The defect above was diagnosed from the 8.0.43, 8.4.11 and 9.4.0 sources and cross-checked against
+> the probe's counts. The full account — the code, the per-major difference and a self-contained
+> reproducer — is `docs/upstream-udf-handler-leak.md`, a draft that is not submitted anywhere.
+> In one paragraph: the leaked handler is one the statement had already fixed, and the release path,
+> `udf_handler::cleanup()`, returns early while the statement is being (re)prepared — by design, so
+> that the handler survives into the execution that a failing (re)prepare never reaches. The first
+> shape found, and the one issue #43 was filed with, fails while the *outer* function's `init` is
+> running: `udf_handler::call_init_func` evaluates a constant argument by calling
+> `args[i]->val_str(...)`, and
+> for an argument that is itself a loadable function that is the inner function's row callback — with
+> the bound parameter still valueless, which is the empty string the inner sees. The inner's
+> `udf_handler` was already fixed, and its RAII release was **deferred** (`udf_fun_guard.defer()`,
+> because the handler is meant to survive into execution), so from then on only
+> `udf_handler::cleanup()` can release it; that one returns early while the statement is being
+> (re)prepared, by design, so the execution it was keeping the handler for never arrives and nothing
+> releases it. The `usage_count` that `find_udf()` took therefore stays,
+> `mysql_udf_registration::udf_unregister` only succeeds at `usage_count == 1` (the idle state of a
+> component-registered function), and the component's de-initialisation fails — which is the ER 3538
+> `UNINSTALL` error in the table above. The de-initialisation function of the leaked handler is never
+> called. 8.0.43 leaks the *outer* function's handler as well as the inner's, because its
+> `call_init_func` does not check `thd->is_error()` after evaluating a constant argument where 8.4.11
+> and 9.4.0 do; that is why the probe's outer-init count is 2 on 8.0 and 0 on the other two.
+>
+> This is a source read plus the probe's counts, not a pinned test. No fix was attempted on either
+> side of the boundary: the server would have to give the handler back on the abort path, and the
+> component's part of the consequence is amendment A16 (a row that raises gives up every secret
+> rather than waiting for a `deinit` that does not come).
+
 > ## Amendment A12 (2026-10-07) — Cross-suite nonce-key linkage, and deterministic AES-128: analysis for review
 >
 > **Status: decisions recorded on 2026-10-07 by Codex (AI design reviewer).** The analysis and
@@ -170,9 +1634,14 @@
 
 > ## Amendment A11 (2026-10-07) — Per-statement reuse of the decrypt context and the deterministic nonce key
 >
-> **Status: proposed — implemented behind this PR; takes effect on merge.** The numbers below are
-> developer-machine prototypes (an arm64 laptop with other containers running) and are quoted for the
-> shape of the saving, not its size. CI measurements follow in `docs/perf.md` and replace them.
+> **Status: implemented and merged (PR #23, 2026-10-07, merged by the repository owner after the
+> reviews recorded on that PR).** The two retained states live in `UdfState` (`src/udf_glue.h`),
+> implemented in `src/gcm.cc` and `src/nonce.{h,cc}` and driven from the row callbacks in
+> `src/udf_*.cc`. Pinned: `tests/unit` (`gcm_test.cc`, `det_session_test.cc`) and `tests/adapter`
+> (one state per `init`, and the key checks); `docs/perf.md` carries the CI measurements that replace
+> the prototype numbers below, which are kept for the shape of the saving, not its size. Amendment
+> A16 later replaced the sentence about a pre-check leaving the schedule intact and rewrote the
+> exposure paragraph at the end of this amendment; both now point at A16.
 >
 > §8 left one item open on purpose: `derive_nonce_key` depends only on the key, `encrypt_det`
 > recomputes it on every row, and caching it per `UDF_INIT` means **keeping a copy of the key between
@@ -208,9 +1677,11 @@
 > - On **every** failure of the cipher operation — an OpenSSL error at any step, and `bad_tag` — the
 >   copy is cleansed and the context is forgotten. The next row starts from scratch and never trusts a
 >   context that has just reported an error. The pre-checks that return *before* the context is
->   consulted — a key length no suite has, a malformed envelope — leave it intact: a wrong-length key
->   on one row is that row's SQL error, not a reason to discard a valid schedule. The nonce-key cache
->   follows the same rule: forgotten on an HMAC failure, untouched by a `bad_key_len` pre-check.
+>   consulted — a key length no suite has, a malformed envelope — do not touch it while the call runs
+>   (a wrong-length key on one row is that row's SQL error, not a reason to discard a valid schedule
+>   *mid-call*), and the call then raises, which gives up the copy, the context, the nonce key and the
+>   result buffer at once (amendment A16, above). The nonce-key cache follows the same rule: forgotten
+>   on an HMAC failure, and given up by the row that raises.
 > - `deinit` cleanses both.
 > - When the key is forgotten, the context is reset as well: the key schedule inside the
 >   `EVP_CIPHER_CTX` is key-equivalent material and does not outlive the copy it was made from.
@@ -246,12 +1717,18 @@
 > copy and its derived material lived for one operation, one row. After it, the **last key used**
 > by a UDF item — its copy, its schedule in the context, and for the deterministic variant its
 > `nonce_key` — lives until a row reaches the cipher with a different key or suite, a cipher
-> operation fails, or the item's `deinit` at the end of the execution. Rows that never reach the
-> cipher do not replace it: a NULL argument, an over-long one, a malformed envelope, a key length no
-> suite has, and a legacy `0x01` envelope (which never uses the session) all leave the previous key
-> in place. The bound is unchanged — nothing outlives the execution — but "the next row" is not
-> always what ends it. How much that adds depends on where the key comes from,
-> and the two cases are not the same:
+> operation fails, or the item's `deinit` at the end of the execution. Two kinds of row leave the
+> previous key in place without using the cipher: a NULL argument, and a legacy `0x01` envelope that
+> opens (one that fails raises, and a row that raises gives the whole state up — amendment A16,
+> above). Every other row that does not reach the cipher for real raises — an over-long argument, a
+> malformed envelope, a key length no suite has — and a row that raises gives the whole state up
+> (A16, above). Inside the execution the bound is unchanged — the next row, or the row that raises,
+> ends the retention — but an instance the *server* abandons without calling `deinit` **and without
+> an error** does not end at all: it keeps what it holds, this copy included, for the life of the
+> server. That is the defect of issue #43, pinned by
+> `tests/integration/nested/24_nonraising_kr_inner`, and neither A11
+> nor A16 can close it from inside a row callback. How much the retention adds depends on where the
+> key comes from, and the two cases are not the same:
 >
 > - **A key the caller supplies as a constant for the statement** — a literal, a user variable, a
 >   bound parameter. This is the usage the README documents. The server already holds that key for
@@ -883,6 +2360,7 @@
 >   log, `performance_schema.events_statements_*` and an SBR binlog. This is **the same exposure surface
 >   as running `AES_ENCRYPT` today**, and it is added to the §6 operational constraints. The keyring
 >   approach can be revisited later as an optional feature (something like `gcm_encrypt_kr`).
+>   *Revisited in A13.*
 > - In the Phase S checklist, "reads the key from the keyring" is removed and replaced by "validates a
 >   32-byte key argument, and `SET SESSION gcm.strict` works".
 
@@ -1022,7 +2500,8 @@ SQL. That is how crypsi's flaw is avoided.
 
 ## 3. A prerequisite decision — the keyring backend (before the spike)
 
-> **Out of scope** as of amendment A1. Kept because A1 is written against this section.
+> **Out of scope** as of amendment A1. Kept because A1 is written against this section. Revisited
+> by amendment A13, which keeps this section's verdict for the goal it was about.
 
 This decision determines whether the project is justified at all.
 
@@ -1146,12 +2625,17 @@ From MySQL 8.0.19, the `mysql_udf_metadata` service can set the charset and coll
 value. That makes MySQL's native `LIKE` usable as-is.
 
 ```sql
-WHERE gcm_decrypt(encrypted_name) LIKE '%김%'   -- works through utf8mb4_general_ci
+WHERE gcm_decrypt(encrypted_name) LIKE '%김%'   -- under the column's collation
 ```
 
-Writing decrypt_like instead would mean reproducing utf8mb4_general_ci's case-insensitivity and
-Unicode normalisation semantics in C, all the way through CJK. Removing OPE was where we were burned
+Writing decrypt_like instead would mean reproducing the column collation's case-insensitivity and
+accent/width behaviour in C, all the way through CJK. Removing OPE was where we were burned
 once by Python's code-point order differing from MySQL's collation. Do not reproduce it; use MySQL's.
+The collation is the column's, and on 8.0+ the default utf8mb4 collation is `utf8mb4_0900_ai_ci`
+(measured — `tests/integration/20_korean_like.expected`), not the older `utf8mb4_general_ci` this
+section once named as the worked example. Amendment A17 measured what that means for an index built on
+top of the comparison: a binary normalisation misses rows the collation matches
+(`docs/leakage-ngram.md`).
 
 > There is one legitimate reason to want decrypt_like, and it is security rather than performance. If
 > `gcm_decrypt(col)` goes through a temporary table or a filesort, plaintext reaches a disk-based temp.
@@ -1185,6 +2669,12 @@ default and it raises an error.
   `loose_` prefix, the first startup can fail
 - A UDF is opaque to the optimizer. Selectivity depends on the other predicates (scope and status
   filters)
+- (Amendment A17) A keyed n-gram token side table to give `LIKE` an index **was researched and
+  declined**: the deterministic tokens leak n-gram frequencies and co-occurrence, and on Korean the
+  experiment recovered 20.7% of Korean n-grams under the S1 attack (17.3% for the second S1 attack and
+  31.7% under the stronger S3 attack 3), far
+  above the ceiling. See [`leakage-ngram.md`](leakage-ngram.md). The motivating `LIKE '%김%'` is the
+  index's worst case (~21% selectivity), and a binary token key does not respect the collation.
 - (Amendment A2) `gcm_encrypt_det`'s nonce is a function of the plaintext alone. **Encrypting the same
   plaintext under one key with two different AADs reuses the (key, nonce) pair**, and an attacker who
   sees both values can recover the GHASH subkey and forge tags for that nonce. Confidentiality is
@@ -1218,7 +2708,8 @@ default and it raises an error.
 
 - (Amendment A8) Sum the usage across every server, column and application that shares a key, and have
   the per-key usage budget and rotation criteria security-reviewed before deployment. The component
-  does not count usage or rotate automatically.
+  does not hold a budget or rotate automatically. For the key-id functions it publishes a count per
+  key name (`gcm_key_usage`, amendment A14), which is one input to this sum and not the sum.
 - (Amendment A8) Copying or restoring an envelope is not a new encryption. Distinguish the conditions
   for re-encryption and for a deterministic retry, and do not let a database restore roll back the
   accumulated usage. If the usage history or the safety of the RNG state is uncertain, stop writing;
@@ -1246,6 +2737,8 @@ forward compatibility.
 
 | Item | Evidence |
 |---|---|
+| **A keyed n-gram token index for `LIKE` was researched and declined** — it leaks n-gram frequency and co-occurrence; on Korean, 20.7% / 17.3% occurrence-weighted token recovery under the S1 attacks and 31.7% under the stronger S3 attack, against a B1 + 10 pp ceiling | amendment A17 — `docs/leakage-ngram.md`; experiment PRs #59–#66 |
+| **N2 (`WEIGHT_STRING`) holds the collation invariant an n-gram index needs; a binary key (N1) does not** — 6 counterexamples (case, accent, full width) on 8.0.46, 8.4.11 and 9.4.0 over the declared repertoire, none under prefix-extension monotonicity, and the Hangul IME composition states in it match nothing | amendment A17 — `tests/leakage/collation`, `scripts/leakage-collation.sh` |
 | MySQL 8.4.11 and 9.4.0 reject GCM/GCM-SIV/SIV/CTR/XTS | measured in a container |
 | The mode list is unchanged across the 8.0 → 9.7 documentation | the dev.mysql.com reference |
 | MariaDB has only ECB/CBC/CTR | the MariaDB documentation |
@@ -1254,6 +2747,7 @@ forward compatibility.
 | A UDF return value's charset can be set (8.0.19+) | `mysql_udf_metadata` (WL#12370) |
 | `AES_ENCRYPT` supports a KDF (hkdf/pbkdf2_hmac) from 8.0.30+ | the 8.0 reference — for information |
 | `udf_registration`, `mysql_udf_metadata`, `component_sys_variable_register`/`_unregister`, `mysql_runtime_error` and `mysql_current_thread_reader` are present in 8.0.43, 8.4.11 and 9.4.0 | measured in `include/mysql/components/services/` across the three tags |
+| The services behind the `_kr` functions have the same signatures in 8.0.43, 8.4.11 and 9.4.0: `keyring_reader_with_status` (introduced in 8.0.24), `mysql_thd_security_context` and `mysql_security_context_options` (in the tree at 8.0.4), `mysql_current_thread_reader` (present at 8.0.43; the release that introduced it was not established) | amendment A13 — read in `include/mysql/components/services/` across the three trees |
 | **The SESSION scope for a component sysvar, and `mysql_system_variable_reader`, are 9.0.0+ only** | amendment A5 — measured in `component_sys_var_service.cc` and `mysql_system_variable.h` across the three tags |
 | `CONFIGURE_COMPONENTS()` globs `components/*`, so placing the sources in `components/gcm` and re-running configure builds in-tree | `cmake/component.cmake` |
 | On the RHEL9 family, the compiler the server source requires is gcc-toolset-12 for 8.0/8.4 and **gcc-toolset-14 for 9.x** | the `ALTERNATIVE_PATHS` (`LINUX_RHEL9` branch) in each tag's `CMakeLists.txt`. Measured: with toolset-13, configuring 9.4.0 fails with "Could not find devtoolset compiler/linker". `rhel9_toolset` in `docker/versions.json` is the source of this value |
@@ -1276,6 +2770,7 @@ forward compatibility.
 | A component cannot include `mysql_com.h` | the `my_io.h` behind it raises `#error This header shall not be included in components`. It surfaced as a failure in the 9.4.0 build while 8.0 and 8.4 passed silently — only building all three catches it |
 | `component_sys_variable_register::register_variable` **copies** the `def_val` from the `*_CHECK_ARG` | `sql/server_component/component_sys_var_service.cc`: `sysvar_bool->def_val = bool_arg->def_val` (into a my_malloc'd struct). So passing a stack-local check-arg is safe |
 | **The per-call EVP context setup, not the cipher, is most of a small decryption**, and the p95 difference between a scan and a scan that also calls `gcm_decrypt` is 73–85% of a `gcm_decrypt(col) LIKE` query (a difference between queries, not a component timing) | amendment A11 — developer-machine prototypes: a 16-byte `open` 353 → 170 ns with a reused context; p95 over 100k rows on 9.4 49.6 → 23.2 ms (1 session) and 126.4 → 27.2 ms (8 sessions); the plaintext-column baseline in `tests/load`. CI numbers to follow in `docs/perf.md` |
+| **Index condition pushdown applies to a loadable function** — a `gcm_decrypt(col, @k) LIKE` predicate is pushed into a `(dept_id, name_enc)` index read (`Using index condition`), a single-step `SELECT` reads the wide row only for a match, and on that path a tampered matching row still raises `ER_UDF_ERROR` under `gcm.strict=ON` | behaviour on 8.0.46, 8.4.11 and 9.4.0 — `tests/integration/21_like_pushdown.sql`; the plan shape (`type=ref` on the chosen key, and no filesort on the covering `(dept_id, id, name_enc)` index) recorded on 8.4 — `mysql-test/suite/gcm/t/gcm_pushdown.test` (#77) |
 
 ### Open (to be answered in Phase S)
 

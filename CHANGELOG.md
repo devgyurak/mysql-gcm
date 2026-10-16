@@ -27,6 +27,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **SQL recipes that reduce the rows `gcm_decrypt(...) LIKE` decrypts** (#77, `docs/like-recipes.md`):
+  A17 closes the index direction, so the only lever left is the number of rows the server decrypts.
+  Four recipes — scope first, a `(scope, id, envelope)` covering index, a bounded window with `LIMIT`,
+  and a per-keystroke refine — with the caveats (Hangul IME composition states, complete results,
+  `range_optimizer_max_mem_size` / `Warning 3170`, the id list in the logs, the 3,072-byte index-key
+  limit, buffer-pool sizing). **No `src/` and no envelope change.** Constraint 5, the READMEs and
+  `docs/perf.md` link to it, and §8 records that index condition pushdown applies to a loadable
+  function and that a tampered in-scope row still raises under `gcm.strict=ON` on 8.0.46, 8.4.11 and
+  9.4.0 (`tests/integration/21_like_pushdown.sql`; the plan shape on 8.4 in
+  `mysql-test/suite/gcm/t/gcm_pushdown.test`).
 - **Design amendment A17, declined — the keyed n-gram token index is not adopted** (#38): a
   deterministic n-gram token side table to give `LIKE` an index was **researched and declined**. The
   amendment pre-registered the threat model, the data, the attacks, the metrics, the baselines

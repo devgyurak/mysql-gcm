@@ -35,15 +35,17 @@ ALTER TABLE patients ADD INDEX ix_scope_search (dept_id, id, name_enc);
 The index is **covering** — the decrypting UDF never reads the wide row, so the wide-row cost
 disappears — **and** ordered by `id` within the scope, so early termination (recipe 3) still works.
 
-Do **not** index `(dept_id, name_enc)`: it cannot serve the `ORDER BY id` inside the scope. Measured on
-8.0.46, 8.4.11 and 9.4.0 (30,000 rows, 10 scopes, 1 KiB padding), the optimizer then takes one of two
-worse paths, and **which one depends on the statistics**, so re-measure rather than assume:
+Do **not** index `(dept_id, name_enc)`: it cannot serve the `ORDER BY id` inside the scope. On the
+harness fixture (30,000 rows, 10 scopes, 1 KiB padding, measured on 8.0.46, 8.4.11 and 9.4.0) the
+optimizer takes the primary reverse scan; a fixture that differed only in the name distribution took
+the second path below. Which one it takes depends on the statistics, so re-measure rather than assume:
 
-- **primary reverse scan** (this fixture): the decrypting call runs only on the in-scope rows the scan
-  passes — about the same ~553 as the covering index — but the **wide row is read 5,530 times**.
-- **scope index + sort** (a fixture that differed only in the name distribution): no wide-row read, but
-  the scope is a `ref` access, so the UDF is then the filter's only condition and **the whole scope is
-  decrypted** — 3,000 rows here against 553.
+- **primary reverse scan** (the harness fixture, all three majors): the decrypting call runs only on the
+  in-scope rows the scan passes — about the same ~553 as the covering index — but the **wide row is
+  read 5,530 times**.
+- **scope index + sort** (observed on 8.4): no wide-row read, but the scope is a `ref` access, so the
+  UDF is then the filter's only condition and **the whole scope is decrypted** — 3,000 rows here
+  against 553.
 
 The covering `(dept_id, id, name_enc)` index avoids both: 553 ordered index entries, no wide-row read,
 no sort, and its early termination is a genuine reduction in decryptions. So keep one shape, not both —

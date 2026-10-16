@@ -27,6 +27,16 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **The conformance kit of amendment A18: the spec's client rules, the server-oracle recipe and its
+  test** (#36). `spec/envelope.md` now names the sections an independent implementation MUST follow
+  (§1), states the plaintext and AAD byte rules in a new §2.7 (the `utf8mb4` conversion of a character
+  argument, opaque `binary` sealed unchanged and never normalised, AAD as raw bytes with one convention
+  per key), reads the failure table for a client (no `gcm.strict`, a tag failure is always an error, the
+  floor is sealing-only), and presents `spec/test-vectors.json` as the conformance suite of **any**
+  implementation — with the honest limit that vectors check bytes, not inputs.
+  `docs/conformance.md` (new, non-normative) is the how-to: a throwaway server as the oracle for the
+  checks the bytes cannot make. `tests/integration/70_conformance_oracle.sql` pins the recipe on 8.0,
+  8.4 and 9, so the document cannot drift. **No `src/` and no envelope byte change**; still no client.
 - **Design amendment A18, adopted — the envelope is an open format; A4 stands** (#36). A team on a
   managed service cannot install the component (constraint 3), and the question was whether the project
   should help it implement the same envelope in the application instead. **Option 1, a conformance

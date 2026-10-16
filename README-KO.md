@@ -51,6 +51,9 @@ AES-GCM 을 서버 **component** 로 더합니다. 복호화 결과에 `utf8mb4`
    있습니다. `'%김%'` 같은 패턴도 마찬가지입니다. `AES_ENCRYPT` 와 같은 노출입니다. 키 id 함수(제약
    17)는 키를 문장에서 빼지만 평문은 그대로 남습니다.
 3. **직접 운영하는 MySQL 전용입니다.** RDS · Aurora · Cloud SQL 은 `plugin_dir` 를 열어 주지 않습니다.
+   봉투 자체는 **공개 포맷**입니다: 독립 구현이 `spec/envelope.md` 를 따르고
+   [`docs/conformance.md`](docs/conformance.md) 의 레시피로 서버와 대조할 수 있습니다. 동등성은
+   구현자의 책임이며, 이것이 관리형 서비스 지원을 뜻하지는 않습니다 — [개정 A18](docs/design-KO.md).
 4. **my.cnf 에는 `loose_` 를 붙이세요**(`loose_gcm.strict=ON`). 붙이지 않으면 component 설치 전에는
    서버가 시작하지 않습니다.
 5. **옵티마이저는 이 함수를 들여다보지 못합니다.** `gcm_decrypt(col) LIKE` 는 후보를 훑습니다.
@@ -244,9 +247,9 @@ PR 로 들어옵니다. 암호 경로는 리뷰어 두 명이 필요합니다.
 | load | `python tests/load/run.py --rows 300000 --concurrency 1,8,32 --gate tests/load/baseline.json` |
 | bench | `scripts/bench.sh --gate` |
 
-[설계와 개정](docs/design-KO.md) · [봉투 spec](spec/envelope.md) · [운영 제약](docs/ops-constraints.md) ·
-[성능](docs/perf.md) · [변경 이력](CHANGELOG.md). AI 에이전트와 작업한다면 `AGENTS.md`(또는
-`CLAUDE.md`)에서 시작하세요.
+[설계와 개정](docs/design-KO.md) · [봉투 spec](spec/envelope.md) · [적합성](docs/conformance.md) ·
+[운영 제약](docs/ops-constraints.md) · [성능](docs/perf.md) · [변경 이력](CHANGELOG.md). AI
+에이전트와 작업한다면 `AGENTS.md`(또는 `CLAUDE.md`)에서 시작하세요.
 
 애플리케이션은 기존 MySQL 드라이버로 이 함수를 부릅니다. 클라이언트 SDK 는 없습니다. 이 저장소의
 Python 은 테스트, 벡터, 문서용 그래프 도구에만 씁니다.

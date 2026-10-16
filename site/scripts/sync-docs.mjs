@@ -21,6 +21,7 @@ const PAGES = {
   "docs/ops-constraints.md": { route: "/ops-constraints/", out: "ops-constraints.md" },
   "docs/like-recipes.md": { route: "/like-recipes/", out: "like-recipes.md", title: "SQL LIKE recipes" },
   "spec/envelope.md": { route: "/envelope/", out: "envelope.md" },
+  "docs/conformance.md": { route: "/conformance/", out: "conformance.md", title: "Conformance" },
   "docs/design.md": { route: "/design/", out: "design.md" },
   "docs/design-KO.md": { route: "/ko/design/", out: "ko/design.md" },
   "docs/perf.md": { route: "/performance/", out: "performance.md" },

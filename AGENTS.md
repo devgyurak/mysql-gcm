@@ -74,6 +74,8 @@ AGENTS.md / CLAUDE.md          Agent instructions (this file is the source)
 docs/design.md                 The design document (the source of rationale, including amendment A1)
 docs/design-KO.md              Its Korean translation. The English file above is canonical
 docs/ops-constraints.md        Operational constraints — also duplicated on the README's first screen
+docs/conformance.md            How a third party checks an independent implementation against a server
+                               (amendment A18). Non-normative, and not a client
 docs/upstream-udf-handler-leak.md
                                The server cause of issue #43, from the 8.0.43/8.4.11/9.4.0 sources,
                                with a reproducer. A draft only: never submitted upstream
@@ -205,6 +207,9 @@ different build method on your own.
   uses `cryptography` only; hand-rolled crypto primitives are forbidden.
 - `scripts/gen-vectors.py` is an internal tool and exposes no public encrypt/decrypt/parse API. The E2E
   runner does its encryption and decryption through the server's SQL functions.
+- The conformance document and recipe (`docs/conformance.md`, amendment A18) are **not a client**: they
+  describe how a third party checks its own implementation against a server. Nothing in this repository
+  is that implementation, and the envelope being an open format does not change the two bullets above.
 
 **Review (`code-review.md`)**
 - Comment priorities are **P1 (blocks the merge) / P2 (resolve before merge) / P3 (optional)**, plus

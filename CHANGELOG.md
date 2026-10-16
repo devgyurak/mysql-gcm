@@ -27,6 +27,21 @@ Notable changes per release. Envelope-format changes get their own entry with a 
   data, and external keyring backends are untested.
 
 ### Documented
+- **Design amendment A18, adopted — the envelope is an open format; A4 stands** (#36). A team on a
+  managed service cannot install the component (constraint 3), and the question was whether the project
+  should help it implement the same envelope in the application instead. **Option 1, a conformance
+  kit, is adopted; A4 stands and no client is shipped.** The amendment records why (the format is
+  already implementation-neutral, so the marginal cost is documentation; a reference client is an
+  unowned compatibility promise), the condition that would reopen reference clients (a named owner and
+  a CI that does not execute external code), and answers to the five questions issue #36 raises:
+  equivalence is the implementer's responsibility (one AAD byte-convention per key; the vectors are
+  byte-level only, the server-oracle recipe covers charset and AAD bytes), plaintext bytes are the
+  server's `utf8mb4` conversion of a character argument but opaque `binary` input is sealed unchanged
+  and never normalised (non-UTF-8 rejection is the application's concern, not a conformance rule), a
+  tag failure is always an error for a client and `gcm.min_key_bytes` is a sealing-only floor of 32, the
+  component's key-cleanse guarantees do not carry over, and managed services remain out of scope. v1
+  (`0x01`) is in the kit's scope **read-only**. **No `src/`, `spec/` or vector change.** The spec
+  section list, the server-oracle recipe and the integration case follow.
 - **SQL recipes that reduce the rows `gcm_decrypt(...) LIKE` decrypts** (#77, `docs/like-recipes.md`):
   A17 closes the index direction, so the only lever left is the number of rows the server decrypts.
   Four recipes — scope first, a `(scope, id, envelope)` covering index, a bounded window with `LIMIT`,

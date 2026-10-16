@@ -6,6 +6,128 @@
 > it; where the two disagree, this file is right (`.agents/rules/docs.md`). Changing the design changes
 > both documents in the same PR.
 
+> ## Amendment A18 (2026-10-16) — the envelope as an open format: a conformance kit, and A4 stands
+>
+> **Status: adopted (2026-10-16) — option 1, a conformance kit. A4 stands and is not amended; options 2
+> and 3 are not adopted.** This is a documentation decision: no file under `src/` changes, the envelope
+> bytes do not change, and `spec/test-vectors.json` and the public surface of `scripts/gen-vectors.py`
+> stay exactly as they are. Issue #36 proposed giving a team on a managed service a path: constraint 3
+> says this component cannot be installed on RDS, Aurora or Cloud SQL (no `plugin_dir`), so a team there
+> cannot adopt the project at all. If the same envelope were implemented in the application, that team
+> could encrypt and decrypt client-side now and move to a self-managed server later **without converting
+> data**, gaining server-side `LIKE` when it does. A4 removes exactly that obligation, so the default
+> answer was no; this amendment records why no is still the right answer, and what a third party is
+> given instead.
+>
+> ### The three options
+>
+> 1. **A conformance kit, no code.** The README states that the envelope is an open format, names the
+>    spec sections an implementation MUST follow, and presents `spec/test-vectors.json` as the
+>    conformance suite, with a server-based recipe for what byte vectors cannot check.
+> 2. **Reference clients in a separate repository**, under their own versioning and licence, tested
+>    against this repository's vectors and against a real server in E2E.
+> 3. **Clients in this repository.** Rewrites A4 and the Python rule (§5, `AGENTS.md`) and adds a
+>    release and a compatibility obligation per language.
+>
+> **Option 1 is adopted.** The format half of `spec/envelope.md` is already implementation-neutral and
+> the vectors already let a third party check an implementation, so the marginal cost is documentation
+> this repository would write anyway, and the conformance suite is a set of tests it already runs.
+> Option 2 creates a maintenance obligation with no owner — a second repository needs someone to keep
+> it equivalent, and "tested against a real server" is this repository's CI running code it does not
+> own. Option 3 rewrites A4 and the Python rule for a product that is not being built. **A4 stands**:
+> "no separate Python or Java encryption client is offered as a product" stays true, because option 1
+> ships no client — it ships the specification and the means to check one.
+>
+> **When option 2 would be reconsidered.** It may be reopened when both hold: a named maintainer owns
+> the separate repository, and this repository's CI does not execute the external code (it may
+> *reference* an external test target, never run it). Until then a reference client is an unowned
+> compatibility promise, which is the failure A4 exists to prevent.
+>
+> ### What a third-party implementation is told (the five questions of issue #36)
+>
+> 1. **Equivalence is the implementer's responsibility.** This repository provides two independent
+>    checks and no promise: the **vectors** check byte-level correctness (`spec/envelope.md` §6), and a
+>    **server-oracle recipe** (the change that follows this one, `docs/conformance.md`, pinned by
+>    `tests/integration/70_conformance_oracle.sql`) checks what bytes alone cannot — that the plaintext
+>    bytes and the AAD bytes an implementation seals are the ones the server would seal — by comparing
+>    its output against a real server's. The recipe will check AAD **bytes**; it cannot check the
+>    one-AAD-per-key convention, which no oracle can and which the implementer owns. Neither check
+>    proves the construction safe, and neither is a support commitment. A client's own seals are also
+>    invisible to `gcm_key_usage` (§4.3), so they have to be folded into the usage budget (constraint
+>    11) by hand.
+> 2. **Charset and AAD bytes.** A plaintext is the bytes of the argument *after* the server has
+>    converted a character argument to `utf8mb4`; a `binary` argument is not converted and its bytes
+>    are sealed unchanged. AAD is always `binary` and is never converted, so an implementation must fix
+>    the byte encoding of its AAD explicitly (a `latin1` connection and a `utf8mb4` connection otherwise
+>    send different bytes for the same visible string). An implementation MUST NOT normalise (NFC, NFD
+>    or otherwise) — the server does not, so a normalising client produces different deterministic
+>    ciphertext for the same visible string **against data the server sealed**, and breaks JOIN, UNIQUE
+>    and exact match across the migration this kit exists for. It MUST use the same `utf8mb4`
+>    conversion when it seals a *character* string, but it MUST seal opaque bytes unchanged: the server
+>    validates nothing here, sealing `UNHEX('ff')` and returning ill-formed `utf8mb4` on decryption
+>    (§2.3), and the conformance vectors include non-UTF-8 plaintexts, so a receiver that rejects bytes
+>    the server accepts fails the suite. Non-UTF-8 input is a boundary concern for the application, not
+>    a conformance rule. Two further facts carry over: `gcm_decrypt` tags its result `utf8mb4` for every
+>    version and converts nothing, and `gcm_encrypt_det` reveals equality (and, by length and
+>    repetition, frequency) of plaintexts — joins, UNIQUE and exact match only, never free text (§2.2,
+>    §3). The AAD rule follows from the same place: **one AAD byte-convention per key** across every
+>    server, column, application and client — a different AAD domain needs a separate key, and a
+>    ciphertext-equality join needs the same key *and* the same AAD bytes on both sides (§3). The random
+>    variant has no fixed-AAD requirement.
+> 3. **`gcm.strict` has no client equivalent.** On the server, `gcm.strict=OFF` turns a tag mismatch
+>    into NULL; a client is told to treat a tag failure as **always an error**, because a NULL that
+>    means "wrong key or tampered" is the one lenient behaviour a server operator may opt into and a
+>    client has no operational reason to reproduce it. `gcm.min_key_bytes` is likewise a server policy
+>    and applies to **sealing only**: the recommendation is **32**, the server default, so a truncated
+>    key is refused rather than silently selecting a weaker suite, but a decryptor MUST accept whatever
+>    key length the version byte states (§4.1) — a floor applied to decryption would lock out exactly
+>    the rows a migration has to read.
+> 4. **The key-cleanse guarantees do not carry over.** A11's per-statement context retention, A13's
+>    keyring read and A16's give-up-on-error rule are guarantees the component makes inside its own
+>    memory. In a garbage-collected runtime a client cannot make the same promises, and the
+>    conformance documentation MUST NOT repeat them.
+> 5. **This does not promise managed-service support.** Constraint 3 stands unchanged: this component
+>    is self-managed MySQL only. A client implementation is a way to interoperate with the format, not
+>    a supported managed-service offering, and nothing in this repository is tested against RDS,
+>    Aurora or Cloud SQL.
+>
+> ### v1 (`0x01`) is in the kit's scope, read-only
+>
+> An independent implementation is told it MAY decrypt `0x01` and MUST NOT produce it, exactly as the
+> server does. Because v1 is a legacy CBC format with no AEAD, its conditions are stated rather than
+> implied:
+>
+> - **Decrypt only.** Producing `0x01` is forbidden; the version exists only to read an existing column
+>   during a migration.
+> - **A 32-byte key only.** v1 is AES-256-CBC, and no other key length applies to it.
+> - **A non-empty AAD is `bad_envelope`,** as §2.3 and §4 already require — v1 predates AAD and cannot
+>   bind one.
+> - **The "not authenticated" warning is carried over as it stands:** a wrong key can return garbage
+>   rather than fail, because CBC padding is occasionally valid by chance.
+> - **No charset conversion at decryption.** A v1 plaintext is not converted, so a legacy non-UTF-8
+>   value comes back ill-formed, exactly as the server documents it.
+> - **The structural failures §2.3 and §4 name are `bad_envelope` on every `gcm.strict` setting:** a
+>   v1 shorter than 33 bytes, a body that is not a multiple of 16, and invalid PKCS#7 padding.
+>
+> ### Scope is unchanged: no client, and the Python rule stands
+>
+> A4 and the one extension A17 added to its Python scope are unchanged by this amendment. What this
+> repository will contain is a specification, the vectors it already has, and a document describing how
+> to check an implementation against a server. It will not contain an encrypt/decrypt client, a
+> reusable Python or Java API, or a reference implementation in any language.
+>
+> ### What follows
+>
+> This amendment is the decision. The document it calls for is the next change, after this one is
+> merged: the normative section list and the MUST rules in `spec/envelope.md`, `docs/conformance.md`
+> (the server-oracle recipe), the integration case that pins it, and the README section. Nothing else
+> changes. Issue #36 marks the E2E items of options 2 and 3 **not applicable**.
+>
+> | | Decision | Conditions | Reviewer | Date |
+> |---|---|---|---|---|
+> | A18 (first) | **adopt option 1; A4 stands** — blocked on the corrections below | Scope the UTF-8 rule (the server seals opaque bytes and its own vectors require it), add the one-AAD-per-key rule, the sealing-only scope of `gcm.min_key_bytes`, the deterministic-variant warnings, and the v1 structural failures | crypto-reviewer — scoped AI design review, separate from the author; **not a human cryptographic audit** (constraint 13) | 2026-10-16 |
+> | A18 (second) | **adopt option 1; A4 stands** | The corrections above applied; no P1/P2. Three P3 observations recorded: the one-AAD rule is duplicated into the charset answer, the non-ASCII-AAD byte-encoding claim is to be pinned by `tests/integration/70_conformance_oracle.sql`, and the CHANGELOG summary is tightened | crypto-reviewer — scoped AI design review, separate from the author; **not a human cryptographic audit** (constraint 13) | 2026-10-16 |
+
 > ## Amendment A17 (2026-10-14) — a keyed n-gram token index for partial match: a pre-registered leakage experiment
 >
 > **Status: declined (2026-10-14) — the experiment was run and the index is not adopted; no file under

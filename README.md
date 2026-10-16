@@ -50,7 +50,11 @@ rationale: [`docs/ops-constraints.md`](docs/ops-constraints.md), `docs/design.md
 2. **Keys and plaintext are SQL arguments**, so they can reach the general and slow logs,
    `performance_schema` and an SBR binlog — `'%김%'` patterns too. Same exposure as `AES_ENCRYPT`.
    The key-id functions (item 17) take the key out of the statement; the plaintext stays.
-3. **Self-managed MySQL only.** RDS, Aurora and Cloud SQL do not expose `plugin_dir`.
+3. **Self-managed MySQL only.** RDS, Aurora and Cloud SQL do not expose `plugin_dir`. The envelope
+   itself is an **open format**: an independent implementation may follow `spec/envelope.md` and check
+   itself against a server with the recipe in [`docs/conformance.md`](docs/conformance.md). Equivalence
+   is the implementer's responsibility, and this does not promise support for the managed services —
+   [amendment A18](docs/design.md).
 4. **Use `loose_` in my.cnf** (`loose_gcm.strict=ON`), or the server refuses to start before the
    component is installed.
 5. **The functions are opaque to the optimizer.** `gcm_decrypt(col) LIKE` scans its candidates;

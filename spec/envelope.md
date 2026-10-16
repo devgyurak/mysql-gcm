@@ -1,6 +1,8 @@
 # mysql-gcm envelope specification
 
-Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 and §4.3 added 2026-10-12 with no byte change). v3 adds the AES-192 version bytes `0x06` and
+Status: **FINAL** (v3 of this document, 2026-10-06; §4.2 and §4.3 added 2026-10-12 with no byte change;
+§1, §2.7, §4 and §6 revised 2026-10-16 by amendment A18 — the public-format section list and the
+plaintext/AAD byte rules — with no byte change). v3 adds the AES-192 version bytes `0x06` and
 `0x07`; v2 added the AES-128 bytes `0x04` and `0x05` and the key-length rule in §2.5. Neither changes
 a byte of any earlier envelope, and an older implementation reading a newer envelope rejects it as a
 reserved version, which §2.6 has required throughout. Supersedes the
@@ -14,8 +16,27 @@ Conformance keywords MUST / MUST NOT / SHOULD are used in the usual sense.
 
 The envelope is the value stored in a MySQL column. It is produced by the server functions
 `gcm_encrypt` and `gcm_encrypt_det` and consumed by `gcm_decrypt`. Applications use these functions
-through an existing MySQL driver. No language-specific encryption SDK is shipped.
-Internal fixture generation MUST match this format; this scope change does not alter its bytes.
+through an existing MySQL driver. Internal fixture generation MUST match this format; this scope
+change does not alter its bytes.
+
+**The format is public and any third party MAY implement it** (`docs/design.md` amendment A18). This
+document is the normative contract for such an implementation; the project ships no client and
+supports none. An independent implementation MUST follow these sections:
+
+| Section | What the implementation takes from it |
+|---|---|
+| §2.1–§2.3, §2.5–§2.7 | The byte layout of every version, including v1 read-only (§2.3) and the reserved-version rule (§2.6); §2.7 states the bytes that are sealed |
+| §3 | The key-length-to-suite mapping and the deterministic nonce derivation |
+| §4 and §4.1 | The failure table and the key-length floor, read for a client (no server setting) |
+| §6 | The conformance suite and how to consume it |
+
+The table is a reading guide, not a copy of the server's internals: §3's paragraph on when the server
+derives and wipes the nonce key, and §4's rules about SQL NULL and a function instance's lifetime,
+describe the server's implementation. §2.7 and §4 state what a client does instead.
+
+`docs/conformance.md` is the non-normative companion: it checks an implementation against a real
+server for what the byte vectors cannot — the plaintext conversion and the AAD bytes. Passing either
+is not a security proof and is not a support commitment.
 
 | Function | Envelope | Result type |
 |---|---|---|
@@ -153,6 +174,36 @@ Every version byte outside `0x01`–`0x07` — that is `0x00` and `0x08`–`0xFF
 decryptor MUST reject it with `bad_envelope`; it MUST NOT be silently treated as a known version and
 MUST NOT return NULL.
 
+### 2.7 Plaintext and AAD bytes
+
+The plaintext and the AAD are the byte strings the AEAD is given; nothing else is sealed, and no byte
+is added, removed or rewritten between them and the version layouts above. They are the bytes a
+third-party implementation is most likely to get subtly wrong, because the server's rules for them live
+in its own charset handling rather than in the envelope (`docs/design.md` amendment A18).
+
+**Plaintext.** A *character* argument is converted to `utf8mb4` before sealing, so the bytes sealed are
+its UTF-8 encoding. A `binary` argument is copied byte for byte, so `gcm_encrypt(UNHEX('ff'), key)`
+seals `FF` and its decryption returns ill-formed `utf8mb4` (§2.3). An implementation MUST use the same
+`utf8mb4` conversion for a character value and MUST seal `binary` input unchanged. It MUST NOT
+normalise (NFC, NFD or otherwise): the server does not, so normalising changes the deterministic
+envelope for the same visible string and breaks JOIN, UNIQUE and exact match against data the server
+sealed. A non-UTF-8 plaintext is **not** rejected — the server seals it, and §6's vectors include
+non-UTF-8 plaintexts — so refusing one is an application decision rather than a conformance rule; an
+implementation whose API cannot seal opaque bytes cannot pass the suite.
+
+**AAD.** AAD is always requested as `binary`: it is never converted to `utf8mb4`, and its bytes are used
+exactly as supplied. An implementation MUST NOT convert or normalise AAD. Two consequences follow:
+
+* The **byte encoding** of a string AAD depends on the source charset — a `latin1` connection and a
+  `utf8mb4` connection send different bytes for the same visible string — so an implementation MUST fix
+  the encoding it uses for AAD explicitly rather than inherit the caller's or the connection's.
+* **One fixed AAD byte string per key** across every server, column, application and client (§3). A
+  different AAD domain needs a different key, and a ciphertext-equality join needs the same key and the
+  same AAD bytes on both sides. The random variant has no fixed-AAD requirement.
+
+**Decrypted output.** `gcm_decrypt` tags its result `utf8mb4` for every version and converts nothing:
+the bytes come back exactly as they were sealed, or as the legacy `0x01` body held them (§2.3).
+
 ## 3. Key and nonce derivation
 
 The key is an argument, 32 bytes (AES-256), 24 (AES-192) or 16 (AES-128); §2.5 maps each length to
@@ -233,6 +284,14 @@ Rules that follow, and that every implementation MUST honour:
    server does not always run after an error (`docs/design.md` amendment A16). This applies to all
    six functions. A row that ends in NULL — a NULL argument (rule 3), or a tag mismatch that
    `gcm.strict=OFF` turns into NULL — is not an error and is not covered by this rule.
+
+**A client implementation has no `gcm.strict` and no `gcm.min_key_bytes`.** There is no server setting
+for it to read, and it MUST NOT reproduce the lenient one. A tag mismatch is **always an error**: an
+independent implementation MUST NOT return unauthenticated plaintext and MUST NOT map a tag failure to
+NULL or to an empty result. The floor of §4.1 is a sealing policy the server's operator sets. A client
+SHOULD prefer 32-byte keys but MUST be able to seal with 16 and 24 bytes — §6's conformance vectors and
+the recipe in `docs/conformance.md` use all three suites — and MUST NOT apply any floor to decryption,
+so that data the server wrote under a lower floor stays readable.
 
 ### 4.1 `gcm.min_key_bytes`
 
@@ -388,10 +447,11 @@ envelope = 01101112131415161718191a1b1c1d1e1fc40f242a0eb2f5da5572ab310442d463   
 
 ## 6. Test vectors
 
-`spec/test-vectors.json` is the single source of truth for the C++ conformance tests.
-`scripts/gen-vectors.py` generates reproducible fixtures with `cryptography` and checks known-good
-fixtures before writing. It is an internal development tool, not a client library. The C++ suite
-MUST consume every case, including expected failures; SQL integration tests cover server behavior.
+`spec/test-vectors.json` is the single source of truth for the **conformance suite of any
+implementation** — this project's C++ suite and an independent one alike (`docs/design.md` amendment
+A18). `scripts/gen-vectors.py` generates reproducible fixtures with `cryptography` and checks known-good
+fixtures before writing. It is an internal development tool, not a client library. A suite MUST consume
+every case, including expected failures; SQL integration tests cover server behavior.
 
 ```jsonc
 {
@@ -415,17 +475,23 @@ MUST consume every case, including expected failures; SQL integration tests cove
 }
 ```
 
-How a suite MUST consume a vector:
+How a suite MUST consume a vector. The operation names below (`seal_with_nonce`, `encrypt`,
+`encrypt_det`, `decrypt`, `derive_nonce_key`) are conceptual; an implementation maps them to its own
+entry points.
 
 | `expect` | Required assertions |
 |---|---|
 | `ok`, kind `nist`/`random` | `seal_with_nonce(key, nonce, pt, aad) == envelope` and `decrypt(envelope, key, aad) == pt` |
-| `ok`, kind `det` | `decrypt(envelope, key, aad) == pt`, `encrypt_det(pt, key, aad) == envelope` and, when present, `derive_nonce_key(key) == nonce_key_hex` and the derived nonce equals `nonce_hex`. Not `seal_with_nonce`: that seam writes version `0x02` and cannot produce a `0x03` envelope |
+| `ok`, kind `det` | `decrypt(envelope, key, aad) == pt`, `encrypt_det(pt, key, aad) == envelope` and, when present, `derive_nonce_key(key) == nonce_key_hex` and the derived nonce equals `nonce_hex`. Not `seal_with_nonce`: that entry point writes version `0x02` and cannot produce a `0x03` envelope |
 | `ok`, kind `legacy` | `decrypt(envelope, key, aad) == pt` only — encryption of v1 does not exist |
 | `bad_tag` | `decrypt` raises the tag error (server: error under `strict=ON`, NULL under OFF) |
 | `bad_envelope` | `decrypt` raises the envelope error under **both** strict settings |
 | `bad_key_len`, key length no suite has | `encrypt`, `encrypt_det` and `decrypt` all raise the key-length error |
 | `bad_key_len`, key length valid but disagreeing with the envelope's version | `decrypt` raises it. `encrypt` and `encrypt_det` **succeed** — they have no envelope to disagree with, and the key is a perfectly good key for its own suite. A conformance runner MUST NOT feed these to the encryption entry points |
+
+The vectors verify bytes only. They pin the AAD **bytes** a case carries, but not how an implementation
+chooses and encodes its own plaintext and AAD inputs — §2.7's conversion and encoding rules;
+`docs/conformance.md` checks those against a real server.
 
 Current contents: 2250 NIST CAVP cases at `[IVlen=96][Taglen=128]` — 750 AES-256 (191 authentication failures), 750 AES-192 (190) and 750 AES-128 (196) — plus 54 project cases covering the deterministic envelopes, which the
 CAVP files never reach because they are all random-nonce.
